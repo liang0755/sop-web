@@ -11,7 +11,8 @@
 :root{--primary:#2563eb;--primary-dark:#1d4ed8;--primary-light:#dbeafe;--success:#16a34a;--success-light:#dcfce7;--warning:#f59e0b;--warning-light:#fef3c7;--danger:#dc2626;--danger-light:#fee2e2;--gray-50:#f9fafb;--gray-100:#f3f4f6;--gray-200:#e5e7eb;--gray-300:#d1d5db;--gray-400:#9ca3af;--gray-500:#6b7280;--gray-600:#4b5563;--gray-700:#374151;--gray-800:#1f2937;--gray-900:#111827;--radius:8px;--shadow:0 1px 3px rgba(0,0,0,.1);--shadow-lg:0 10px 25px rgba(0,0,0,.1)}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;background:var(--gray-100);color:var(--gray-800);font-size:14px;line-height:1.6}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:url('login-bg.jpg') center/cover no-repeat fixed;position:relative}
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%);position:relative}
+.login-wrap.bg-loaded{background:url('login-bg.jpg') center/cover no-repeat fixed}
 .login-wrap::before{content:"";position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:0}
 .login-wrap > *{position:relative;z-index:1}
 .login-card{background:rgba(15,23,42,.78);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:40px;width:400px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.4);color:#fff}
@@ -318,7 +319,6 @@ tr:hover td{background:var(--gray-50)}
   .content-body > div > div[style*="display:flex;gap:12px"] .btn{width:100%;justify-content:center}
 }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -403,6 +403,7 @@ let currentUser = null;
 let isCloudAvailable = false;
 let dataLoaded = false;
 let reportsLoaded = false;
+let _coreDataPromise = null;
 
 async function hashPassword(pwd) {
   const enc = new TextEncoder();
@@ -413,16 +414,36 @@ async function hashPassword(pwd) {
 function genId(){return Date.now().toString(36)+Math.random().toString(36).substr(2,9)}
 
 // Phase 1: Load core data (users, formConfig, brandConfig) — small, fast, enough for login
+// Phase 0: Load ONLY users — minimum data needed for login (fast)
+async function loadUsersOnly() {
+  try {
+    const uRes = await fetch(FB_BASE + '/users.json');
+    cloudData.users = uRes.ok ? Object.values(await uRes.json() || {}) : [];
+    isCloudAvailable = true;
+  } catch(e) {
+    console.warn('Users fetch failed:', e.message);
+    isCloudAvailable = false;
+    cloudData.users = [];
+  }
+  // Ensure admin exists
+  if (!cloudData.users.find(u => u.username === 'admin')) {
+    const adminPwd = await hashPassword('admin123');
+    const admin = {id:'admin_001',username:'admin',password:adminPwd,name:'管理员',department:'管理部',role:'admin',active:true,createdAt:new Date().toISOString()};
+    if (isCloudAvailable) { try { await apiCreate('users', admin); } catch(e) {} }
+    cloudData.users.push(admin);
+  }
+  dataLoaded = true;
+}
+
+// Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [uRes, fRes, bRes, dRes, aRes] = await Promise.all([
-      fetch(FB_BASE + '/users.json'),
+    const [fRes, bRes, dRes, aRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
       fetch(FB_BASE + '/aiConfig.json')
     ]);
-    cloudData.users = uRes.ok ? Object.values(await uRes.json() || {}) : [];
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
     if (!fcData) {
@@ -450,21 +471,12 @@ async function loadCoreData() {
     cloudData.aiConfig = aiData || JSON.parse(JSON.stringify(DEFAULT_AI_CONFIG));
     isCloudAvailable = true;
   } catch(e) {
-    console.warn('Core data fetch failed:', e.message);
-    isCloudAvailable = false;
+    console.warn('Core config fetch failed:', e.message);
     cloudData.formConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
     cloudData.brandConfig = JSON.parse(JSON.stringify(DEFAULT_BRAND_CONFIG));
     cloudData.departments = [...new Set(cloudData.users.map(u => u.department).filter(d => d))].sort();
     cloudData.aiConfig = JSON.parse(JSON.stringify(DEFAULT_AI_CONFIG));
   }
-  // Ensure admin exists
-  if (!cloudData.users.find(u => u.username === 'admin')) {
-    const adminPwd = await hashPassword('admin123');
-    const admin = {id:'admin_001',username:'admin',password:adminPwd,name:'管理员',department:'管理部',role:'admin',active:true,createdAt:new Date().toISOString()};
-    if (isCloudAvailable) { try { await apiCreate('users', admin); } catch(e) {} }
-    cloudData.users.push(admin);
-  }
-  dataLoaded = true;
 }
 
 // Phase 2: Load report data (dailyReports, weeklyReports) — larger, needed after login
@@ -487,7 +499,9 @@ async function loadReportData() {
 async function loadCloudData() {
   dataLoaded = false;
   reportsLoaded = false;
-  await loadCoreData();
+  await loadUsersOnly();
+  _coreDataPromise = loadCoreData();
+  await _coreDataPromise;
   await loadReportData();
   return cloudData;
 }
@@ -572,6 +586,8 @@ function doLogout() {
 }
 
 async function showApp() {
+  // Wait for config data (formConfig, brandConfig, etc.) to finish loading
+  if (_coreDataPromise) { try { await _coreDataPromise; } catch(e){} }
   // If report data not loaded yet, show loading and wait
   if (!reportsLoaded) {
     const loadingEl = document.getElementById('loginLoading');
@@ -1623,14 +1639,31 @@ function renderSummaryTab() {
 
 // ============ Summary Charts ============
 let _summaryCharts = {};
+let _chartJSPromise = null;
+function loadChartJS() {
+  if (typeof Chart !== 'undefined') return Promise.resolve();
+  if (_chartJSPromise) return _chartJSPromise;
+  _chartJSPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  return _chartJSPromise;
+}
 function destroySummaryCharts() {
   Object.values(_summaryCharts).forEach(ch => { try { ch.destroy(); } catch(e){} });
   _summaryCharts = {};
 }
 
-function renderSummaryCharts() {
+async function renderSummaryCharts() {
   destroySummaryCharts();
-  if (!summaryData || typeof Chart === 'undefined') return;
+  if (!summaryData) return;
+  if (typeof Chart === 'undefined') {
+    await loadChartJS();
+  }
+  if (typeof Chart === 'undefined') return;
   const type = document.getElementById('sumType') ? document.getElementById('sumType').value : 'daily';
   const isDaily = type === 'daily';
   const palette = ['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
@@ -3025,11 +3058,8 @@ function updateSidebarRefreshTime() {
 let loadingTimer = null;
 const LOADING_STEPS = [
   { text: '正在连接服务器...', at: 0 },
-  { text: '正在加载用户数据...', at: 20 },
-  { text: '正在加载表单配置...', at: 40 },
-  { text: '正在加载品牌配置...', at: 60 },
-  { text: '正在加载系统数据...', at: 75 },
-  { text: '即将完成...', at: 90 }
+  { text: '正在加载用户数据...', at: 30 },
+  { text: '即将完成...', at: 80 }
 ];
 
 function startLoadingCountdown(estSeconds) {
@@ -3061,17 +3091,27 @@ function finishLoadingCountdown() {
 
 // ============ Init ============
 (async function init() {
-  // Start loading countdown
-  startLoadingCountdown(4);
-  // Phase 1: Load only core data (users, formConfig, brandConfig) — fast, enough for login
-  await loadCoreData();
+  // Start loading countdown (reduced from 4s to 2s — only loading users now)
+  startLoadingCountdown(2);
+  // Phase 0: Load ONLY users — minimum data needed for login
+  await loadUsersOnly();
   finishLoadingCountdown();
-  applyBrandConfig();
   // Show login form immediately
   const loadingEl = document.getElementById('loginLoading');
   if (loadingEl) loadingEl.style.display = 'none';
   const formBox = document.getElementById('loginFormBox');
   if (formBox) formBox.style.display = '';
+  // Phase 1: Load config data in background (non-blocking) — formConfig, brandConfig, departments, aiConfig
+  _coreDataPromise = loadCoreData().then(() => {
+    applyBrandConfig();
+    // Preload login background image
+    const bgImg = new Image();
+    bgImg.onload = function() {
+      const lw = document.getElementById('loginView');
+      if (lw) lw.classList.add('bg-loaded');
+    };
+    bgImg.src = 'login-bg.jpg';
+  });
   // Phase 2: Start loading report data in background (non-blocking)
   loadReportData();
   // Check for saved session (auto-login)
@@ -3082,6 +3122,8 @@ function finishLoadingCountdown() {
     if (user) {
       currentUser = {id:user.id,username:user.username,name:user.name,department:user.department,role:user.role};
       localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+      // Wait for config data and report data before showing dashboard
+      if (_coreDataPromise) { try { await _coreDataPromise; } catch(e){} }
       // Wait for report data before showing dashboard
       if (!reportsLoaded) {
         // Show loading screen with countdown while reports load
