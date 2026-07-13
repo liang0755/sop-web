@@ -3100,18 +3100,19 @@ function finishLoadingCountdown() {
 
 // ============ Init ============
 (async function init() {
+  // Start loading background image IMMEDIATELY (has nothing to do with Firebase)
+  const bgImg = new Image();
+  bgImg.onload = function() {
+    const lw = document.getElementById('loginView');
+    if (lw) lw.classList.add('bg-loaded');
+  };
+  bgImg.src = 'login-bg.jpg';
+
   // Phase 0: Start loading users in background (NON-BLOCKING)
   _usersDataPromise = loadUsersOnly();
   // Phase 1: Start loading config data in background (NON-BLOCKING)
   _coreDataPromise = _usersDataPromise.then(() => loadCoreData()).then(() => {
     applyBrandConfig();
-    // Preload login background image
-    const bgImg = new Image();
-    bgImg.onload = function() {
-      const lw = document.getElementById('loginView');
-      if (lw) lw.classList.add('bg-loaded');
-    };
-    bgImg.src = 'login-bg.jpg';
   });
   // Phase 2: Start loading report data in background (NON-BLOCKING)
   _coreDataPromise.then(() => loadReportData());
