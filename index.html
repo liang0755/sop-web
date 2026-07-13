@@ -75,6 +75,7 @@ tr:hover td{background:var(--gray-50)}
 .table-wrap{overflow-x:auto}
 .badge{padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;display:inline-block}
 .badge-success{background:var(--success-light);color:var(--success)}
+.badge-info{background:var(--primary-light);color:var(--primary)}
 .badge-warning{background:var(--warning-light);color:var(--warning)}
 .badge-danger{background:var(--danger-light);color:var(--danger)}
 .badge-gray{background:var(--gray-100);color:var(--gray-500)}
@@ -374,6 +375,7 @@ tr:hover td{background:var(--gray-50)}
       <div class="nav-item" data-page="summary" onclick="navTo('summary')"><span class="icon">👥</span> 团队汇总</div>
       <div class="nav-section-title">管理</div>
       <div class="nav-item" data-page="userManagement" onclick="navTo('userManagement')" id="navUserMgmt"><span class="icon">👤</span> 用户管理</div>
+      <div class="nav-item" data-page="roleConfig" onclick="navTo('roleConfig')" id="navRoleConfig"><span class="icon">🛡️</span> 角色权限</div>
       <div class="nav-item" data-page="formConfig" onclick="navTo('formConfig')" id="navFormConfig"><span class="icon">⚙️</span> 表单配置</div>
       <div class="nav-item" data-page="aiChat" onclick="navTo('aiChat')" id="navAIChat"><span class="icon">🤖</span> AI助手</div>
       <div class="nav-item" data-page="settings" onclick="navTo('settings')"><span class="icon">🔧</span> 设置</div>
@@ -398,7 +400,7 @@ tr:hover td{background:var(--gray-50)}
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null};
 let currentUser = null;
 let isCloudAvailable = false;
 let dataLoaded = false;
@@ -436,14 +438,15 @@ async function loadUsersOnly() {
   dataLoaded = true;
 }
 
-// Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig) — background, non-blocking
+// Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [fRes, bRes, dRes, aRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
-      fetch(FB_BASE + '/aiConfig.json')
+      fetch(FB_BASE + '/aiConfig.json'),
+      fetch(FB_BASE + '/roleConfig.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -470,6 +473,12 @@ async function loadCoreData() {
     // Load AI config
     const aiData = aRes.ok ? await aRes.json() : null;
     cloudData.aiConfig = aiData || JSON.parse(JSON.stringify(DEFAULT_AI_CONFIG));
+    // Load role config
+    const rcData = rRes.ok ? await rRes.json() : null;
+    cloudData.roleConfig = rcData || JSON.parse(JSON.stringify(DEFAULT_ROLE_CONFIG));
+    if (!rcData) {
+      try { await fetch(FB_BASE + '/roleConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.roleConfig)}); } catch(e) {}
+    }
     isCloudAvailable = true;
   } catch(e) {
     console.warn('Core config fetch failed:', e.message);
@@ -477,6 +486,7 @@ async function loadCoreData() {
     cloudData.brandConfig = JSON.parse(JSON.stringify(DEFAULT_BRAND_CONFIG));
     cloudData.departments = [...new Set(cloudData.users.map(u => u.department).filter(d => d))].sort();
     cloudData.aiConfig = JSON.parse(JSON.stringify(DEFAULT_AI_CONFIG));
+    cloudData.roleConfig = JSON.parse(JSON.stringify(DEFAULT_ROLE_CONFIG));
   }
 }
 
@@ -621,14 +631,21 @@ async function showApp() {
   document.getElementById('userWelcome').textContent = `👋 欢迎，${currentUser.name}`;
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
-  // Show/hide admin-only nav items
-  const navMgmt = document.getElementById('navUserMgmt');
-  if (navMgmt) navMgmt.style.display = currentUser.role === 'admin' ? '' : 'none';
-  const navFC = document.getElementById('navFormConfig');
-  if (navFC) navFC.style.display = currentUser.role === 'admin' ? '' : 'none';
-  const navAI = document.getElementById('navAIChat');
-  if (navAI) navAI.style.display = currentUser.role === 'admin' ? '' : 'none';
+  updateNavVisibility();
   navTo('dashboard');
+}
+
+function updateNavVisibility() {
+  const navMap = {
+    'navUserMgmt': 'userManagement',
+    'navRoleConfig': 'roleConfig',
+    'navFormConfig': 'formConfig',
+    'navAIChat': 'aiChat'
+  };
+  Object.entries(navMap).forEach(([navId, perm]) => {
+    const el = document.getElementById(navId);
+    if (el) el.style.display = hasPermission(perm) ? '' : 'none';
+  });
 }
 
 // ============ Navigation ============
@@ -637,11 +654,18 @@ const REFRESH_INTERVAL = 60000; // 60s minimum between background refreshes
 let bgRefreshInFlight = false;
 
 function navTo(page) {
+  // Check page permission (dashboard and settings are always allowed)
+  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat'];
+  if (restrictedPages.includes(page) && !hasPermission(page)) {
+    document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面，请联系管理员。</div>';
+    closeSidebar();
+    return;
+  }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',formConfig:'表单配置',aiChat:'AI助手',settings:'设置'};
+  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
-  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings}[page]||(()=>{}))();
+  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings}[page]||(()=>{}))();
   closeSidebar();
   // Background refresh: silently fetch latest data (non-blocking, only for read-only pages)
   silentRefresh(page);
@@ -717,6 +741,98 @@ function getAIConfig() { return cloudData.aiConfig || DEFAULT_AI_CONFIG; }
 let aiChatHistory = [];
 let aiChatLoading = false;
 
+// ============ Role & Permission Config ============
+const DEFAULT_ROLE_CONFIG = {
+  roles: [
+    {
+      key: 'admin', name: '超级管理员', description: '拥有所有权限，不可修改',
+      permissions: {
+        dashboard: true, dailyForm: true, weeklyForm: true,
+        dailyData: true, weeklyData: true, summary: true,
+        userManagement: true, formConfig: true, aiChat: true,
+        roleConfig: true, settings: true,
+        editOthers: true, deleteOthers: true, exportData: true,
+        brandConfig: true, aiConfig: true
+      }
+    },
+    {
+      key: 'manager', name: '主管', description: '可查看所有数据，可编辑他人数据，可导出',
+      permissions: {
+        dashboard: true, dailyForm: true, weeklyForm: true,
+        dailyData: true, weeklyData: true, summary: true,
+        userManagement: false, formConfig: false, aiChat: true,
+        roleConfig: false, settings: true,
+        editOthers: true, deleteOthers: false, exportData: true,
+        brandConfig: false, aiConfig: false
+      }
+    },
+    {
+      key: 'member', name: '成员', description: '可填写日报周报，查看数据和汇总',
+      permissions: {
+        dashboard: true, dailyForm: true, weeklyForm: true,
+        dailyData: true, weeklyData: true, summary: true,
+        userManagement: false, formConfig: false, aiChat: false,
+        roleConfig: false, settings: true,
+        editOthers: false, deleteOthers: false, exportData: false,
+        brandConfig: false, aiConfig: false
+      }
+    },
+    {
+      key: 'viewer', name: '查看者', description: '只能查看数据，不能填写',
+      permissions: {
+        dashboard: true, dailyForm: false, weeklyForm: false,
+        dailyData: true, weeklyData: true, summary: true,
+        userManagement: false, formConfig: false, aiChat: false,
+        roleConfig: false, settings: true,
+        editOthers: false, deleteOthers: false, exportData: false,
+        brandConfig: false, aiConfig: false
+      }
+    }
+  ]
+};
+
+// Permission labels for UI
+const PERMISSION_LABELS = {
+  dashboard: '首页', dailyForm: '日报填写', weeklyForm: '周报填写',
+  dailyData: '日报数据', weeklyData: '周报数据', summary: '团队汇总',
+  userManagement: '用户管理', formConfig: '表单配置', aiChat: 'AI助手',
+  roleConfig: '角色权限配置', settings: '设置',
+  editOthers: '编辑他人数据', deleteOthers: '删除他人数据', exportData: '导出数据',
+  brandConfig: '品牌配置', aiConfig: 'AI模型配置'
+};
+
+const PERMISSION_GROUPS = [
+  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary'] },
+  { title: '管理功能', keys: ['userManagement','formConfig','aiChat','roleConfig','settings','brandConfig','aiConfig'] },
+  { title: '数据操作', keys: ['editOthers','deleteOthers','exportData'] }
+];
+
+function getRoleConfig() { return cloudData.roleConfig || DEFAULT_ROLE_CONFIG; }
+
+function hasPermission(perm) {
+  if (!currentUser) return false;
+  if (currentUser.role === 'admin') return true; // admin always has all permissions
+  const cfg = getRoleConfig();
+  const role = cfg.roles.find(r => r.key === currentUser.role);
+  if (!role) return false;
+  return role.permissions[perm] === true;
+}
+
+function getRoleName(roleKey) {
+  const cfg = getRoleConfig();
+  const role = cfg.roles.find(r => r.key === roleKey);
+  return role ? role.name : roleKey;
+}
+
+function getRoleBadge(roleKey) {
+  const names = {admin:'超级管理员', manager:'主管', member:'成员', viewer:'查看者'};
+  const name = getRoleName(roleKey);
+  if (roleKey === 'admin') return `<span class="badge badge-success">${name}</span>`;
+  if (roleKey === 'manager') return `<span class="badge badge-info">${name}</span>`;
+  if (roleKey === 'viewer') return `<span class="badge badge-warning">${name}</span>`;
+  return `<span class="badge badge-gray">${name}</span>`;
+}
+
 function applyBrandConfig() {
   const bc = getBrandConfig();
   const sl = document.getElementById('sidebarLogo');
@@ -787,7 +903,7 @@ function renderDashboard() {
   const today = new Date().toISOString().split('T')[0];
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
   const dayBeforeYest = new Date(Date.now() - 2*86400000).toISOString().split('T')[0];
-  const activeUsers = cloudData.users.filter(u => u.active && u.role !== 'admin');
+  const activeUsers = cloudData.users.filter(u => u.active && u.role !== 'admin' && u.role !== 'viewer');
   const teamDailyToday = cloudData.dailyReports.filter(r => r.reportDate === today).length;
   const body = document.getElementById('contentBody');
   const refreshTimeStr = new Date(lastRefreshTime).toLocaleTimeString('zh-CN');
@@ -1338,7 +1454,7 @@ function loadDataView(type) {
   if (!reports.length) { c.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无数据</div>'; return; }
   c.innerHTML = reports.map(r => {
     const dl = type==='daily' ? r.reportDate : `${r.weekStart} ~ ${r.weekEnd}`;
-    const canEdit = currentUser.role === 'admin' || r.userId === currentUser.id;
+    const canEdit = hasPermission('editOthers') || r.userId === currentUser.id;
     return `<div class="card" style="margin-bottom:16px">
       <div class="card-header"><h4>👤 ${r.name} <span class="badge badge-gray">${r.department}</span> <span style="font-weight:400;color:var(--gray-500);font-size:13px">${dl}</span></h4>
         <div style="display:flex;align-items:center;gap:8px">
@@ -1364,7 +1480,7 @@ function editReport(type, reportId) {
   const reports = type === 'daily' ? cloudData.dailyReports : cloudData.weeklyReports;
   const r = reports.find(x => x.id === reportId);
   if (!r) return;
-  const canEdit = currentUser.role === 'admin' || r.userId === currentUser.id;
+  const canEdit = hasPermission('editOthers') || r.userId === currentUser.id;
   if (!canEdit) { alert('无权编辑此报告'); return; }
   const isDaily = type === 'daily';
   const channels = r.channels || [];
@@ -1463,7 +1579,7 @@ async function deleteReport(type, reportId) {
   const reports = type === 'daily' ? cloudData.dailyReports : cloudData.weeklyReports;
   const r = reports.find(x => x.id === reportId);
   if (!r) return;
-  const canDelete = currentUser.role === 'admin' || r.userId === currentUser.id;
+  const canDelete = hasPermission('deleteOthers') || r.userId === currentUser.id;
   if (!canDelete) { alert('无权删除此报告'); return; }
   if (!confirm(`确定删除 ${r.name} 的这条${type==='daily'?'日报':'周报'}吗？此操作不可撤销。`)) return;
 
@@ -1493,7 +1609,7 @@ function renderSummary() {
       <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="sumStart" value="${mAgo}"></div>
       <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="sumEnd" value="${today}"></div>
       <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="loadSummary()">🔍 汇总查询</button></div>
-      <div class="form-group"><label>&nbsp;</label><button class="btn btn-success" onclick="exportSummaryCSV()">📥 导出汇总数据</button></div>
+      <div class="form-group"><label>&nbsp;</label>${hasPermission('exportData')?'<button class="btn btn-success" onclick="exportSummaryCSV()">📥 导出汇总数据</button>':''}</div>
     </div></div></div>
     <div class="summary-tabs">
       <div class="summary-tab active" data-t="byPerson" onclick="switchTab('byPerson')">按人员汇总</div>
@@ -1846,8 +1962,8 @@ function getDepartments() {
 }
 
 function renderUserManagement() {
-  if (currentUser.role !== 'admin') {
-    document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 仅管理员可访问此页面</div>';
+  if (!hasPermission('userManagement')) {
+    document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
     return;
   }
   const body = document.getElementById('contentBody');
@@ -1883,7 +1999,7 @@ function renderUserManagement() {
         <td><strong>${u.name}</strong></td>
         <td>${u.username}</td>
         <td>${u.department||'-'}</td>
-        <td>${u.role==='admin'?'<span class="badge badge-success">管理员</span>':'<span class="badge badge-gray">成员</span>'}</td>
+        <td>${getRoleBadge(u.role)}</td>
         <td>${u.active?'<span class="badge badge-success">启用</span>':'<span class="badge badge-danger">禁用</span>'}</td>
         <td style="font-size:12px;color:var(--gray-500)">${u.createdAt?new Date(u.createdAt).toLocaleDateString('zh-CN'):'-'}</td>
         <td>
@@ -1896,6 +2012,94 @@ function renderUserManagement() {
   </div></div>`;
 }
 
+// ============ Role & Permission Config ============
+function renderRoleConfig() {
+  if (!hasPermission('roleConfig')) {
+    document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
+    return;
+  }
+  const cfg = getRoleConfig();
+  const body = document.getElementById('contentBody');
+  const userCounts = {};
+  cloudData.users.forEach(u => { userCounts[u.role] = (userCounts[u.role] || 0) + 1; });
+
+  body.innerHTML = `
+    <div id="roleConfigAlert"></div>
+    <div style="margin-bottom:16px;padding:12px 16px;background:var(--primary-light);border:1px solid #93c5fd;border-radius:8px;font-size:13px;color:var(--primary)">
+      💡 配置每个角色可访问的页面和操作权限。修改后点击保存即生效。超级管理员权限不可修改。
+    </div>
+    ${cfg.roles.map((role, idx) => {
+      const isLocked = role.key === 'admin';
+      const count = userCounts[role.key] || 0;
+      return `<div class="card" style="margin-bottom:16px">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div>
+            <h4 style="font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px">
+              ${getRoleBadge(role.key)}
+              <span style="font-size:13px;font-weight:400;color:var(--gray-500)">${role.description}</span>
+            </h4>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:12px;color:var(--gray-500)">${count} 个用户</span>
+            ${isLocked ? '<span style="font-size:11px;color:var(--gray-400)">🔒 锁定</span>' : ''}
+          </div>
+        </div>
+        <div class="card-body">
+          ${PERMISSION_GROUPS.map(group => `
+            <div style="margin-bottom:12px">
+              <div style="font-size:12px;font-weight:600;color:var(--gray-600);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">${group.title}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:10px">
+                ${group.keys.map(perm => {
+                  const checked = role.permissions[perm] === true;
+                  const label = PERMISSION_LABELS[perm] || perm;
+                  return `<label style="display:flex;align-items:center;gap:6px;cursor:${isLocked?'default':'pointer'};padding:6px 12px;border-radius:6px;background:${checked?'var(--success-light)':'var(--gray-50)'};border:1px solid ${checked?'var(--success)':'var(--gray-200)'};font-size:13px;${isLocked?'opacity:0.7':''}">
+                    <input type="checkbox" ${checked?'checked':''} ${isLocked?'disabled':''} onchange="updateRolePermission(${idx},'${perm}',this.checked)" style="cursor:${isLocked?'default':'pointer'}">
+                    <span style="font-weight:${checked?'600':'400'};color:${checked?'var(--success)':'var(--gray-600)'}">${label}</span>
+                  </label>`;
+                }).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+    }).join('')}
+    <div style="height:70px"></div>
+    <div class="sticky-submit-bar">
+      <button class="btn btn-outline" onclick="resetRoleConfig()">↩️ 恢复默认</button>
+      <button class="btn btn-primary" onclick="saveRoleConfig()">💾 保存配置</button>
+    </div>
+  `;
+}
+
+function updateRolePermission(roleIdx, perm, checked) {
+  const cfg = getRoleConfig();
+  if (cfg.roles[roleIdx] && cfg.roles[roleIdx].key !== 'admin') {
+    cfg.roles[roleIdx].permissions[perm] = checked;
+  }
+}
+
+async function saveRoleConfig() {
+  try {
+    await fetch(FB_BASE + '/roleConfig.json', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(cloudData.roleConfig)
+    });
+    showToast('角色权限配置已保存！', 'success');
+    // Update nav visibility for current user
+    updateNavVisibility();
+  } catch(e) {
+    showToast('保存失败: ' + e.message, 'error');
+  }
+}
+
+function resetRoleConfig() {
+  if (!confirm('确定恢复默认角色权限配置？所有自定义权限将丢失。')) return;
+  cloudData.roleConfig = JSON.parse(JSON.stringify(DEFAULT_ROLE_CONFIG));
+  renderRoleConfig();
+  showToast('已恢复默认配置，记得点击保存', 'info');
+}
+
 function showAddUserModal() {
   const depts = getDepartments();
   const deptOptions = depts.length > 0
@@ -1906,7 +2110,7 @@ function showAddUserModal() {
     <div class="form-group"><label>用户名 <span class="req">*</span></label><input type="text" class="form-control" id="newUserUsername" required></div>
     <div class="form-group"><label>密码 <span class="req">*</span></label><input type="text" class="form-control" id="newUserPassword" value="123456" required></div>
     <div class="form-group"><label>部门 <span class="req">*</span></label><select class="form-control" id="newUserDept" onchange="onDeptSelectChange(this,'newUserDeptCustom')">${deptOptions}</select><input type="text" class="form-control" id="newUserDeptCustom" style="display:none;margin-top:8px" placeholder="输入自定义部门名称"></div>
-    <div class="form-group"><label>角色</label><select class="form-control" id="newUserRole"><option value="member">成员</option><option value="admin">管理员</option></select></div>
+    <div class="form-group"><label>角色</label><select class="form-control" id="newUserRole"><option value="member">成员</option><option value="manager">主管</option><option value="viewer">查看者</option><option value="admin">超级管理员</option></select></div>
     <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="submit" class="btn btn-primary">添加</button></div>
   </form>`);
 }
@@ -2152,7 +2356,7 @@ function editUser(id) {
     <div class="form-group"><label>用户名</label><input type="text" class="form-control" id="editUsername" value="${user.username}" ${user.username==='admin'?'disabled':''}></div>
     <div class="form-group"><label>部门</label><select class="form-control" id="editDept" onchange="onDeptSelectChange(this,'editDeptCustom')">${deptOptions}</select><input type="text" class="form-control" id="editDeptCustom" style="display:none;margin-top:8px" placeholder="输入自定义部门名称"></div>
     <div class="form-group"><label>重设密码（留空不改）</label><input type="text" class="form-control" id="editPassword" placeholder="输入新密码..."></div>
-    <div class="form-group"><label>角色</label><select class="form-control" id="editRole" ${user.username==='admin'?'disabled':''}><option value="member" ${user.role==='member'?'selected':''}>成员</option><option value="admin" ${user.role==='admin'?'selected':''}>管理员</option></select></div>
+    <div class="form-group"><label>角色</label><select class="form-control" id="editRole" ${user.username==='admin'?'disabled':''}><option value="member" ${user.role==='member'?'selected':''}>成员</option><option value="manager" ${user.role==='manager'?'selected':''}>主管</option><option value="viewer" ${user.role==='viewer'?'selected':''}>查看者</option><option value="admin" ${user.role==='admin'?'selected':''}>超级管理员</option></select></div>
     <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="submit" class="btn btn-primary">保存</button></div>
   </form>`);
 }
@@ -2321,17 +2525,18 @@ function renderAIChat() {
 let settingsTab = 'personal';
 function renderSettings() {
   const body = document.getElementById('contentBody');
-  const isAdmin = currentUser.role === 'admin';
+  const canBrand = hasPermission('brandConfig');
+  const canAI = hasPermission('aiConfig');
   const bc = getBrandConfig();
   const ai = getAIConfig();
 
   // Tab bar
   let tabsHtml = '';
-  if (isAdmin) {
+  if (canBrand || canAI) {
     tabsHtml = `<div class="settings-tabs">
       <div class="settings-tab ${settingsTab==='personal'?'active':''}" onclick="switchSettingsTab('personal')">👤 个人设置</div>
-      <div class="settings-tab ${settingsTab==='brand'?'active':''}" onclick="switchSettingsTab('brand')">🎨 品牌配置</div>
-      <div class="settings-tab ${settingsTab==='ai'?'active':''}" onclick="switchSettingsTab('ai')">🤖 AI模型配置</div>
+      ${canBrand?`<div class="settings-tab ${settingsTab==='brand'?'active':''}" onclick="switchSettingsTab('brand')">🎨 品牌配置</div>`:''}
+      ${canAI?`<div class="settings-tab ${settingsTab==='ai'?'active':''}" onclick="switchSettingsTab('ai')">🤖 AI模型配置</div>`:''}
     </div>`;
   }
 
@@ -2355,7 +2560,7 @@ function renderSettings() {
         <div class="settings-info-row"><span class="label">用户名</span><span class="value">${currentUser.username}</span></div>
         <div class="settings-info-row"><span class="label">姓名</span><span class="value">${currentUser.name}</span></div>
         <div class="settings-info-row"><span class="label">部门</span><span class="value">${currentUser.department || '-'}</span></div>
-        <div class="settings-info-row"><span class="label">角色</span><span class="value">${currentUser.role==='admin'?'<span class="badge badge-success">管理员</span>':'<span class="badge badge-gray">成员</span>'}</span></div>
+        <div class="settings-info-row"><span class="label">角色</span><span class="value">${getRoleBadge(currentUser.role)}</span></div>
         <div class="settings-info-row"><span class="label">数据状态</span><span class="value">${isCloudAvailable?'<span class="badge badge-success">云端同步</span>':'<span class="badge badge-danger">连接失败</span>'}</span></div>
       </div>
     </div>
@@ -2433,12 +2638,13 @@ function renderSettings() {
 
   // Assemble
   let content = tabsHtml;
-  if (!isAdmin) {
+  const hasAdminTabs = canBrand || canAI;
+  if (!hasAdminTabs) {
     content += personalHtml;
   } else {
     content += `<div id="settingsPanelPersonal" style="${settingsTab==='personal'?'':'display:none'}">${personalHtml}</div>`;
-    content += `<div id="settingsPanelBrand" style="${settingsTab==='brand'?'':'display:none'}">${brandHtml}</div>`;
-    content += `<div id="settingsPanelAI" style="${settingsTab==='ai'?'':'display:none'}">${aiHtml}</div>`;
+    if (canBrand) content += `<div id="settingsPanelBrand" style="${settingsTab==='brand'?'':'display:none'}">${brandHtml}</div>`;
+    if (canAI) content += `<div id="settingsPanelAI" style="${settingsTab==='ai'?'':'display:none'}">${aiHtml}</div>`;
   }
 
   body.innerHTML = content;
@@ -2872,8 +3078,8 @@ async function changePwd(e) {
 let configTab = 'daily';
 
 function renderFormConfig() {
-  if (currentUser.role !== 'admin') {
-    document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 仅管理员可访问此页面</div>';
+  if (!hasPermission('formConfig')) {
+    document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
     return;
   }
   const body = document.getElementById('contentBody');
@@ -3155,13 +3361,7 @@ function finishLoadingCountdown() {
       document.getElementById('sidebarDept').textContent = currentUser.department;
       document.getElementById('sidebarAvatar').textContent = currentUser.name.charAt(0);
       document.getElementById('userWelcome').textContent = `👋 欢迎，${currentUser.name}`;
-      // Show/hide admin-only nav items
-      const navMgmt = document.getElementById('navUserMgmt');
-      if (navMgmt) navMgmt.style.display = currentUser.role === 'admin' ? '' : 'none';
-      const navFC = document.getElementById('navFormConfig');
-      if (navFC) navFC.style.display = currentUser.role === 'admin' ? '' : 'none';
-      const navAI = document.getElementById('navAIChat');
-      if (navAI) navAI.style.display = currentUser.role === 'admin' ? '' : 'none';
+      updateNavVisibility();
       navTo('dashboard');
       return;
     }
