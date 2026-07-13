@@ -902,46 +902,82 @@ function renderDashboard() {
   const myWeekly = cloudData.weeklyReports.filter(r => r.userId === currentUser.id);
   const today = new Date().toISOString().split('T')[0];
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-  const dayBeforeYest = new Date(Date.now() - 2*86400000).toISOString().split('T')[0];
   const activeUsers = cloudData.users.filter(u => u.active && u.role !== 'admin' && u.role !== 'viewer');
-  const teamDailyToday = cloudData.dailyReports.filter(r => r.reportDate === today).length;
   const body = document.getElementById('contentBody');
   const refreshTimeStr = new Date(lastRefreshTime).toLocaleTimeString('zh-CN');
   const cloudStatus = isCloudAvailable
     ? `<div class="alert alert-success">☁️ 云端数据已连接 <span style="font-size:12px;color:var(--gray-500)">（上次更新: ${refreshTimeStr}）</span></div>`
     : '<div class="alert alert-danger">⚠️ 云端连接失败，请检查网络后刷新页面</div>';
 
-  // --- Kanban 1: Yesterday's missing daily reports ---
-  const yestSubmitters = new Set(cloudData.dailyReports.filter(r => r.reportDate === yesterday).map(r => r.userId));
-  const yestMissing = activeUsers.filter(u => !yestSubmitters.has(u.id));
-  // Check backfill: who submitted for dayBeforeYest today (补交)
-  const backfillToday = cloudData.dailyReports.filter(r => r.reportDate === dayBeforeYest && r.createdAt && r.createdAt.split('T')[0] === today);
+  // --- Selected dates (with defaults) ---
+  const dailyDate = _dashDailyDate || yesterday;
+  const weeklyDate = _dashWeeklyDate || getLastWeekStart();
+  const weeklyDateEnd = getWeekEnd(weeklyDate);
+  const dayBeforeYest = new Date(Date.now() - 2*86400000).toISOString().split('T')[0];
 
-  const yestKanban = `
+  // --- Kanban 1: Daily missing reports (with date filter) ---
+  const dailySubmitters = new Set(cloudData.dailyReports.filter(r => r.reportDate === dailyDate).map(r => r.userId));
+  const dailyMissing = activeUsers.filter(u => !dailySubmitters.has(u.id));
+  const dailyBackfill = cloudData.dailyReports.filter(r => r.reportDate === dayBeforeYest && r.createdAt && r.createdAt.split('T')[0] === today);
+
+  const dailyKanban = `
     <div class="card" style="margin-bottom:20px">
-      <div class="card-header"><h4>📌 昨日日报提交情况 <span style="font-size:13px;font-weight:400;color:var(--gray-500)">（${yesterday}）</span></h4>
+      <div class="card-header"><h4>📌 日报提交情况</h4>
         <div style="display:flex;gap:8px;align-items:center">
-          <span class="badge badge-success">已交 ${yestSubmitters.size}</span>
-          <span class="badge badge-danger">未交 ${yestMissing.length}</span>
+          <span class="badge badge-success">已交 ${dailySubmitters.size}</span>
+          <span class="badge badge-danger">未交 ${dailyMissing.length}</span>
           <button class="btn btn-outline btn-sm" onclick="refreshAndRender()">🔄 刷新</button>
         </div>
       </div>
       <div class="card-body">
-        ${yestMissing.length > 0 ? `
-          <div style="margin-bottom:12px;font-size:13px;color:var(--gray-600)">以下人员尚未提交昨日日报：</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <label style="font-size:13px;font-weight:600;color:var(--gray-600);white-space:nowrap">筛选日期：</label>
+          <input type="date" class="form-control" id="dashDailyDateInput" value="${dailyDate}" style="width:auto;max-width:180px" onchange="onDashDailyDateChange(this.value)">
+          ${dailyDate === yesterday ? '<span class="badge badge-info">昨日</span>' : dailyDate === today ? '<span class="badge badge-info">今日</span>' : ''}
+        </div>
+        ${dailyMissing.length > 0 ? `
+          <div style="margin-bottom:8px;font-size:13px;color:var(--gray-600)">以下人员尚未提交 ${dailyDate} 的日报：</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px">
-            ${yestMissing.map(u => `<div style="display:flex;align-items:center;gap:6px;background:var(--danger-light);border:1px solid #fecaca;border-radius:20px;padding:5px 14px;font-size:13px"><span style="font-size:16px">⚠️</span><span style="font-weight:600">${u.name}</span><span style="color:var(--gray-500);font-size:12px">${u.department}</span></div>`).join('')}
+            ${dailyMissing.map(u => `<div style="display:flex;align-items:center;gap:6px;background:var(--danger-light);border:1px solid #fecaca;border-radius:20px;padding:5px 14px;font-size:13px"><span style="font-size:16px">⚠️</span><span style="font-weight:600">${u.name}</span><span style="color:var(--gray-500);font-size:12px">${u.department}</span></div>`).join('')}
           </div>
-        ` : '<div class="empty-state" style="padding:20px"><div class="icon" style="font-size:32px">✅</div>昨日全员已提交日报！</div>'}
-        ${backfillToday.length > 0 ? `
+        ` : '<div class="empty-state" style="padding:20px"><div class="icon" style="font-size:32px">✅</div>' + dailyDate + ' 全员已提交日报！</div>'}
+        ${dailyDate === yesterday && dailyBackfill.length > 0 ? `
           <div style="margin-top:12px;padding:10px 14px;background:var(--warning-light);border:1px solid #fde68a;border-radius:8px;font-size:12px;color:var(--gray-700)">
-            <strong>📝 补交提醒：</strong>今日有 ${backfillToday.length} 人补交了前天（${dayBeforeYest}）的日报：
-            ${backfillToday.map(r => r.name).join('、')}
+            <strong>📝 补交提醒：</strong>今日有 ${dailyBackfill.length} 人补交了前天（${dayBeforeYest}）的日报：
+            ${dailyBackfill.map(r => r.name).join('、')}
           </div>` : ''}
       </div>
     </div>`;
 
-  // --- Kanban 2: Monthly submission counts ---
+  // --- Kanban 2: Weekly missing reports (with date filter) ---
+  const weeklySubmitters = new Set(cloudData.weeklyReports.filter(r => r.weekStart === weeklyDate).map(r => r.userId));
+  const weeklyMissing = activeUsers.filter(u => !weeklySubmitters.has(u.id));
+
+  const weeklyKanban = `
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header"><h4>📋 周报提交情况</h4>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="badge badge-success">已交 ${weeklySubmitters.size}</span>
+          <span class="badge badge-danger">未交 ${weeklyMissing.length}</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <label style="font-size:13px;font-weight:600;color:var(--gray-600);white-space:nowrap">筛选周次：</label>
+          <input type="date" class="form-control" id="dashWeeklyDateInput" value="${weeklyDate}" style="width:auto;max-width:180px" onchange="onDashWeeklyDateChange(this.value)">
+          <span style="font-size:12px;color:var(--gray-500)">~ ${weeklyDateEnd}</span>
+          ${weeklyDate === getLastWeekStart() ? '<span class="badge badge-info">上周</span>' : weeklyDate === getWeekStart() ? '<span class="badge badge-info">本周</span>' : ''}
+        </div>
+        ${weeklyMissing.length > 0 ? `
+          <div style="margin-bottom:8px;font-size:13px;color:var(--gray-600)">以下人员尚未提交 ${weeklyDate} ~ ${weeklyDateEnd} 的周报：</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            ${weeklyMissing.map(u => `<div style="display:flex;align-items:center;gap:6px;background:var(--danger-light);border:1px solid #fecaca;border-radius:20px;padding:5px 14px;font-size:13px"><span style="font-size:16px">⚠️</span><span style="font-weight:600">${u.name}</span><span style="color:var(--gray-500);font-size:12px">${u.department}</span></div>`).join('')}
+          </div>
+        ` : '<div class="empty-state" style="padding:20px"><div class="icon" style="font-size:32px">✅</div>' + weeklyDate + ' ~ ' + weeklyDateEnd + ' 全员已提交周报！</div>'}
+      </div>
+    </div>`;
+
+  // --- Kanban 3: Monthly submission counts ---
   const now = new Date();
   const ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
   const monthDaily = cloudData.dailyReports.filter(r => r.reportDate && r.reportDate.startsWith(ym));
@@ -977,6 +1013,8 @@ function renderDashboard() {
       </table></div>
     </div>`;
 
+  const teamDailyToday = cloudData.dailyReports.filter(r => r.reportDate === today).length;
+
   body.innerHTML = cloudStatus + `
     <div class="entry-grid">
       <div class="entry-card daily" onclick="navTo('dailyForm')"><div class="entry-icon">📝</div><h4>日报填写</h4><p>记录每日渠道执行数据</p></div>
@@ -991,9 +1029,19 @@ function renderDashboard() {
       <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;color:#4f46e5">🗂️</div><div class="stat-value">${cloudData.weeklyReports.length}</div><div class="stat-label">周报总记录数</div></div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-      ${yestKanban}
-      ${monthKanban}
-    </div>`;
+      ${dailyKanban}
+      ${weeklyKanban}
+    </div>
+    ${monthKanban}`;
+}
+
+function onDashDailyDateChange(val) {
+  _dashDailyDate = val;
+  renderDashboard();
+}
+function onDashWeeklyDateChange(val) {
+  _dashWeeklyDate = val;
+  renderDashboard();
 }
 
 // ============ Report Form ============
@@ -3229,6 +3277,11 @@ function showToast(msg, type='success', duration=2500) {
 // ============ Utils ============
 function getWeekStart(){const n=new Date(),d=n.getDay()||7;const m=new Date(n);m.setDate(n.getDate()-d+1);return m.toISOString().split('T')[0]}
 function getWeekEnd(s){if(!s)return'';const d=new Date(s);d.setDate(d.getDate()+6);return d.toISOString().split('T')[0]}
+function getLastWeekStart(){const n=new Date(),d=n.getDay()||7;const m=new Date(n);m.setDate(n.getDate()-d-6);return m.toISOString().split('T')[0]}
+
+// Dashboard filter state
+let _dashDailyDate = null; // null = default yesterday
+let _dashWeeklyDate = null; // null = default last week
 
 async function refreshAndRender() {
   reportsLoaded = false;
