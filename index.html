@@ -189,6 +189,10 @@ tr:hover td{background:var(--gray-50)}
 .ai-msg.assistant table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px}
 .ai-msg.assistant th{background:var(--gray-100);padding:6px 10px;text-align:left;border:1px solid var(--gray-200)}
 .ai-msg.assistant td{padding:6px 10px;border:1px solid var(--gray-200)}
+.ai-table-wrap{margin:8px 0;border:1px solid var(--gray-200);border-radius:8px;overflow:hidden}
+.ai-table-toolbar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--gray-100);border-bottom:1px solid var(--gray-200)}
+.ai-table-label{font-size:11px;color:var(--gray-600);flex:1}
+.ai-table-toolbar .btn-sm{font-size:11px;padding:2px 8px}
 .ai-msg.assistant code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px}
 .ai-msg.assistant strong{font-weight:600}
 .ai-msg.system{align-self:center;background:var(--warning-light);color:var(--warning);font-size:12px;text-align:center;max-width:100%}
@@ -3016,12 +3020,12 @@ function renderAIMarkdown(text) {
     let header = parseRow(lines[0]);
     let bodyLines = lines.slice(1);
     if (lines[1] && /^\|[\s:-]+\|/.test(lines[1])) bodyLines = lines.slice(2);
-    let result = '<table><thead><tr>' + header.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>';
+    let result = '<div class="ai-table-wrap"><div class="ai-table-toolbar"><span class="ai-table-label">📊 表格数据</span><button class="btn btn-outline btn-sm" onclick="downloadAITable(this,\'csv\')">📥 CSV</button><button class="btn btn-outline btn-sm" onclick="downloadAITable(this,\'xlsx\')">📥 Excel</button></div><table><thead><tr>' + header.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>';
     bodyLines.forEach(line => {
       const cells = parseRow(line);
       result += '<tr>' + cells.map(c => '<td>' + c + '</td>').join('') + '</tr>';
     });
-    result += '</tbody></table>';
+    result += '</tbody></table></div>';
     return result;
   });
   // Bold
@@ -3031,6 +3035,54 @@ function renderAIMarkdown(text) {
   // Line breaks
   html = html.replace(/\n/g, '<br>');
   return html;
+}
+
+function downloadAITable(btn, format) {
+  const wrap = btn.closest('.ai-table-wrap');
+  if (!wrap) return;
+  const table = wrap.querySelector('table');
+  if (!table) return;
+  // Parse table data
+  const headers = [];
+  table.querySelectorAll('thead th').forEach(th => headers.push(th.textContent.trim()));
+  const rows = [];
+  table.querySelectorAll('tbody tr').forEach(tr => {
+    const row = [];
+    tr.querySelectorAll('td').forEach(td => row.push(td.textContent.trim()));
+    rows.push(row);
+  });
+  const ts = new Date().toISOString().split('T')[0];
+  if (format === 'csv') {
+    const lines = [headers.join(',')];
+    rows.forEach(row => {
+      lines.push(row.map(c => {
+        if (c.includes(',') || c.includes('"') || c.includes('\n')) return '"' + c.replace(/"/g, '""') + '"';
+        return c;
+      }).join(','));
+    });
+    const blob = new Blob(['\uFEFF' + lines.join('\n')], {type:'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'AI表格_' + ts + '.csv'; a.click();
+    URL.revokeObjectURL(url);
+  } else if (format === 'xlsx') {
+    if (window.XLSX) {
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'AI表格');
+      XLSX.writeFile(wb, 'AI表格_' + ts + '.xlsx');
+    } else {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+      s.onload = () => {
+        const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'AI表格');
+        XLSX.writeFile(wb, 'AI表格_' + ts + '.xlsx');
+      };
+      document.head.appendChild(s);
+    }
+  }
 }
 
 function initAIChat() {
