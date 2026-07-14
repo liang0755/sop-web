@@ -2896,34 +2896,36 @@ function buildAIContext() {
   (fc.daily || []).forEach(c => dChMap[c.id] = c.name);
   (fc.weekly || []).forEach(c => wChMap[c.id] = c.name);
 
-  // Compile daily reports
+  // Compile daily reports (channels is an array in Firebase)
   const dailyData = cloudData.dailyReports.map(r => {
     const u = userMap[r.userId] || {};
     const channels = {};
-    Object.entries(r.data || {}).forEach(([chId, fields]) => {
-      const chName = dChMap[chId] || chId;
+    (r.channels || []).forEach(ch => {
+      const chName = ch.channel || '未知渠道';
       const fd = {};
-      Object.entries(fields).forEach(([k, v]) => {
+      Object.entries(ch).forEach(([k, v]) => {
+        if (k === 'channel' || k === 'reference') return;
         if (v !== '' && v !== null && v !== undefined) fd[fieldLabels[k] || k] = v;
       });
       if (Object.keys(fd).length > 0) channels[chName] = fd;
     });
-    return { user: u.name || '未知', department: u.department || '', date: r.reportDate, channels };
+    return { user: u.name || r.name || '未知', department: u.department || r.department || '', date: r.reportDate, channels };
   }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
-  // Compile weekly reports
+  // Compile weekly reports (channels is an array in Firebase)
   const weeklyData = cloudData.weeklyReports.map(r => {
     const u = userMap[r.userId] || {};
     const channels = {};
-    Object.entries(r.data || {}).forEach(([chId, fields]) => {
-      const chName = wChMap[chId] || chId;
+    (r.channels || []).forEach(ch => {
+      const chName = ch.channel || '未知渠道';
       const fd = {};
-      Object.entries(fields).forEach(([k, v]) => {
+      Object.entries(ch).forEach(([k, v]) => {
+        if (k === 'channel' || k === 'reference') return;
         if (v !== '' && v !== null && v !== undefined) fd[fieldLabels[k] || k] = v;
       });
       if (Object.keys(fd).length > 0) channels[chName] = fd;
     });
-    return { user: u.name || '未知', department: u.department || '', weekStart: r.weekStart, channels };
+    return { user: u.name || r.name || '未知', department: u.department || r.department || '', weekStart: r.weekStart, weekEnd: r.weekEnd, channels };
   }).sort((a, b) => (a.weekStart || '').localeCompare(b.weekStart || ''));
 
   const activeUsers = cloudData.users.filter(u => u.active);
