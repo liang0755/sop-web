@@ -2908,7 +2908,7 @@ function buildAIContext() {
       });
       if (Object.keys(fd).length > 0) channels[chName] = fd;
     });
-    return { user: u.name || '未知', department: u.department || '', date: r.date, channels };
+    return { user: u.name || '未知', department: u.department || '', date: r.reportDate, channels };
   }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   // Compile weekly reports
