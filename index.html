@@ -1045,6 +1045,27 @@ function onDashWeeklyDateChange(val) {
   renderDashboard();
 }
 
+// Check if a report already exists for the selected date
+function checkExistingReport(type) {
+  const dateVal = document.getElementById('reportDate').value;
+  if (!dateVal) return;
+  const isDaily = type === 'daily';
+  const existing = isDaily
+    ? cloudData.dailyReports.find(r => r.userId === currentUser.id && r.reportDate === dateVal)
+    : cloudData.weeklyReports.find(r => r.userId === currentUser.id && r.weekStart === dateVal);
+  const alertEl = document.getElementById('formAlert');
+  if (!alertEl) return;
+  if (existing) {
+    const dateLabel = isDaily ? dateVal : `${dateVal} ~ ${existing.weekEnd || getWeekEnd(dateVal)}`;
+    alertEl.innerHTML = `<div class="alert alert-warning" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span>⚠️ 你已提交过 ${dateLabel} 的${isDaily?'日报':'周报'}，每人每天只能提交一次。如需修改请前往数据页面编辑。</span>
+      <button class="btn btn-sm btn-primary" onclick="navTo('${isDaily?'dailyData':'weeklyData'}')">前往修改 →</button>
+    </div>`;
+  } else {
+    alertEl.innerHTML = '';
+  }
+}
+
 // ============ Report Form ============
 function renderReportForm(type) {
   const isDaily = type === 'daily';
@@ -1057,7 +1078,7 @@ function renderReportForm(type) {
     <div id="formAlert"></div>
     <div class="card" style="margin-bottom:16px"><div class="card-body" style="padding:14px 18px">
       <div class="filter-bar">
-        <div class="form-group"><label>${isDaily?'填写日期':'周报起始日（周一）'}</label><input type="date" class="form-control" id="reportDate" value="${isDaily?today:ws}" ${isDaily?'':'onchange="onWeekStartChange()"'}></div>
+        <div class="form-group"><label>${isDaily?'填写日期':'周报起始日（周一）'}</label><input type="date" class="form-control" id="reportDate" value="${isDaily?today:ws}" ${isDaily?'onchange="checkExistingReport(\'daily\')"':'onchange="onWeekStartChange();checkExistingReport(\'weekly\')"'}></div>
         ${!isDaily?`<div class="form-group"><label>周报结束日</label><input type="date" class="form-control" id="reportWeekEnd" value="${getWeekEnd(ws)}" readonly></div>`:''}
         <div class="form-group" style="flex:1;min-width:200px"><label>备注（选填）</label><input type="text" class="form-control" id="reportRemark" placeholder="其他需要说明的内容"></div>
       </div>
@@ -1118,6 +1139,8 @@ function renderReportForm(type) {
   restoreDraft(type);
   // Attach auto-save listeners
   attachDraftListeners(type);
+  // Check if report already exists for the default date
+  checkExistingReport(type);
 }
 
 // ============ Draft Auto-Save ============
@@ -1370,6 +1393,20 @@ async function submitReport(type) {
   if (!isDaily) {
     const wd = new Date(dateVal).getDay();
     if (wd !== 1) { alert('周报起始日必须是周一，请重新选择'); return; }
+  }
+  // Check for duplicate submission
+  const existingReport = isDaily
+    ? cloudData.dailyReports.find(r => r.userId === currentUser.id && r.reportDate === dateVal)
+    : cloudData.weeklyReports.find(r => r.userId === currentUser.id && r.weekStart === dateVal);
+  if (existingReport) {
+    const dateLabel = isDaily ? dateVal : `${dateVal} ~ ${existingReport.weekEnd || getWeekEnd(dateVal)}`;
+    showModal('已提交过 ⚠️', `<div class="alert alert-warning">⚠️ 你已于 ${existingReport.createdAt ? existingReport.createdAt.split('T')[0] : '之前'} 提交过 ${dateLabel} 的${isDaily?'日报':'周报'}。</div>
+      <div style="font-size:14px;color:var(--gray-600);margin:12px 0">每人每天只能提交一次${isDaily?'日报':'周报'}。如需修改内容，请前往「${isDaily?'日报':'周报'}数据」页面编辑。</div>
+      <div style="text-align:center;margin-top:16px;display:flex;gap:10px;justify-content:center">
+        <button class="btn btn-outline" onclick="closeModal()">我知道了</button>
+        <button class="btn btn-primary" onclick="closeModal();navTo('${isDaily?'dailyData':'weeklyData'}')">前往${isDaily?'日报':'周报'}数据</button>
+      </div>`);
+    return;
   }
   const channels = getChannels(type);
   // Validate required fields
