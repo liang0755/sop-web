@@ -4176,7 +4176,13 @@ async function handleVisitUpload(input) {
   const alertEl = document.getElementById('visitAlert');
   if (alertEl) alertEl.innerHTML = '<div class="alert alert-info">正在解析CSV文件...</div>';
   try {
-    const text = await file.text();
+    const buffer = await file.arrayBuffer();
+    let text;
+    // Try UTF-8 first; if replacement chars found, fall back to GBK (common for Chinese Windows CSVs)
+    text = new TextDecoder('utf-8').decode(buffer);
+    if (text.includes('\uFFFD')) {
+      text = new TextDecoder('gbk').decode(buffer);
+    }
     const rows = parseVisitCSV(text);
     if (rows.length < 2) {
       if (alertEl) alertEl.innerHTML = '<div class="alert alert-warning">CSV文件没有数据行</div>';
