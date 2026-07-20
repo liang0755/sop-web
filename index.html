@@ -3885,7 +3885,7 @@ function renderConfigContent() {
     const cats = cloudData.formConfig.signinCategories;
     c.innerHTML = `
       <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
-        💡 配置"签到事件归类"，用于拜访统计「个人汇总」中的归类汇总。每个归类可包含多个签到事件，需与拜访数据中的"签到事件"字段<b>完全一致</b>（含空格）。修改后点击底部「保存配置」生效。
+        💡 配置"签到事件归类"，用于拜访统计「个人拜访类型统计」中的归类汇总。每个归类可包含多个签到事件，需与拜访数据中的"签到事件"字段<b>完全一致</b>（含空格）。修改后点击底部「保存配置」生效。
       </div>
       <div id="signinCatList">
         ${cats.map((cat, ci) => `
@@ -4099,7 +4099,7 @@ let selectedVisitIds = new Set(); // for batch operations
 let visitDataLoaded = false; // track whether visitRecords have been fetched
 let visitPageSize = 30;      // 拜访数据每页条数（默认 30，可选 30/50/100/200）
 let visitCurrentPage = 1;    // 拜访数据当前页码
-let visitStatsTab = 'team';  // 拜访统计 tab：team=团队汇总 / person=个人汇总
+let visitStatsTab = 'team';  // 拜访统计 tab：team=团队拜访卡点统计 / person=个人拜访类型统计
 
 // Lazy-load visit records for managers who didn't get them during initial load
 async function ensureVisitDataLoaded() {
@@ -5012,8 +5012,8 @@ async function renderVisitStats() {
   const mAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
   body.innerHTML = `
     <div class="summary-tabs" style="margin-bottom:16px">
-      <div class="summary-tab visit-stats-tab ${visitStatsTab==='team'?'active':''}" onclick="switchVisitStatsTab('team', this)">🏢 团队汇总</div>
-      <div class="summary-tab visit-stats-tab ${visitStatsTab==='person'?'active':''}" onclick="switchVisitStatsTab('person', this)">👤 个人汇总</div>
+      <div class="summary-tab visit-stats-tab ${visitStatsTab==='team'?'active':''}" onclick="switchVisitStatsTab('team', this)">🏢 团队拜访卡点统计</div>
+      <div class="summary-tab visit-stats-tab ${visitStatsTab==='person'?'active':''}" onclick="switchVisitStatsTab('person', this)">👤 个人拜访类型统计</div>
     </div>
     <div class="card" style="margin-bottom:20px"><div class="card-body">
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap" id="visitDateBtns">
@@ -5353,7 +5353,7 @@ function renderPersonVisitStats(records, s, e) {
       </table></div>
     </div></div>`;
 
-  const intro = `<div style="font-size:13px;color:var(--gray-500);margin-bottom:12px">个人汇总（按人员，共 ${emps.length} 人）· ${s || '全部'} 至 ${e || '全部'}<span style="margin-left:8px;color:var(--gray-400)">提示：点击事件列 / 归类列 / 合计列的 ▲▼，可按该列数值对人员行升/降序排列（自动保存，当前排序列高亮）</span></div>`;
+  const intro = `<div style="font-size:13px;color:var(--gray-500);margin-bottom:12px">个人拜访类型统计（按人员，共 ${emps.length} 人）· ${s || '全部'} 至 ${e || '全部'}<span style="margin-left:8px;color:var(--gray-400)">提示：点击事件列 / 归类列 / 合计列的 ▲▼，可按该列数值对人员行升/降序排列（自动保存，当前排序列高亮）</span></div>`;
   return intro + table1 + table2;
 }
 
