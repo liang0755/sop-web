@@ -4127,8 +4127,8 @@ async function renderVisitData() {
     if (saved === 30 || saved === 50 || saved === 100 || saved === 200) visitPageSize = saved;
   } catch(e) {}
   const body = document.getElementById('contentBody');
-  const today = new Date().toISOString().split('T')[0];
-  const mAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
+  const today = localYMD(new Date());
+  const mAgo = localYMD(new Date(Date.now()-30*86400000));
   const depts = [...new Set(cloudData.users.map(u => u.department).filter(d => d))].sort();
   const persons = [...new Set(cloudData.users.map(u => u.name))].sort();
   body.innerHTML = `
@@ -5008,8 +5008,8 @@ async function renderVisitStats() {
     await ensureVisitDataLoaded();
   }
   const body = document.getElementById('contentBody');
-  const today = new Date().toISOString().split('T')[0];
-  const mAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
+  const today = localYMD(new Date());
+  const mAgo = localYMD(new Date(Date.now()-30*86400000));
   body.innerHTML = `
     <div class="summary-tabs" style="margin-bottom:16px">
       <div class="summary-tab visit-stats-tab ${visitStatsTab==='team'?'active':''}" onclick="switchVisitStatsTab('team', this)">🏢 团队拜访卡点统计</div>
@@ -5046,23 +5046,23 @@ function switchVisitStatsTab(tab, el) {
 function setVisitDateRange(type, btn) {
   const now = new Date();
   let start, end;
-  const todayStr = now.toISOString().split('T')[0];
+  const todayStr = localYMD(now);
   if (type === 'yesterday') {
     const y = new Date(now); y.setDate(y.getDate() - 1);
-    start = end = y.toISOString().split('T')[0];
+    start = end = localYMD(y);
   } else if (type === 'thisWeek') {
     const day = now.getDay() || 7;
     const monday = new Date(now); monday.setDate(monday.getDate() - day + 1);
-    start = monday.toISOString().split('T')[0]; end = todayStr;
+    start = localYMD(monday); end = todayStr;
   } else if (type === 'lastWeek') {
     const day = now.getDay() || 7;
     const monday = new Date(now); monday.setDate(monday.getDate() - day + 1 - 7);
     const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
-    start = monday.toISOString().split('T')[0]; end = sunday.toISOString().split('T')[0];
+    start = localYMD(monday); end = localYMD(sunday);
   } else if (type === 'thisMonth') {
-    start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]; end = todayStr;
+    start = localYMD(new Date(now.getFullYear(), now.getMonth(), 1)); end = todayStr;
   } else if (type === 'thisYear') {
-    start = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0]; end = todayStr;
+    start = localYMD(new Date(now.getFullYear(), 0, 1)); end = todayStr;
   }
   if (start) document.getElementById('visitStatsStart').value = start;
   if (end) document.getElementById('visitStatsEnd').value = end;
