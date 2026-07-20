@@ -503,6 +503,9 @@ async function loadCoreData() {
     if (!cloudData.formConfig.signinCategories || !cloudData.formConfig.signinCategories.length) {
       cloudData.formConfig.signinCategories = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.signinCategories));
     }
+    if (!cloudData.formConfig.signinEvents || !cloudData.formConfig.signinEvents.length) {
+      cloudData.formConfig.signinEvents = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.signinEvents));
+    }
     if (!fcData) {
       try { await fetch(FB_BASE + '/formConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.formConfig)}); } catch(e) {}
     }
@@ -1019,7 +1022,9 @@ const DEFAULT_FORM_CONFIG = {
     { name: '自拓演示', events: ['陌拜演示','自拓线下','自拓线上'] },
     { name: '线索演示', events: ['线索线上','线索线下'] },
     { name: '其他', events: ['N面拜访','售后服务'] }
-  ]
+  ],
+  // 签到事件固定选项（用于拜访数据导入后手动修改下拉单选框）
+  signinEvents: ['陌拜演示','自拓线下','自拓线上','线索线上','线索线下','N面拜访','售后服务']
 };
 
 function getChannels(type) {
@@ -3856,6 +3861,7 @@ function renderFormConfig() {
       <div class="summary-tab ${configTab==='weekly'?'active':''}" onclick="switchConfigTab('weekly')">周报配置</div>
       <div class="summary-tab ${configTab==='visitResults'?'active':''}" onclick="switchConfigTab('visitResults')">拜访结果配置</div>
       <div class="summary-tab ${configTab==='signinCategories'?'active':''}" onclick="switchConfigTab('signinCategories')">签到归类配置</div>
+      <div class="summary-tab ${configTab==='signinEvents'?'active':''}" onclick="switchConfigTab('signinEvents')">签到事件配置</div>
     </div>
     <div id="configContent"></div>
     <div style="margin-top:12px;font-size:12px;color:var(--gray-500)">
@@ -3879,6 +3885,29 @@ function switchConfigTab(tab) {
 
 function renderConfigContent() {
   const c = document.getElementById('configContent');
+  // ===== 签到事件固定选项配置 tab（用于拜访数据手动修改下拉框）=====
+  if (configTab === 'signinEvents') {
+    if (!cloudData.formConfig.signinEvents) cloudData.formConfig.signinEvents = [];
+    const list = cloudData.formConfig.signinEvents;
+    c.innerHTML = `
+      <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
+        💡 配置"签到事件"的<b>固定选项</b>，用于拜访数据导入后在「签到事件」列手动修改时的<b>下拉单选框</b>。新增/删除后点击底部「保存配置」生效。已有拜访数据中的签到事件值不会被自动改动。
+      </div>
+      <div id="signinEventOptList">
+        ${list.map((ev, i) => `
+          <div class="channel-card" style="margin-bottom:12px">
+            <div class="channel-card-header" style="padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span class="badge badge-gray" style="font-size:12px">${i + 1}</span>
+              <input type="text" class="form-control" value="${ev.replace(/"/g,'&quot;')}" onchange="updateSigninEventOption(${i}, this.value)" style="flex:1;min-width:160px;max-width:320px" placeholder="签到事件名称，如：陌拜演示">
+              <button class="btn btn-danger btn-sm" onclick="deleteSigninEventOption(${i})">🗑 删除</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn btn-outline" style="width:100%;padding:12px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addSigninEventOption()">➕ 添加签到事件</button>
+    `;
+    return;
+  }
   // ===== 签到事件归类配置 tab =====
   if (configTab === 'signinCategories') {
     if (!cloudData.formConfig.signinCategories) cloudData.formConfig.signinCategories = [];
@@ -4041,6 +4070,22 @@ function deleteSigninCategory(ci) {
 function addSigninCategory() {
   if (!cloudData.formConfig.signinCategories) cloudData.formConfig.signinCategories = [];
   cloudData.formConfig.signinCategories.push({ name: '新归类', events: [''] });
+  renderConfigContent();
+}
+
+// ===== 签到事件固定选项 编辑助手 =====
+function updateSigninEventOption(i, value) {
+  if (!cloudData.formConfig.signinEvents) cloudData.formConfig.signinEvents = [];
+  if (cloudData.formConfig.signinEvents[i] !== undefined) cloudData.formConfig.signinEvents[i] = value;
+}
+function addSigninEventOption() {
+  if (!cloudData.formConfig.signinEvents) cloudData.formConfig.signinEvents = [];
+  cloudData.formConfig.signinEvents.push('');
+  renderConfigContent();
+}
+function deleteSigninEventOption(i) {
+  if (!confirm('确定删除此签到事件选项吗？')) return;
+  if (cloudData.formConfig.signinEvents) cloudData.formConfig.signinEvents.splice(i, 1);
   renderConfigContent();
 }
 
@@ -4226,16 +4271,22 @@ function renderVisitTable() {
       ${pageRecords.map(r => {
         const vr = visitEditBuffer[r.id]?.visitResult !== undefined ? visitEditBuffer[r.id].visitResult : (r.visitResult || '');
         const bn = visitEditBuffer[r.id]?.blockerNote !== undefined ? visitEditBuffer[r.id].blockerNote : (r.blockerNote || '');
+        const se = visitEditBuffer[r.id]?.signinEvent !== undefined ? visitEditBuffer[r.id].signinEvent : (r.signinEvent || '');
         const vrColor = getVisitResultColor(vr);
         const vrBg = getVisitResultBg(vr);
         const checked = selectedVisitIds.has(r.id) ? 'checked' : '';
+        // 签到事件下拉选项（固定配置项；若当前值不在配置中，则追加该项避免丢失显示）
+        const fixedEvents = getSigninEvents();
+        let signinEventList = fixedEvents.slice();
+        if (se && !signinEventList.includes(se)) signinEventList = signinEventList.concat([se]);
+        const signinOpts = signinEventList.map(ev => `<option value="${ev.replace(/"/g,'&quot;')}" ${ev === se ? 'selected' : ''}>${ev}</option>`).join('');
         return `<tr data-id="${r.id}">
           <td style="text-align:center"><input type="checkbox" class="visit-row-cb" data-id="${r.id}" ${checked} onchange="onVisitSelect('${r.id}', this.checked)"></td>
           <td>${r.contactTime || ''}</td>
           <td>${r.customer || ''}</td>
           <td>${r.contactPerson || ''}</td>
           <td>${r.phone || ''}</td>
-          <td>${r.signinEvent || ''}</td>
+          <td><select class="form-control form-control-sm" onchange="onVisitEdit('${r.id}','signinEvent',this.value)" title="点击修改签到事件（选项来自表单配置-签到事件配置）"><option value="">未设置</option>${signinOpts}</select></td>
           <td>${r.employee || ''}</td>
           <td>${r.department || ''}</td>
           <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.signinAddress || '').replace(/"/g,'&quot;')}">${r.signinAddress || ''}</td>
@@ -4251,11 +4302,18 @@ function renderVisitTable() {
     </tbody>
   </table></div></div>
   ${renderVisitPager(total, pages, visitCurrentPage)}`;
-  // Restore select values
+  // Restore select values（签到事件在第6列、拜访结果在第11列）
   pageRecords.forEach(r => {
     const vr = visitEditBuffer[r.id]?.visitResult !== undefined ? visitEditBuffer[r.id].visitResult : (r.visitResult || '');
-    const select = c.querySelector(`tr[data-id="${r.id}"] select`);
-    if (select) select.value = vr;
+    const se = visitEditBuffer[r.id]?.signinEvent !== undefined ? visitEditBuffer[r.id].signinEvent : (r.signinEvent || '');
+    const row = c.querySelector(`tr[data-id="${r.id}"]`);
+    if (row) {
+      const vrTd = row.querySelector('td:nth-child(11)');
+      const vrSel = vrTd ? vrTd.querySelector('select') : null;
+      if (vrSel) vrSel.value = vr;
+      const seSel = row.querySelector('td:nth-child(6) select');
+      if (seSel) seSel.value = se;
+    }
   });
   // Sync select-all checkbox state（仅当前页）
   const selAll = document.getElementById('visitSelectAll');
@@ -4342,7 +4400,8 @@ function updateVisitSaveBar() {
     const orig = cloudData.visitRecords.find(r => r.id === id) || {};
     const origVR = orig.visitResult || '';
     const origBN = orig.blockerNote || '';
-    if ((buf.visitResult !== undefined && buf.visitResult !== origVR) || (buf.blockerNote !== undefined && buf.blockerNote !== origBN)) {
+    const origSE = orig.signinEvent || '';
+    if ((buf.visitResult !== undefined && buf.visitResult !== origVR) || (buf.blockerNote !== undefined && buf.blockerNote !== origBN) || (buf.signinEvent !== undefined && buf.signinEvent !== origSE)) {
       count++;
     }
   });
@@ -4444,10 +4503,12 @@ async function saveVisitEdits() {
     if (!orig) return;
     const origVR = orig.visitResult || '';
     const origBN = orig.blockerNote || '';
+    const origSE = orig.signinEvent || '';
     const newVR = buf.visitResult !== undefined ? buf.visitResult : origVR;
     const newBN = buf.blockerNote !== undefined ? buf.blockerNote : origBN;
-    if (newVR !== origVR || newBN !== origBN) {
-      changes.push({ id, orig, visitResult: newVR, blockerNote: newBN });
+    const newSE = buf.signinEvent !== undefined ? buf.signinEvent : origSE;
+    if (newVR !== origVR || newBN !== origBN || newSE !== origSE) {
+      changes.push({ id, orig, visitResult: newVR, blockerNote: newBN, signinEvent: newSE });
     }
   });
   if (!changes.length) { alert('没有修改需要保存'); return; }
@@ -4455,9 +4516,10 @@ async function saveVisitEdits() {
   if (alertEl) alertEl.innerHTML = '<div class="alert alert-info">正在保存...</div>';
   try {
     for (const ch of changes) {
-      await apiUpdate('visitRecords', ch.id, { visitResult: ch.visitResult, blockerNote: ch.blockerNote });
+      await apiUpdate('visitRecords', ch.id, { visitResult: ch.visitResult, blockerNote: ch.blockerNote, signinEvent: ch.signinEvent });
       ch.orig.visitResult = ch.visitResult;
       ch.orig.blockerNote = ch.blockerNote;
+      ch.orig.signinEvent = ch.signinEvent;
     }
     visitEditBuffer = {};
     if (alertEl) alertEl.innerHTML = '<div class="alert alert-success">✅ 已保存 ' + changes.length + ' 条修改</div>';
@@ -5156,7 +5218,22 @@ function loadVisitStats() {
   } else if (visitStatsTab === 'teamType') {
     c.innerHTML = renderTeamTypeVisitStats(records, s, e);
   } else {
-    c.innerHTML = summaryHtml + groupHtml;
+    // 捕获导出数据（部门 × 拜访结果）
+    const tcHeaders = ['部门', '拜访结果', '次数', '销售人员'];
+    const tcRows = [];
+    Object.keys(deptGroups).sort().forEach(dept => {
+      const deptRecords = deptGroups[dept];
+      const rc = {};
+      allResults.forEach(r => rc[r] = 0); rc['未标记'] = 0;
+      deptRecords.forEach(r => { const vr = r.visitResult || '未标记'; if (rc[vr] === undefined) rc[vr] = 0; rc[vr]++; });
+      Object.keys(rc).filter(k => rc[k] > 0).forEach(k => {
+        const empSet = [...new Set(deptRecords.filter(r => (r.visitResult || '未标记') === k).map(r => r.employee))];
+        tcRows.push([dept, k, rc[k], empSet.join('、')]);
+      });
+    });
+    window.__teamCardExport = { s, e, headers: tcHeaders, rows: tcRows };
+    const exportBar = `<div style="text-align:right;margin-bottom:12px"><button class="btn btn-sm btn-outline" onclick="exportTeamCardCsv()">⬇️ 导出筛选结果（部门×拜访结果）</button></div>`;
+    c.innerHTML = exportBar + summaryHtml + groupHtml;
   }
 }
 
@@ -5165,18 +5242,57 @@ function getSigninCategories() {
   const fc = cloudData.formConfig || DEFAULT_FORM_CONFIG;
   return (fc.signinCategories && fc.signinCategories.length) ? fc.signinCategories : (DEFAULT_FORM_CONFIG.signinCategories || []);
 }
+// 读取签到事件固定选项（用于拜访数据手动修改下拉框），可配置，存于 formConfig.signinEvents
+function getSigninEvents() {
+  const fc = cloudData.formConfig || DEFAULT_FORM_CONFIG;
+  const list = (fc.signinEvents && fc.signinEvents.length) ? fc.signinEvents : (DEFAULT_FORM_CONFIG.signinEvents || []);
+  return list.map(x => (x || '').trim()).filter(Boolean);
+}
 
-// 个人汇总：签到事件列手动排序（持久化到 localStorage）
-// 个人汇总：人员行排序（点击列头 ▲▼ 按该列数值对人员行升/降序，持久化 localStorage）
-let personSortKey = '__total__';
-let personSortDir = 'desc';
-try { const _k = localStorage.getItem('sop_personSortKey'); if (_k) personSortKey = _k; } catch (e) {}
-try { const _d = localStorage.getItem('sop_personSortDir'); if (_d === 'asc' || _d === 'desc') personSortDir = _d; } catch (e) {}
-function setPersonSort(key, dir) {
-  personSortKey = key;
-  personSortDir = dir;
-  try { localStorage.setItem('sop_personSortKey', key); localStorage.setItem('sop_personSortDir', dir); } catch (e) {}
+// 拜访类型统计：每张表（按签到事件 / 按归类）独立维护排序键与方向（持久化 localStorage）
+let visitTableSort = {
+  person_events: { key:'__total__', dir:'desc' },
+  person_cats:   { key:'__total__', dir:'desc' },
+  team_events:   { key:'__total__', dir:'desc' },
+  team_cats:     { key:'__total__', dir:'desc' }
+};
+try { const _vs = JSON.parse(localStorage.getItem('sop_visitTableSort') || 'null'); if (_vs) visitTableSort = Object.assign(visitTableSort, _vs); } catch (e) {}
+function setVisitSort(mode, kind, key, dir) {
+  const sk = mode + '_' + kind; // kind: 'events' | 'cats'
+  if (!visitTableSort[sk]) visitTableSort[sk] = { key:'__total__', dir:'desc' };
+  visitTableSort[sk].key = key;
+  visitTableSort[sk].dir = dir;
+  try { localStorage.setItem('sop_visitTableSort', JSON.stringify(visitTableSort)); } catch (e) {}
   loadVisitStats();
+}
+
+// ===== 拜访统计导出工具 =====
+function escCsv(v){ v = v==null ? '' : String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; }
+function downloadCsv(filename, headers, rows){
+  const csv = '﻿' + [headers, ...rows].map(r => r.map(escCsv).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('已导出：' + filename, 'success');
+}
+function visitExportFilename(tabLabel, tableLabel, s, e){
+  const cond = (s && e) ? (s + '至' + e) : '全部区间';
+  return '拜访统计_' + tabLabel + '_' + tableLabel + '_' + cond + '.csv';
+}
+function exportVisitTable(mode, kind){
+  const data = window.__visitExport;
+  if (!data || data.mode !== mode) { showToast('请先渲染该表格再导出', 'warning'); return; }
+  const t = data[kind];
+  if (!t) return;
+  const tabLabel = mode === 'person' ? '个人拜访类型统计' : '团队拜访类型统计';
+  downloadCsv(visitExportFilename(tabLabel, t.label, data.s, data.e), t.headers, t.rows);
+}
+function exportTeamCardCsv(){
+  const d = window.__teamCardExport;
+  if (!d) { showToast('请先渲染团队拜访卡点统计再导出', 'warning'); return; }
+  downloadCsv(visitExportFilename('团队拜访卡点统计', '部门×拜访结果', d.s, d.e), d.headers, d.rows);
 }
 
 function computeSigninEvents() {
@@ -5202,6 +5318,7 @@ function renderTeamTypeVisitStats(records, s, e) { return renderGroupedVisitStat
 
 // 拜访类型统计通用渲染：mode='person' 按人员分组；mode='team' 按团队/部门分组
 // 表格形式 —— 主体竖排（行）、签到事件横排（列），同结构再出一张按归类的汇总表
+// 两张表各自维护独立的排序状态（visitTableSort[mode+'_events'] / [mode+'_cats']）
 function renderGroupedVisitStats(records, s, e, mode) {
   const isTeam = mode === 'team';
   const unitLabel = isTeam ? '团队 / 部门' : '人员 / 部门';
@@ -5263,31 +5380,30 @@ function renderGroupedVisitStats(records, s, e, mode) {
   });
   const catGrand = emps.reduce((a, emp) => a + catRowTotals[emp], 0);
 
-  // ===== 人员行排序：按当前排序列（事件/归类/合计）的数值升/降序 =====
-  const sortVal = (emp) => {
-    if (personSortKey === '__total__') return rowTotals[emp] || 0;
-    if (matrix[emp] && matrix[emp][personSortKey] !== undefined) return matrix[emp][personSortKey] || 0;
-    if (catMatrix[emp] && catMatrix[emp][personSortKey] !== undefined) return catMatrix[emp][personSortKey] || 0;
-    return 0;
-  };
-  const displayEmps = [...emps].sort((a, b) => personSortDir === 'desc' ? (sortVal(b) - sortVal(a)) : (sortVal(a) - sortVal(b)));
+  // ===== 各自独立的排序状态 =====
+  const st1 = visitTableSort[mode + '_events'] || { key:'__total__', dir:'desc' };
+  const st2 = visitTableSort[mode + '_cats'] || { key:'__total__', dir:'desc' };
+  const sortVal1 = (emp) => { if (st1.key === '__total__') return rowTotals[emp] || 0; return matrix[emp][st1.key] || 0; };
+  const sortVal2 = (emp) => { if (st2.key === '__total__') return catRowTotals[emp] || 0; return catMatrix[emp][st2.key] || 0; };
+  const display1 = [...emps].sort((a, b) => st1.dir === 'desc' ? (sortVal1(b) - sortVal1(a)) : (sortVal1(a) - sortVal1(b)));
+  const display2 = [...emps].sort((a, b) => st2.dir === 'desc' ? (sortVal2(b) - sortVal2(a)) : (sortVal2(a) - sortVal2(b)));
 
-  // ===== 表1：按签到事件（人员竖排 × 事件横排）=====
+  // ===== 表1：按签到事件（主体竖排 × 事件横排）=====
   const thCells = events.map(ev => {
     const cat = eventToCat[ev];
     const color = cat ? (catColorMap[cat] || '#6366f1') : '#6366f1';
     const evJson = JSON.stringify(ev);
-    const active = personSortKey === ev;
+    const active = st1.key === ev;
     return `<th style="text-align:center;white-space:nowrap;font-size:12px;padding:8px 10px">
       <div>${ev}</div>
       <div style="font-size:10px;color:${color};font-weight:400;margin-bottom:2px">${cat || '—'}</div>
       <div style="display:flex;justify-content:center;gap:2px">
-        <button onclick='setPersonSort(${evJson},"asc")' title="按此列升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'asc' ? '#16a34a' : '#6b7280'}">▲</button>
-        <button onclick='setPersonSort(${evJson},"desc")' title="按此列降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'desc' ? '#dc2626' : '#6b7280'}">▼</button>
+        <button onclick='setVisitSort("${mode}","events",${evJson},"asc")' title="按此列升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && st1.dir === 'asc' ? '#16a34a' : '#6b7280'}">▲</button>
+        <button onclick='setVisitSort("${mode}","events",${evJson},"desc")' title="按此列降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && st1.dir === 'desc' ? '#dc2626' : '#6b7280'}">▼</button>
       </div>
     </th>`;
   }).join('');
-  const bodyRows = displayEmps.map(emp => {
+  const bodyRows1 = display1.map(emp => {
     const cells = events.map(ev => `<td style="text-align:center;padding:6px 8px">${matrix[emp][ev] || ''}</td>`).join('');
     const label = byEmp[emp].dept ? `${emp}<br><span style="font-size:11px;color:var(--gray-500);font-weight:400">${byEmp[emp].dept}</span>` : emp;
     return `<tr>
@@ -5296,41 +5412,42 @@ function renderGroupedVisitStats(records, s, e, mode) {
       <td style="text-align:center;font-weight:700;background:var(--gray-50);padding:6px 8px">${rowTotals[emp]}</td>
     </tr>`;
   }).join('');
-  const totalRow = `<tr style="font-weight:700;background:var(--gray-50)">
+  const totalRow1 = `<tr style="font-weight:700;background:var(--gray-50)">
     <td style="padding:8px 10px">合计</td>
     ${events.map(ev => `<td style="text-align:center;padding:6px 8px">${colTotals[ev]}</td>`).join('')}
     <td style="text-align:center;padding:6px 8px">${grandTotal}</td>
   </tr>`;
   const table1 = `<div class="card" style="margin-bottom:20px;overflow:hidden">
-    <div class="card-header" style="padding:12px 16px;background:var(--gray-50)">
+    <div class="card-header" style="padding:12px 16px;background:var(--gray-50);display:flex;align-items:center;justify-content:space-between;gap:10px">
       <h4 style="margin:0;font-size:15px">📌 按签到事件统计（${unitName}竖排 × 事件横排）</h4>
+      <button class="btn btn-sm btn-outline" onclick="exportVisitTable('${mode}','events')">⬇️ 导出</button>
     </div>
     <div class="card-body" style="padding:16px">
       <div class="table-wrap"><table style="font-size:13px;min-width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--gray-50)">
           <th style="text-align:left;padding:8px 10px">${unitLabel}</th>${thCells}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计
             <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
-              <button onclick="setPersonSort('__total__','asc')" title="按合计升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${personSortKey==='__total__'&&personSortDir==='asc'?'#16a34a':'#6b7280'}">▲</button>
-              <button onclick="setPersonSort('__total__','desc')" title="按合计降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${personSortKey==='__total__'&&personSortDir==='desc'?'#dc2626':'#6b7280'}">▼</button>
+              <button onclick='setVisitSort("${mode}","events","__total__","asc")' title="按合计升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${st1.key==='__total__'&&st1.dir==='asc'?'#16a34a':'#6b7280'}">▲</button>
+              <button onclick='setVisitSort("${mode}","events","__total__","desc")' title="按合计降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${st1.key==='__total__'&&st1.dir==='desc'?'#dc2626':'#6b7280'}">▼</button>
             </div>
           </th>
         </tr></thead>
-        <tbody>${bodyRows}${totalRow}</tbody>
+        <tbody>${bodyRows1}${totalRow1}</tbody>
       </table></div>
     </div></div>`;
 
-  // ===== 表2：按归类（人员竖排 × 归类横排）=====
+  // ===== 表2：按归类（主体竖排 × 归类横排）=====
   const catTh = catNames.map(c => {
     const cJson = JSON.stringify(c);
-    const active = personSortKey === c;
+    const active = st2.key === c;
     return `<th style="text-align:center;white-space:nowrap;padding:8px 10px;color:${catColorMap[c] || '#6366f1'}">${c}
       <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
-        <button onclick='setPersonSort(${cJson},"asc")' title="按此列升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'asc' ? '#16a34a' : '#6b7280'}">▲</button>
-        <button onclick='setPersonSort(${cJson},"desc")' title="按此列降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'desc' ? '#dc2626' : '#6b7280'}">▼</button>
+        <button onclick='setVisitSort("${mode}","cats",${cJson},"asc")' title="按此列升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && st2.dir === 'asc' ? '#16a34a' : '#6b7280'}">▲</button>
+        <button onclick='setVisitSort("${mode}","cats",${cJson},"desc")' title="按此列降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && st2.dir === 'desc' ? '#dc2626' : '#6b7280'}">▼</button>
       </div>
     </th>`;
   }).join('');
-  const catBody = displayEmps.map(emp => {
+  const catBody2 = display2.map(emp => {
     const cells = catNames.map(c => {
       const v = catMatrix[emp][c] || 0;
       const color = catColorMap[c] || '#6366f1';
@@ -5342,31 +5459,47 @@ function renderGroupedVisitStats(records, s, e, mode) {
       <td style="text-align:center;font-weight:700;background:var(--gray-50);padding:6px 8px">${catRowTotals[emp]}</td>
     </tr>`;
   }).join('');
-  const catTotalRow = `<tr style="font-weight:700;background:var(--gray-50)">
+  const catTotalRow2 = `<tr style="font-weight:700;background:var(--gray-50)">
     <td style="padding:8px 10px">合计</td>
     ${catNames.map(c => `<td style="text-align:center;padding:6px 8px">${catTotals[c]}</td>`).join('')}
     <td style="text-align:center;padding:6px 8px">${catGrand}</td>
   </tr>`;
   const table2 = `<div class="card" style="margin-bottom:20px;overflow:hidden">
-    <div class="card-header" style="padding:12px 16px;background:var(--gray-50)">
+    <div class="card-header" style="padding:12px 16px;background:var(--gray-50);display:flex;align-items:center;justify-content:space-between;gap:10px">
       <h4 style="margin:0;font-size:15px">🗂️ 签到事件归类汇总（${unitName}竖排 × 归类横排）</h4>
+      <button class="btn btn-sm btn-outline" onclick="exportVisitTable('${mode}','cats')">⬇️ 导出</button>
     </div>
     <div class="card-body" style="padding:16px">
       <div class="table-wrap"><table style="font-size:13px;min-width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--gray-50)">
           <th style="text-align:left;padding:8px 10px">${unitName}</th>${catTh}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计
             <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
-              <button onclick="setPersonSort('__total__','asc')" title="按合计升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${personSortKey==='__total__'&&personSortDir==='asc'?'#16a34a':'#6b7280'}">▲</button>
-              <button onclick="setPersonSort('__total__','desc')" title="按合计降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${personSortKey==='__total__'&&personSortDir==='desc'?'#dc2626':'#6b7280'}">▼</button>
+              <button onclick='setVisitSort("${mode}","cats","__total__","asc")' title="按合计升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${st2.key==='__total__'&&st2.dir==='asc'?'#16a34a':'#6b7280'}">▲</button>
+              <button onclick='setVisitSort("${mode}","cats","__total__","desc")' title="按合计降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${st2.key==='__total__'&&st2.dir==='desc'?'#dc2626':'#6b7280'}">▼</button>
             </div>
           </th>
         </tr></thead>
-        <tbody>${catBody}${catTotalRow}</tbody>
+        <tbody>${catBody2}${catTotalRow2}</tbody>
       </table></div>
     </div></div>`;
 
+  // 捕获导出数据（含当前筛选区间 + 当前排序后的行顺序）
+  window.__visitExport = {
+    mode, s, e,
+    events: {
+      label: '按签到事件',
+      headers: [unitLabel, ...events, '合计'],
+      rows: display1.map(emp => [ byEmp[emp].dept ? `${emp}（${byEmp[emp].dept}）` : emp, ...events.map(ev => matrix[emp][ev] || ''), rowTotals[emp] ])
+    },
+    cats: {
+      label: '按归类汇总',
+      headers: [unitName, ...catNames, '合计'],
+      rows: display2.map(emp => [ emp, ...catNames.map(c => catMatrix[emp][c] || ''), catRowTotals[emp] ])
+    }
+  };
+
   const introTitle = isTeam ? `团队拜访类型统计（按团队/部门，共 ${emps.length} 个）` : `个人拜访类型统计（按人员，共 ${emps.length} 人）`;
-  const intro = `<div style="font-size:13px;color:var(--gray-500);margin-bottom:12px">${introTitle} · ${s || '全部'} 至 ${e || '全部'}<span style="margin-left:8px;color:var(--gray-400)">提示：点击事件列 / 归类列 / 合计列的 ▲▼，可按该列数值对${unitName}行升/降序排列（自动保存，当前排序列高亮）</span></div>`;
+  const intro = `<div style="font-size:13px;color:var(--gray-500);margin-bottom:12px">${introTitle} · ${s || '全部'} 至 ${e || '全部'}<span style="margin-left:8px;color:var(--gray-400)">提示：点击事件列 / 归类列 / 合计列的 ▲▼，可按该列数值对${unitName}行升/降序排列（两张表独立排序，自动保存，当前排序列高亮）</span></div>`;
   return intro + table1 + table2;
 }
 
