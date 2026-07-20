@@ -4104,6 +4104,7 @@ async function saveFormConfig() {
       body: JSON.stringify(cloudData.visitConfig || DEFAULT_VISIT_CONFIG)
     });
     showToast('配置已保存并生效！', 'success');
+    syncOpenReports();
     if (alertEl) alertEl.innerHTML = '';
   } catch(e) {
     showToast('保存失败: ' + e.message, 'error', 4000);
@@ -4528,6 +4529,7 @@ async function saveVisitEdits() {
       ch.orig.signinEvent = ch.signinEvent;
     }
     visitEditBuffer = {};
+    syncOpenReports();
     if (alertEl) alertEl.innerHTML = '<div class="alert alert-success">✅ 已保存 ' + changes.length + ' 条修改</div>';
     setTimeout(() => { const a = document.getElementById('visitAlert'); if (a) a.innerHTML = ''; }, 3000);
     renderVisitTable();
@@ -4727,6 +4729,50 @@ function getVisitSummaryForWeek(weekStart, weekEnd, department) {
   return { total: records.length, byResult, records };
 }
 
+// 依据最新的拜访数据与配置，构建拜访结果快照（提交周报 / 重新生成共用）
+function buildVisitSnapshot(summary) {
+  const vc = getVisitConfig();
+  const allResults = vc.visitResults || [];
+  return {
+    total: summary.total,
+    details: [...allResults, '未标记'].filter(res => (summary.byResult[res] || 0) > 0).map(res => {
+      const empMap = {};
+      summary.records.forEach(rec => {
+        const vr = rec.visitResult || '未标记';
+        const emp = rec.employee || '未知';
+        if (vr === res) empMap[emp] = (empMap[emp] || 0) + 1;
+      });
+      const employees = Object.keys(empMap).map(name => ({ name, count: empMap[name] }));
+      return { result: res, count: summary.byResult[res] || employees.reduce((s, e) => s + e.count, 0), employees };
+    })
+  };
+}
+
+// 已提交周报：依据当前最新拜访数据 + 拜访结果配置，重新生成快照（实时同步）
+async function regenerateMgrSnapshot(id) {
+  const rep = cloudData.mgrReports.find(r => r.id === id);
+  if (!rep) return;
+  if (!confirm('将依据当前最新的拜访数据与「拜访结果配置」，重新生成本周报的拜访结果快照？原快照将被覆盖。')) return;
+  try {
+    const summary = getVisitSummaryForWeek(rep.weekStart, rep.weekEnd, rep.department);
+    const visitSnapshot = buildVisitSnapshot(summary);
+    const updated = { ...rep, visitSnapshot, updatedAt: new Date().toISOString() };
+    await apiUpdate('mgrReports', id, updated);
+    Object.assign(rep, updated);
+    renderMgrReportList();
+    showToast('✅ 快照已重新生成（与最新数据/配置同步）', 'success');
+  } catch(e) {
+    showToast('重新生成失败：' + e.message, 'error');
+  }
+}
+
+// 配置或拜访记录变更后，刷新当前已打开的报表视图，确保实时同步
+function syncOpenReports() {
+  try { if (document.getElementById('visitStatsResults')) loadVisitStats(); } catch(e) {}
+  try { if (document.getElementById('mgrReportList')) renderMgrReportList(); } catch(e) {}
+  try { if (document.getElementById('mgrVisitSummary')) updateMgrVisitSummary(); } catch(e) {}
+}
+
 async function renderMgrReport() {
   if (!hasPermission('mgrReport')) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
@@ -4907,23 +4953,9 @@ async function saveMgrReport(btn) {
   const [weekStart, weekEnd, weekLabel] = weekVal.split('|');
   // Get visit summary snapshot
   const summary = getVisitSummaryForWeek(weekStart, weekEnd, dept);
-  const vc = getVisitConfig();
-  const allResults = vc.visitResults || [];
   // 按「拜访结果」归组的销售人员明细，随快照持久化，便于列表展示与导出
   // 注意：不要把结果名作为快照平铺 key（结果名可能含 "/" 等 Firebase 非法字符），统一用 details 数组
-  const visitSnapshot = {
-    total: summary.total,
-    details: [...allResults, '未标记'].filter(res => (summary.byResult[res] || 0) > 0).map(res => {
-      const empMap = {};
-      summary.records.forEach(rec => {
-        const vr = rec.visitResult || '未标记';
-        const emp = rec.employee || '未知';
-        if (vr === res) empMap[emp] = (empMap[emp] || 0) + 1;
-      });
-      const employees = Object.keys(empMap).map(name => ({ name, count: empMap[name] }));
-      return { result: res, count: summary.byResult[res] || employees.reduce((s, e) => s + e.count, 0), employees };
-    })
-  };
+  const visitSnapshot = buildVisitSnapshot(summary);
 
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 提交中...'; }
 
@@ -5021,6 +5053,7 @@ function renderMgrReportList() {
         </div>
         <div style="display:flex;gap:4px">
           ${canEdit ? `<button class="btn btn-sm btn-outline" onclick="editMgrReport('${r.id}')">✏️ 编辑</button>` : ''}
+          ${canEdit ? `<button class="btn btn-sm btn-outline" onclick="regenerateMgrSnapshot('${r.id}')" title="依据最新拜访数据与配置重新生成拜访结果快照">🔄 重算快照</button>` : ''}
           ${canDelete ? `<button class="btn btn-sm btn-outline" style="color:var(--danger)" onclick="deleteMgrReport('${r.id}')">🗑️ 删除</button>` : ''}
         </div>
       </div>
