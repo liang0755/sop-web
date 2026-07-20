@@ -2130,20 +2130,29 @@ function exportSummaryCSV() {
   const typeLabel = type === 'daily' ? '日报' : '周报';
   const f = v => v > 0 ? v.toLocaleString() : '0';
   const fm = v => v > 0 ? v.toLocaleString() : '0';
+  // CSV 转义：值包含逗号/引号/换行时用双引号包裹，内部双引号转义为两个双引号
+  const esc = v => {
+    if (v === null || v === undefined) return '';
+    const str = String(v);
+    if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  };
   const rows = [];
 
   if (summaryTab === 'totals') {
     const t = summaryData.totals;
-    rows.push('指标,数值');
-    rows.push('报告总数,' + summaryData.count);
-    rows.push('新增精准线索,' + f(t.newLeads));
-    rows.push('有效建联数,' + f(t.effectiveContacts));
-    rows.push('AB意向数,' + f(t.abIntent));
-    rows.push('成交客户数,' + f(t.closedCustomers));
-    rows.push('成交金额,' + fm(t.dealAmount));
-    rows.push('建联转AB率,' + t.contactToAbRate);
-    rows.push('目标金额,' + fm(t.targetAmount));
-    rows.push('完成率,' + t.completionRate);
+    rows.push(['指标','数值'].join(','));
+    rows.push(['报告总数', summaryData.count].map(esc).join(','));
+    rows.push(['新增精准线索', f(t.newLeads)].map(esc).join(','));
+    rows.push(['有效建联数', f(t.effectiveContacts)].map(esc).join(','));
+    rows.push(['AB意向数', f(t.abIntent)].map(esc).join(','));
+    rows.push(['成交客户数', f(t.closedCustomers)].map(esc).join(','));
+    rows.push(['成交金额', fm(t.dealAmount)].map(esc).join(','));
+    rows.push(['建联转AB率', t.contactToAbRate].map(esc).join(','));
+    rows.push(['目标金额', fm(t.targetAmount)].map(esc).join(','));
+    rows.push(['完成率', t.completionRate].map(esc).join(','));
   } else if (summaryTab === 'byDepartment') {
     // 按部门→渠道分组导出：每个部门一个小节，列出该部门各渠道明细 + 小计
     const deptChannels = {};
@@ -2180,12 +2189,12 @@ function exportSummaryCSV() {
       channelOrder.forEach(cn => { if (chMap[cn]) { seen.add(cn); orderedRows.push(chMap[cn]); } });
       Object.values(chMap).forEach(c => { if (!seen.has(c.channel)) orderedRows.push(c); });
       rows.push('');
-      rows.push('【' + dept + '】（' + orderedRows.length + '个渠道）');
+      rows.push(['【' + dept + '】（' + orderedRows.length + '个渠道）'].map(esc).join(','));
       rows.push(chHeaders.join(','));
       orderedRows.forEach(c => {
-        rows.push([c.channel, c.count, f(c.newLeads), f(c.effectiveContacts), f(c.abIntent), f(c.closedCustomers), fm(c.dealAmount), c.contactToAbRate, fm(c.targetAmount), c.completionRate].join(','));
+        rows.push([c.channel, c.count, f(c.newLeads), f(c.effectiveContacts), f(c.abIntent), f(c.closedCustomers), fm(c.dealAmount), c.contactToAbRate, fm(c.targetAmount), c.completionRate].map(esc).join(','));
       });
-      rows.push(['小计', ds.count||0, f(ds.newLeads), f(ds.effectiveContacts), f(ds.abIntent), f(ds.closedCustomers), fm(ds.dealAmount), ds.contactToAbRate, fm(ds.targetAmount), ds.completionRate].join(','));
+      rows.push(['小计', ds.count||0, f(ds.newLeads), f(ds.effectiveContacts), f(ds.abIntent), f(ds.closedCustomers), fm(ds.dealAmount), ds.contactToAbRate, fm(ds.targetAmount), ds.completionRate].map(esc).join(','));
     });
   } else {
     let data, titleCol, headers;
@@ -2203,7 +2212,7 @@ function exportSummaryCSV() {
       const row = summaryTab === 'byPerson'
         ? [nm, sub, d.count||0, f(d.newLeads), f(d.effectiveContacts), f(d.abIntent), f(d.closedCustomers), fm(d.dealAmount), d.contactToAbRate, fm(d.targetAmount), d.completionRate]
         : [nm, d.count||0, f(d.newLeads), f(d.effectiveContacts), f(d.abIntent), f(d.closedCustomers), fm(d.dealAmount), d.contactToAbRate, fm(d.targetAmount), d.completionRate];
-      rows.push(row.join(','));
+      rows.push(row.map(esc).join(','));
     });
   }
 
@@ -2751,6 +2760,15 @@ function exportCSV(type) {
   if (fDept) reports = reports.filter(r => r.department === fDept);
   if (fPerson) reports = reports.filter(r => r.name === fPerson);
   const headers = ['姓名','部门',type==='weekly'?'周开始':'日期',type==='weekly'?'周结束':'','渠道','参考标准','新增精准线索数','有效建联数','AB意向数','成交客户数','成交金额','建联转AB率','目标金额','完成率','问题/提升动作'];
+  // CSV 转义：值含逗号/引号/换行时用双引号包裹
+  const esc = v => {
+    if (v === null || v === undefined) return '';
+    const str = String(v);
+    if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  };
   const rows = [headers.join(',')];
   reports.forEach(r => {
     (r.channels||[]).forEach(ch => {
@@ -2759,7 +2777,7 @@ function exportCSV(type) {
       const cpr=ch.targetAmount===''||ch.targetAmount==='/'?'/':(ta>0?(da/ta*100).toFixed(1)+'%':'/');
       const df=type==='weekly'?r.weekStart:r.reportDate;
       const ef=type==='weekly'?r.weekEnd:'';
-      rows.push([r.name,r.department,df,ef,ch.channel,ch.reference||'',ch.newLeads||'',ch.effectiveContacts||'',ch.abIntent||'',ch.closedCustomers||'',ch.dealAmount||'',ctr,ch.targetAmount||'',cpr,(ch.issues||'').replace(/,/g,'，').replace(/\n/g,' ')].join(','));
+      rows.push([r.name,r.department,df,ef,ch.channel,ch.reference||'',ch.newLeads||'',ch.effectiveContacts||'',ch.abIntent||'',ch.closedCustomers||'',ch.dealAmount||'',ctr,ch.targetAmount||'',cpr,(ch.issues||'').replace(/,/g,'，').replace(/\n/g,' ')].map(esc).join(','));
     });
   });
   const csv = '\uFEFF' + rows.join('\n');
