@@ -5200,6 +5200,35 @@ function moveSigninEvent(ev, dir) {
   loadVisitStats();
 }
 
+// 个人汇总：归类列手动排序 + 人员按合计排序（均持久化 localStorage）
+let catColumnOrder = [];
+try { const _c = localStorage.getItem('sop_catColumnOrder'); if (_c) catColumnOrder = JSON.parse(_c); } catch (e) {}
+let personSortDir = 'desc';
+try { const _d = localStorage.getItem('sop_personSortDir'); if (_d === 'asc' || _d === 'desc') personSortDir = _d; } catch (e) {}
+let lastCatNames = [];
+function orderBySaved(arr, saved) {
+  if (!saved || !saved.length) return arr.slice();
+  const ordered = saved.filter(x => arr.includes(x));
+  arr.forEach(x => { if (!ordered.includes(x)) ordered.push(x); });
+  return ordered;
+}
+function moveCat(cat, dir) {
+  const list = lastCatNames.length ? lastCatNames : [];
+  const idx = list.indexOf(cat);
+  const ni = idx + dir;
+  if (idx < 0 || ni < 0 || ni >= list.length) return;
+  const arr = list.slice();
+  const t = arr[idx]; arr[idx] = arr[ni]; arr[ni] = t;
+  catColumnOrder = arr;
+  try { localStorage.setItem('sop_catColumnOrder', JSON.stringify(arr)); } catch (e) {}
+  loadVisitStats();
+}
+function setPersonSort(dir) {
+  personSortDir = dir;
+  try { localStorage.setItem('sop_personSortDir', dir); } catch (e) {}
+  loadVisitStats();
+}
+
 // 个人汇总：表格形式 —— 人员竖排（行）、签到事件横排（列）
 function renderPersonVisitStats(records, s, e) {
   const categories = getSigninCategories();
@@ -5232,6 +5261,8 @@ function renderPersonVisitStats(records, s, e) {
     rowTotals[emp] = t;
   });
   const grandTotal = emps.reduce((acc, emp) => acc + rowTotals[emp], 0);
+  // 人员行按合计排序（升降序，持久化）
+  const displayEmps = [...emps].sort((a, b) => personSortDir === 'desc' ? (rowTotals[b] - rowTotals[a]) : (rowTotals[a] - rowTotals[b]));
 
   // ===== 表1：按签到事件（人员竖排 × 事件横排）=====
   const thCells = events.map(ev => {
@@ -5247,7 +5278,7 @@ function renderPersonVisitStats(records, s, e) {
       </div>
     </th>`;
   }).join('');
-  const bodyRows = emps.map(emp => {
+  const bodyRows = displayEmps.map(emp => {
     const cells = events.map(ev => `<td style="text-align:center;padding:6px 8px">${matrix[emp][ev] || ''}</td>`).join('');
     return `<tr>
       <td style="white-space:nowrap;font-weight:600;padding:8px 10px">${emp}<br><span style="font-size:11px;color:var(--gray-500);font-weight:400">${byEmp[emp].dept || ''}</span></td>
@@ -5267,7 +5298,12 @@ function renderPersonVisitStats(records, s, e) {
     <div class="card-body" style="padding:16px">
       <div class="table-wrap"><table style="font-size:13px;min-width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--gray-50)">
-          <th style="text-align:left;padding:8px 10px">人员 / 部门</th>${thCells}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计</th>
+          <th style="text-align:left;padding:8px 10px">人员 / 部门</th>${thCells}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计
+            <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
+              <button onclick="setPersonSort('asc')" title="按合计升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${personSortDir==='asc'?'#2563eb':'#6b7280'}">▲</button>
+              <button onclick="setPersonSort('desc')" title="按合计降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${personSortDir==='desc'?'#2563eb':'#6b7280'}">▼</button>
+            </div>
+          </th>
         </tr></thead>
         <tbody>${bodyRows}${totalRow}</tbody>
       </table></div>
@@ -5280,7 +5316,9 @@ function renderPersonVisitStats(records, s, e) {
     const cat = ev ? (eventToCat[ev] || '未归类') : '未归类';
     usedCats.add(cat);
   }));
-  const catNames = [...new Set([...categories.map(c => c.name), ...usedCats])];
+  const baseCatNames = [...new Set([...categories.map(c => c.name), ...usedCats])];
+  lastCatNames = baseCatNames;
+  const catNames = orderBySaved(baseCatNames, catColumnOrder);
   const catMatrix = {};
   emps.forEach(emp => {
     const m = {}; catNames.forEach(c => m[c] = 0);
@@ -5298,8 +5336,16 @@ function renderPersonVisitStats(records, s, e) {
     catRowTotals[emp] = t;
   });
   const catGrand = emps.reduce((a, emp) => a + catRowTotals[emp], 0);
-  const catTh = catNames.map(c => `<th style="text-align:center;white-space:nowrap;padding:8px 10px;color:${catColorMap[c] || '#6366f1'}">${c}</th>`).join('');
-  const catBody = emps.map(emp => {
+  const catTh = catNames.map(c => {
+    const cJson = JSON.stringify(c);
+    return `<th style="text-align:center;white-space:nowrap;padding:8px 10px;color:${catColorMap[c] || '#6366f1'}">${c}
+      <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
+        <button onclick="moveCat(${cJson},-1)" title="前移" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:#6b7280">▲</button>
+        <button onclick="moveCat(${cJson},1)" title="后移" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:#6b7280">▼</button>
+      </div>
+    </th>`;
+  }).join('');
+  const catBody = displayEmps.map(emp => {
     const cells = catNames.map(c => {
       const v = catMatrix[emp][c] || 0;
       const color = catColorMap[c] || '#6366f1';
@@ -5323,13 +5369,18 @@ function renderPersonVisitStats(records, s, e) {
     <div class="card-body" style="padding:16px">
       <div class="table-wrap"><table style="font-size:13px;min-width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--gray-50)">
-          <th style="text-align:left;padding:8px 10px">人员</th>${catTh}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计</th>
+          <th style="text-align:left;padding:8px 10px">人员</th>${catTh}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计
+            <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
+              <button onclick="setPersonSort('asc')" title="按合计升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${personSortDir==='asc'?'#2563eb':'#6b7280'}">▲</button>
+              <button onclick="setPersonSort('desc')" title="按合计降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${personSortDir==='desc'?'#2563eb':'#6b7280'}">▼</button>
+            </div>
+          </th>
         </tr></thead>
         <tbody>${catBody}${catTotalRow}</tbody>
       </table></div>
     </div></div>`;
 
-  const intro = `<div style="font-size:13px;color:var(--gray-500);margin-bottom:12px">个人汇总（按人员，共 ${emps.length} 人）· ${s || '全部'} 至 ${e || '全部'}<span style="margin-left:8px;color:var(--gray-400)">提示：点击「按签到事件统计」表头的 ▲▼ 可手动调整列顺序（自动保存）</span></div>`;
+  const intro = `<div style="font-size:13px;color:var(--gray-500);margin-bottom:12px">个人汇总（按人员，共 ${emps.length} 人）· ${s || '全部'} 至 ${e || '全部'}<span style="margin-left:8px;color:var(--gray-400)">提示：点击事件列 / 归类列表头的 ▲▼ 可手动调整列顺序；点击「合计」表头 ▲▼ 可按合计对人员排序（均自动保存）</span></div>`;
   return intro + table1 + table2;
 }
 
