@@ -1727,12 +1727,13 @@ async function deleteReport(type, reportId) {
 let summaryTab = 'byPerson';
 let summaryData = null;
 let summaryFilters = {dept:'', person:'', channel:''};
+let mergeSummaryData = null;
 
 function renderSummary() {
   const body = document.getElementById('contentBody');
   const today = new Date().toISOString().split('T')[0];
   const mAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
-  body.innerHTML = `<div class="card" style="margin-bottom:20px"><div class="card-body">
+  body.innerHTML = `<div class="card" id="regularFilterCard" style="margin-bottom:20px"><div class="card-body">
     <div class="filter-bar">
       <div class="form-group"><label>类型</label><select class="form-control" id="sumType" onchange="onSummaryTypeChange()"><option value="daily">日报</option><option value="weekly">周报</option></select></div>
       <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="sumStart" value="${mAgo}"></div>
@@ -1740,11 +1741,22 @@ function renderSummary() {
       <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="loadSummary()">🔍 汇总查询</button></div>
       <div class="form-group"><label>&nbsp;</label>${hasPermission('exportData')?'<button class="btn btn-success" onclick="exportSummaryCSV()">📥 导出汇总数据</button>':''}</div>
     </div></div></div>
+    <div class="card" id="mergeFilterCard" style="margin-bottom:20px;display:none"><div class="card-body">
+    <div class="filter-bar">
+      <div class="form-group"><label>日报开始</label><input type="date" class="form-control" id="mergeDailyStart" value="${mAgo}"></div>
+      <div class="form-group"><label>日报结束</label><input type="date" class="form-control" id="mergeDailyEnd" value="${today}"></div>
+      <div style="width:1px;background:var(--gray-200);margin:0 8px"></div>
+      <div class="form-group"><label>周报开始</label><input type="date" class="form-control" id="mergeWeeklyStart" value="${mAgo}"></div>
+      <div class="form-group"><label>周报结束</label><input type="date" class="form-control" id="mergeWeeklyEnd" value="${today}"></div>
+      <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="loadMergeSummary()">🔄 合并统计</button></div>
+      <div class="form-group"><label>&nbsp;</label>${hasPermission('exportData')?'<button class="btn btn-success" onclick="exportMergeSummaryCSV()">📥 导出合并数据</button>':''}</div>
+    </div></div></div>
     <div class="summary-tabs">
       <div class="summary-tab active" data-t="byPerson" onclick="switchTab('byPerson')">按人员汇总</div>
       <div class="summary-tab" data-t="byDepartment" onclick="switchTab('byDepartment')">按部门汇总</div>
       <div class="summary-tab" data-t="byChannel" onclick="switchTab('byChannel')">按渠道汇总</div>
       <div class="summary-tab" data-t="totals" onclick="switchTab('totals')">总计</div>
+      <div class="summary-tab" data-t="merge" onclick="switchTab('merge')" style="color:var(--primary)">日报周报汇总</div>
     </div>
     <div id="sumSubFilters"></div>
     <div id="sumResults"></div>`;
@@ -1777,6 +1789,18 @@ function renderSubFilters() {
   const container = document.getElementById('sumSubFilters');
   if (!container) return;
   if (summaryTab === 'totals') { container.innerHTML = ''; return; }
+
+  if (summaryTab === 'merge') {
+    const depts = getUniqueDepartments();
+    const allChannels = [...new Set([...getChannels('daily').map(ch => ch.name), ...getChannels('weekly').map(ch => ch.name)])];
+    let h = '<div class="card" style="margin-bottom:16px"><div class="card-body"><div class="filter-bar">';
+    h += `<div class="form-group"><label>筛选部门</label><select class="form-control" onchange="summaryFilters.dept=this.value;loadMergeSummary()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}" ${summaryFilters.dept===d?'selected':''}>${d}</option>`).join('')}</select></div>`;
+    h += `<div class="form-group"><label>筛选渠道</label><select class="form-control" onchange="summaryFilters.channel=this.value;loadMergeSummary()"><option value="">全部渠道</option>${allChannels.map(c => `<option value="${c}" ${summaryFilters.channel===c?'selected':''}>${c}</option>`).join('')}</select></div>`;
+    h += `<div class="form-group"><label>&nbsp;</label><button class="btn btn-outline btn-sm" onclick="summaryFilters={dept:'',person:'',channel:''};loadMergeSummary()">🔄 重置筛选</button></div>`;
+    h += '</div></div></div>';
+    container.innerHTML = h;
+    return;
+  }
 
   const depts = getUniqueDepartments();
   const persons = getUniquePersons();
@@ -1848,6 +1872,15 @@ function loadSummary() {
 
 function switchTab(tab){
   summaryTab=tab;
+  const regularCard=document.getElementById('regularFilterCard');
+  const mergeCard=document.getElementById('mergeFilterCard');
+  if(tab==='merge'){
+    if(regularCard)regularCard.style.display='none';
+    if(mergeCard)mergeCard.style.display='';
+  }else{
+    if(regularCard)regularCard.style.display='';
+    if(mergeCard)mergeCard.style.display='none';
+  }
   // Clear filters not relevant to the new tab
   if (tab === 'byPerson') { summaryFilters.person = ''; }
   else if (tab === 'byDepartment') { summaryFilters.dept = ''; }
@@ -1855,11 +1888,16 @@ function switchTab(tab){
   document.querySelectorAll('.summary-tab').forEach(t=>t.classList.remove('active'));
   const tabEl = document.querySelector(`.summary-tab[data-t="${tab}"]`);
   if (tabEl) tabEl.classList.add('active');
-  loadSummary();
+  if(tab==='merge'){
+    loadMergeSummary();
+  }else{
+    loadSummary();
+  }
 }
 
 function renderSummaryTab() {
   if(!summaryData)return;
+  if(summaryTab==='merge'){renderMergeSummary();return;}
   const c=document.getElementById('sumResults');
   const f=v=>v>0?v.toLocaleString():'0';
   const fm=v=>v>0?'¥'+v.toLocaleString():'¥0';
@@ -1991,6 +2029,197 @@ function renderSummaryTab() {
     ${data.map(d=>{const nm=d.name||d.department||d.channel;const sub=summaryTab==='byPerson'?d.department:'';return `<tr><td><strong>${nm}</strong></td>${summaryTab==='byPerson'?`<td>${sub}</td>`:''}<td>${d.count||0}</td><td>${f(d.newLeads)}</td><td>${f(d.effectiveContacts)}</td><td>${f(d.abIntent)}</td><td>${f(d.closedCustomers)}</td><td style="font-weight:600;color:var(--success)">${fm(d.dealAmount)}</td><td>${d.contactToAbRate}</td><td>${fm(d.targetAmount)}</td><td style="font-weight:600;color:${d.completionRate!=='0%'?'var(--primary)':'var(--gray-400)'}">${d.completionRate}</td></tr>`}).join('')}
   </tbody></table></div></div>`;
   renderSummaryCharts();
+}
+
+// ============ Merge Summary (日报+周报合并统计) ============
+function loadMergeSummary() {
+  const ds=document.getElementById('mergeDailyStart').value;
+  const de=document.getElementById('mergeDailyEnd').value;
+  const ws=document.getElementById('mergeWeeklyStart').value;
+  const we=document.getElementById('mergeWeeklyEnd').value;
+  let dailyReports=[...cloudData.dailyReports];
+  if(ds)dailyReports=dailyReports.filter(r=>r.reportDate>=ds);
+  if(de)dailyReports=dailyReports.filter(r=>r.reportDate<=de);
+  let weeklyReports=[...cloudData.weeklyReports];
+  if(ws)weeklyReports=weeklyReports.filter(r=>r.weekStart>=ws);
+  if(we)weeklyReports=weeklyReports.filter(r=>r.weekStart<=we);
+  if(summaryFilters.person){
+    dailyReports=dailyReports.filter(r=>r.name===summaryFilters.person);
+    weeklyReports=weeklyReports.filter(r=>r.name===summaryFilters.person);
+  }
+  if(summaryFilters.dept){
+    dailyReports=dailyReports.filter(r=>r.department===summaryFilters.dept);
+    weeklyReports=weeklyReports.filter(r=>r.department===summaryFilters.dept);
+  }
+  const deptChannels={};
+  const deptSummary={};
+  const processReports=(reports,source)=>{
+    reports.forEach(r=>{
+      const dept=r.department||'未分组';
+      if(!deptChannels[dept])deptChannels[dept]={};
+      if(!deptSummary[dept])deptSummary[dept]={newLeads:0,effectiveContacts:0,abIntent:0,closedCustomers:0,dealAmount:0,targetAmount:0,count:0,dailyCount:0,weeklyCount:0};
+      deptSummary[dept].count++;
+      if(source==='daily')deptSummary[dept].dailyCount++;else deptSummary[dept].weeklyCount++;
+      (r.channels||[]).forEach(ch=>{
+        if(summaryFilters.channel&&ch.channel!==summaryFilters.channel)return;
+        const key=ch.channel+'|||'+source;
+        if(!deptChannels[dept][key])deptChannels[dept][key]={channel:ch.channel,source:source,newLeads:0,effectiveContacts:0,abIntent:0,closedCustomers:0,dealAmount:0,targetAmount:0,count:0};
+        const x=deptChannels[dept][key];
+        const nl=parseFloat(ch.newLeads)||0,ec=parseFloat(ch.effectiveContacts)||0,ab=parseFloat(ch.abIntent)||0,cc=parseFloat(ch.closedCustomers)||0,da=parseFloat(ch.dealAmount)||0,ta=parseFloat(ch.targetAmount)||0;
+        x.newLeads+=nl;x.effectiveContacts+=ec;x.abIntent+=ab;x.closedCustomers+=cc;x.dealAmount+=da;x.targetAmount+=ta;x.count++;
+        deptSummary[dept].newLeads+=nl;deptSummary[dept].effectiveContacts+=ec;deptSummary[dept].abIntent+=ab;deptSummary[dept].closedCustomers+=cc;deptSummary[dept].dealAmount+=da;deptSummary[dept].targetAmount+=ta;
+      });
+    });
+  };
+  processReports(dailyReports,'daily');
+  processReports(weeklyReports,'weekly');
+  const cr=o=>{o.contactToAbRate=o.effectiveContacts>0?(o.abIntent/o.effectiveContacts*100).toFixed(2)+'%':'0%';o.completionRate=o.targetAmount>0?(o.dealAmount/o.targetAmount*100).toFixed(2)+'%':'0%'};
+  Object.values(deptChannels).forEach(chMap=>Object.values(chMap).forEach(cr));
+  Object.values(deptSummary).forEach(cr);
+  mergeSummaryData={deptChannels,deptSummary,dailyCount:dailyReports.length,weeklyCount:weeklyReports.length,dailyRange:{start:ds,end:de},weeklyRange:{start:ws,end:we}};
+  summaryData=mergeSummaryData;
+  renderSubFilters();
+  renderSummaryTab();
+}
+
+function renderMergeSummary() {
+  if(!mergeSummaryData){document.getElementById('sumResults').innerHTML='<div class="empty-state"><div class="icon">📭</div>请点击"合并统计"按钮</div>';return;}
+  const c=document.getElementById('sumResults');
+  const f=v=>v>0?v.toLocaleString():'0';
+  const fm=v=>v>0?'¥'+v.toLocaleString():'¥0';
+  const{deptChannels,deptSummary,dailyCount,weeklyCount,dailyRange,weeklyRange}=mergeSummaryData;
+  if(Object.keys(deptChannels).length===0){c.innerHTML='<div class="empty-state"><div class="icon">📭</div>暂无数据</div>';return;}
+  const channelOrder=[...new Set([...getChannels('daily').map(ch=>ch.name),...getChannels('weekly').map(ch=>ch.name)])];
+  let html=`<div class="card" style="margin-bottom:16px"><div class="card-body" style="padding:12px 16px">
+    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center">
+      <div style="font-size:13px;color:var(--gray-500)">日报: <strong style="color:var(--primary)">${dailyCount}条</strong> <span style="font-size:12px">(${dailyRange.start||'全部'} 至 ${dailyRange.end||'全部'})</span></div>
+      <div style="font-size:13px;color:var(--gray-500)">周报: <strong style="color:var(--primary)">${weeklyCount}条</strong> <span style="font-size:12px">(${weeklyRange.start||'全部'} 至 ${weeklyRange.end||'全部'})</span></div>
+    </div>
+  </div></div>`;
+  const dColors=['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
+  let ci=0;
+  Object.keys(deptChannels).sort().forEach(dept=>{
+    const chMap=deptChannels[dept];
+    const ds=deptSummary[dept]||{};
+    const color=dColors[ci%dColors.length];ci++;
+    const orderedRows=[];
+    const seen=new Set();
+    channelOrder.forEach(cn=>{
+      const dk=cn+'|||daily',wk=cn+'|||weekly';
+      if(chMap[dk]){seen.add(dk);orderedRows.push(chMap[dk]);}
+      if(chMap[wk]){seen.add(wk);orderedRows.push(chMap[wk]);}
+    });
+    Object.values(chMap).forEach(c=>{const k=c.channel+'|||'+c.source;if(!seen.has(k))orderedRows.push(c);});
+    const statBar=[
+      {l:'报告数',v:ds.count||0},
+      {l:'新增线索',v:f(ds.newLeads)},
+      {l:'有效建联',v:f(ds.effectiveContacts)},
+      {l:'AB意向',v:f(ds.abIntent)},
+      {l:'成交客户',v:f(ds.closedCustomers)},
+      {l:'成交金额',v:fm(ds.dealAmount)},
+      {l:'目标金额',v:fm(ds.targetAmount)},
+      {l:'完成率',v:ds.completionRate||'0%'},
+    ].map(s=>`<div style="text-align:center;padding:10px 6px;background:var(--gray-50);border-radius:8px"><div style="font-size:16px;font-weight:700;color:${color}">${s.v}</div><div style="font-size:11px;color:var(--gray-500);margin-top:2px">${s.l}</div></div>`).join('');
+    const chRowsHtml=orderedRows.map(c=>{
+      const tagStyle=c.source==='daily'?'background:#dbeafe;color:#185FA5':'background:#fef3c7;color:#854F0B';
+      const tagText=c.source==='daily'?'日报':'周报';
+      return `<tr>
+        <td><strong>${c.channel}</strong></td>
+        <td><span style="display:inline-block;padding:1px 8px;border-radius:8px;font-size:11px;${tagStyle}">${tagText}</span></td>
+        <td>${c.count}</td>
+        <td>${f(c.newLeads)}</td>
+        <td>${f(c.effectiveContacts)}</td>
+        <td>${f(c.abIntent)}</td>
+        <td>${f(c.closedCustomers)}</td>
+        <td style="font-weight:600;color:var(--success)">${fm(c.dealAmount)}</td>
+        <td>${c.contactToAbRate}</td>
+        <td>${fm(c.targetAmount)}</td>
+        <td style="font-weight:600;color:${c.completionRate!=='0%'?'var(--primary)':'var(--gray-400)'}">${c.completionRate}</td>
+      </tr>`;
+    }).join('');
+    html+=`<div class="card" style="margin-bottom:16px;overflow:hidden">
+      <div class="card-header" style="border-left:4px solid ${color};padding:12px 16px;background:var(--gray-50)">
+        <h4 style="display:flex;align-items:center;gap:8px;font-size:15px;margin:0;flex-wrap:wrap">
+          📍 ${dept}
+          <span style="font-size:12px;font-weight:400;color:var(--gray-500);background:var(--gray-100);padding:2px 10px;border-radius:10px">${orderedRows.length}个渠道</span>
+          <span style="font-size:12px;font-weight:400;background:#dbeafe;color:#185FA5;padding:2px 10px;border-radius:10px">日报${ds.dailyCount||0}条 + 周报${ds.weeklyCount||0}条</span>
+        </h4>
+      </div>
+      <div class="card-body" style="padding:16px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(95px,1fr));gap:8px;margin-bottom:16px">${statBar}</div>
+        <div class="table-wrap"><table><thead><tr>
+          <th>渠道</th><th>来源</th><th>报告数</th><th>新增线索</th><th>有效建联</th><th>AB意向</th><th>成交客户</th><th>成交金额</th><th>建联转AB率</th><th>目标金额</th><th>完成率</th>
+        </tr></thead><tbody>
+          ${chRowsHtml}
+          <tr style="font-weight:700;background:var(--gray-50);border-top:2px solid ${color}">
+            <td>小计</td><td>—</td>
+            <td>${ds.count||0}</td>
+            <td>${f(ds.newLeads)}</td>
+            <td>${f(ds.effectiveContacts)}</td>
+            <td>${f(ds.abIntent)}</td>
+            <td>${f(ds.closedCustomers)}</td>
+            <td style="color:var(--success)">${fm(ds.dealAmount)}</td>
+            <td>${ds.contactToAbRate}</td>
+            <td>${fm(ds.targetAmount)}</td>
+            <td style="color:${ds.completionRate!=='0%'?'var(--primary)':'var(--gray-400)'}">${ds.completionRate}</td>
+          </tr>
+        </tbody></table></div>
+      </div>
+    </div>`;
+  });
+  c.innerHTML=html;
+}
+
+function exportMergeSummaryCSV() {
+  if(!mergeSummaryData){alert('请先点击"合并统计"');return;}
+  const esc=v=>{const s=String(v);return/[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
+  const f=v=>v>0?v.toLocaleString():'0';
+  const fm=v=>v>0?v.toLocaleString():'0';
+  const{deptChannels,deptSummary,dailyCount,weeklyCount,dailyRange,weeklyRange}=mergeSummaryData;
+  const channelOrder=[...new Set([...getChannels('daily').map(ch=>ch.name),...getChannels('weekly').map(ch=>ch.name)])];
+  const rows=[];
+  rows.push('# 日报周报合并统计');
+  rows.push('# 日报时间: '+(dailyRange.start||'全部')+' 至 '+(dailyRange.end||'全部')+' ('+dailyCount+'条)');
+  rows.push('# 周报时间: '+(weeklyRange.start||'全部')+' 至 '+(weeklyRange.end||'全部')+' ('+weeklyCount+'条)');
+  rows.push('# 筛选部门: '+(summaryFilters.dept||'全部部门'));
+  rows.push('# 筛选渠道: '+(summaryFilters.channel||'全部渠道'));
+  rows.push('# 导出时间: '+new Date().toLocaleString('zh-CN'));
+  const headers=['渠道','来源','报告数','新增线索','有效建联','AB意向','成交客户','成交金额','建联转AB率','目标金额','完成率'];
+  Object.keys(deptChannels).sort().forEach(dept=>{
+    const chMap=deptChannels[dept];
+    const ds=deptSummary[dept]||{};
+    const orderedRows=[];
+    const seen=new Set();
+    channelOrder.forEach(cn=>{
+      const dk=cn+'|||daily',wk=cn+'|||weekly';
+      if(chMap[dk]){seen.add(dk);orderedRows.push(chMap[dk]);}
+      if(chMap[wk]){seen.add(wk);orderedRows.push(chMap[wk]);}
+    });
+    Object.values(chMap).forEach(c=>{const k=c.channel+'|||'+c.source;if(!seen.has(k))orderedRows.push(c);});
+    rows.push('');
+    rows.push(esc('【'+dept+'】（日报'+(ds.dailyCount||0)+'条 + 周报'+(ds.weeklyCount||0)+'条）'));
+    rows.push(headers.map(esc).join(','));
+    orderedRows.forEach(c=>{
+      rows.push([c.channel,c.source==='daily'?'日报':'周报',c.count,f(c.newLeads),f(c.effectiveContacts),f(c.abIntent),f(c.closedCustomers),fm(c.dealAmount),c.contactToAbRate,fm(c.targetAmount),c.completionRate].map(esc).join(','));
+    });
+    rows.push(['小计','—',ds.count||0,f(ds.newLeads),f(ds.effectiveContacts),f(ds.abIntent),f(ds.closedCustomers),fm(ds.dealAmount),ds.contactToAbRate,fm(ds.targetAmount),ds.completionRate].map(esc).join(','));
+  });
+  const csv='\uFEFF'+rows.join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  const nameParts=['合并统计'];
+  if(dailyRange.start)nameParts.push('日报'+dailyRange.start+'至'+dailyRange.end);
+  if(weeklyRange.start)nameParts.push('周报'+weeklyRange.start+'至'+weeklyRange.end);
+  if(summaryFilters.dept)nameParts.push(summaryFilters.dept);
+  if(summaryFilters.channel)nameParts.push(summaryFilters.channel);
+  nameParts.push(new Date().toISOString().split('T')[0]);
+  a.download=nameParts.join('_')+'.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ============ Summary Charts ============
