@@ -922,6 +922,20 @@ const DEFAULT_VISIT_CONFIG = {
 };
 function getVisitConfig() { return cloudData.visitConfig || DEFAULT_VISIT_CONFIG; }
 
+// Color mapping for visit results (by index in config)
+const VISIT_RESULT_COLORS = ['#16a34a','#2563eb','#f59e0b','#7c3aed','#dc2626','#0891b2','#db2777','#4f46e5'];
+function getVisitResultColor(result) {
+  if (!result) return '';
+  const vc = getVisitConfig();
+  const allResults = vc.visitResults || [];
+  const idx = allResults.indexOf(result);
+  return idx >= 0 ? VISIT_RESULT_COLORS[idx % VISIT_RESULT_COLORS.length] : '#6b7280';
+}
+function getVisitResultBg(result) {
+  const c = getVisitResultColor(result);
+  return c ? c + '1a' : ''; // ~10% opacity
+}
+
 function hasPermission(perm) {
   if (!currentUser) return false;
   if (currentUser.role === 'admin') return true; // admin always has all permissions
@@ -4062,17 +4076,30 @@ function renderVisitTable() {
     return;
   }
   const vc = getVisitConfig();
-  const resultOptions = vc.visitResults.map(r => `<option value="${r}">${r}</option>`).join('');
-  c.innerHTML = `<div class="card"><div class="table-wrap"><table style="font-size:12px">
+  const resultOptions = vc.visitResults.map(r => {
+    const c = getVisitResultColor(r);
+    return `<option value="${r}" style="color:${c};font-weight:600">● ${r}</option>`;
+  }).join('');
+  // Color legend
+  const legend = vc.visitResults.map(r => {
+    const c = getVisitResultColor(r);
+    return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--gray-600)"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${c}"></span>${r}</span>`;
+  }).join('<span style="color:var(--gray-300);margin:0 6px">|</span>');
+  c.innerHTML = `<div style="margin-bottom:10px;padding:8px 12px;background:var(--gray-50);border-radius:6px;display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+    <span style="font-size:12px;font-weight:600;color:var(--gray-700);margin-right:4px">🎨 拜访结果颜色：</span>${legend}
+  </div>
+  <div class="card"><div class="table-wrap"><table style="font-size:12px">
     <thead><tr>
       <th>联系时间</th><th>客户</th><th>联系人</th><th>手机号</th><th>签到事件</th>
       <th>员工</th><th>部门</th><th>签到地址</th><th>备注</th>
-      <th style="min-width:120px">拜访结果</th><th style="min-width:200px">卡点说明</th>
+      <th style="min-width:130px">拜访结果</th><th style="min-width:200px">卡点说明</th>
     </tr></thead>
     <tbody>
       ${records.map(r => {
         const vr = visitEditBuffer[r.id]?.visitResult !== undefined ? visitEditBuffer[r.id].visitResult : (r.visitResult || '');
         const bn = visitEditBuffer[r.id]?.blockerNote !== undefined ? visitEditBuffer[r.id].blockerNote : (r.blockerNote || '');
+        const vrColor = getVisitResultColor(vr);
+        const vrBg = getVisitResultBg(vr);
         return `<tr data-id="${r.id}">
           <td>${r.contactTime || ''}</td>
           <td>${r.customer || ''}</td>
@@ -4083,7 +4110,8 @@ function renderVisitTable() {
           <td>${r.department || ''}</td>
           <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.signinAddress || '').replace(/"/g,'&quot;')}">${r.signinAddress || ''}</td>
           <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.remark || '').replace(/"/g,'&quot;').replace(/\n/g,' ')}">${(r.remark || '').substring(0,50).replace(/\n/g,' ')}${(r.remark||'').length>50?'...':''}</td>
-          <td><select class="form-control form-control-sm" onchange="onVisitEdit('${r.id}','visitResult',this.value)">
+          <td style="border-left:4px solid ${vrColor || 'transparent'};background:${vrBg}">
+            <select class="form-control form-control-sm" style="border-color:${vrColor};font-weight:${vr?'600':'400'};color:${vrColor || 'inherit'}" onchange="onVisitEdit('${r.id}','visitResult',this.value)">
             <option value="">未设置</option>
             ${resultOptions}
           </select></td>
@@ -4104,6 +4132,18 @@ function renderVisitTable() {
 function onVisitEdit(recordId, field, value) {
   if (!visitEditBuffer[recordId]) visitEditBuffer[recordId] = {};
   visitEditBuffer[recordId][field] = value;
+  // Update select cell color dynamically when visitResult changes
+  if (field === 'visitResult') {
+    const row = document.querySelector(`tr[data-id="${recordId}"]`);
+    if (row) {
+      const td = row.querySelector('td:nth-child(10)');
+      const select = td?.querySelector('select');
+      const color = getVisitResultColor(value);
+      const bg = getVisitResultBg(value);
+      if (td) { td.style.borderLeftColor = color || 'transparent'; td.style.background = bg; }
+      if (select) { select.style.borderColor = color || ''; select.style.color = color || 'inherit'; select.style.fontWeight = value ? '600' : '400'; }
+    }
+  }
   updateVisitSaveBar();
 }
 
