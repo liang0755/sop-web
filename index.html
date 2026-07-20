@@ -499,6 +499,10 @@ async function loadCoreData() {
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
+    // Migration: ensure signinCategories exists (forward-compat for stored configs predating this feature)
+    if (!cloudData.formConfig.signinCategories || !cloudData.formConfig.signinCategories.length) {
+      cloudData.formConfig.signinCategories = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.signinCategories));
+    }
     if (!fcData) {
       try { await fetch(FB_BASE + '/formConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.formConfig)}); } catch(e) {}
     }
@@ -1010,6 +1014,11 @@ const DEFAULT_FORM_CONFIG = {
       contactToAbRate:{required:false,disabled:true},
       completionRate:{required:false,disabled:true}
     }}
+  ],
+  signinCategories: [
+    { name: '自拓演示', events: ['陌拜演示','自拓线下','自拓线上'] },
+    { name: '线索演示', events: ['线索线上','线索线下'] },
+    { name: '其他', events: ['N面拜访','售后服务'] }
   ]
 };
 
@@ -3846,6 +3855,7 @@ function renderFormConfig() {
       <div class="summary-tab ${configTab==='daily'?'active':''}" onclick="switchConfigTab('daily')">日报配置</div>
       <div class="summary-tab ${configTab==='weekly'?'active':''}" onclick="switchConfigTab('weekly')">周报配置</div>
       <div class="summary-tab ${configTab==='visitResults'?'active':''}" onclick="switchConfigTab('visitResults')">拜访结果配置</div>
+      <div class="summary-tab ${configTab==='signinCategories'?'active':''}" onclick="switchConfigTab('signinCategories')">签到归类配置</div>
     </div>
     <div id="configContent"></div>
     <div style="margin-top:12px;font-size:12px;color:var(--gray-500)">
@@ -3869,6 +3879,41 @@ function switchConfigTab(tab) {
 
 function renderConfigContent() {
   const c = document.getElementById('configContent');
+  // ===== 签到事件归类配置 tab =====
+  if (configTab === 'signinCategories') {
+    if (!cloudData.formConfig.signinCategories) cloudData.formConfig.signinCategories = [];
+    const cats = cloudData.formConfig.signinCategories;
+    c.innerHTML = `
+      <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
+        💡 配置"签到事件归类"，用于拜访统计「个人汇总」中的归类汇总。每个归类可包含多个签到事件，需与拜访数据中的"签到事件"字段<b>完全一致</b>（含空格）。修改后点击底部「保存配置」生效。
+      </div>
+      <div id="signinCatList">
+        ${cats.map((cat, ci) => `
+          <div class="channel-card" style="margin-bottom:12px">
+            <div class="channel-card-header" style="padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span class="badge badge-gray" style="font-size:12px">${ci + 1}</span>
+              <input type="text" class="form-control" value="${cat.name.replace(/"/g,'&quot;')}" onchange="updateSigninCategoryName(${ci}, this.value)" style="flex:1;min-width:160px;max-width:240px" placeholder="归类名称，如：自拓演示">
+              <button class="btn btn-danger btn-sm" onclick="deleteSigninCategory(${ci})">🗑 删除归类</button>
+            </div>
+            <div class="card-body" style="padding:12px 16px">
+              <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">包含签到事件：</div>
+              <div id="signinEvents_${ci}">
+                ${(cat.events || []).map((ev, ei) => `
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                    <input type="text" class="form-control form-control-sm" value="${ev.replace(/"/g,'&quot;')}" onchange="updateSigninEvent(${ci}, ${ei}, this.value)" placeholder="签到事件名称，需与数据中完全一致">
+                    <button class="btn btn-outline btn-sm" onclick="deleteSigninEvent(${ci}, ${ei})">✕</button>
+                  </div>
+                `).join('')}
+              </div>
+              <button class="btn btn-outline btn-sm" style="margin-top:4px" onclick="addSigninEvent(${ci})">➕ 添加签到事件</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn btn-outline" style="width:100%;padding:12px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addSigninCategory()">➕ 添加归类</button>
+    `;
+    return;
+  }
   // ===== 拜访结果配置 tab =====
   if (configTab === 'visitResults') {
     const vc = getVisitConfig();
@@ -3968,6 +4013,37 @@ function deleteConfigChannel(idx) {
   renderConfigContent();
 }
 
+// ===== 签到事件归类配置 编辑助手 =====
+function updateSigninCategoryName(ci, value) {
+  if (cloudData.formConfig.signinCategories[ci]) cloudData.formConfig.signinCategories[ci].name = value;
+}
+function addSigninEvent(ci) {
+  const cat = cloudData.formConfig.signinCategories[ci];
+  if (!cat) return;
+  if (!cat.events) cat.events = [];
+  cat.events.push('');
+  renderConfigContent();
+}
+function updateSigninEvent(ci, ei, value) {
+  const cat = cloudData.formConfig.signinCategories[ci];
+  if (cat && cat.events && cat.events[ei] !== undefined) cat.events[ei] = value;
+}
+function deleteSigninEvent(ci, ei) {
+  const cat = cloudData.formConfig.signinCategories[ci];
+  if (cat && cat.events) cat.events.splice(ei, 1);
+  renderConfigContent();
+}
+function deleteSigninCategory(ci) {
+  if (!confirm('确定删除此归类吗？已有拜访数据的归类统计将不再包含它（需点击保存才会写入云端）。')) return;
+  cloudData.formConfig.signinCategories.splice(ci, 1);
+  renderConfigContent();
+}
+function addSigninCategory() {
+  if (!cloudData.formConfig.signinCategories) cloudData.formConfig.signinCategories = [];
+  cloudData.formConfig.signinCategories.push({ name: '新归类', events: [''] });
+  renderConfigContent();
+}
+
 async function saveFormConfig() {
   const alertEl = document.getElementById('configAlert');
   const btn = event?.target;
@@ -4023,6 +4099,7 @@ let selectedVisitIds = new Set(); // for batch operations
 let visitDataLoaded = false; // track whether visitRecords have been fetched
 let visitPageSize = 30;      // 拜访数据每页条数（默认 30，可选 30/50/100/200）
 let visitCurrentPage = 1;    // 拜访数据当前页码
+let visitStatsTab = 'team';  // 拜访统计 tab：team=团队汇总 / person=个人汇总
 
 // Lazy-load visit records for managers who didn't get them during initial load
 async function ensureVisitDataLoaded() {
@@ -4934,6 +5011,10 @@ async function renderVisitStats() {
   const today = new Date().toISOString().split('T')[0];
   const mAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
   body.innerHTML = `
+    <div class="summary-tabs" style="margin-bottom:16px">
+      <div class="summary-tab visit-stats-tab ${visitStatsTab==='team'?'active':''}" onclick="switchVisitStatsTab('team', this)">🏢 团队汇总</div>
+      <div class="summary-tab visit-stats-tab ${visitStatsTab==='person'?'active':''}" onclick="switchVisitStatsTab('person', this)">👤 个人汇总</div>
+    </div>
     <div class="card" style="margin-bottom:20px"><div class="card-body">
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap" id="visitDateBtns">
         <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('yesterday', this)">昨天</button>
@@ -4951,6 +5032,13 @@ async function renderVisitStats() {
     </div></div>
     <div id="visitStatsResults"></div>
   `;
+  loadVisitStats();
+}
+
+function switchVisitStatsTab(tab, el) {
+  visitStatsTab = tab;
+  document.querySelectorAll('.visit-stats-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
   loadVisitStats();
 }
 
@@ -5062,7 +5150,187 @@ function loadVisitStats() {
       </div>
     </div>`;
   });
-  c.innerHTML = summaryHtml + groupHtml;
+  if (visitStatsTab === 'person') {
+    c.innerHTML = renderPersonVisitStats(records, s, e);
+  } else {
+    c.innerHTML = summaryHtml + groupHtml;
+  }
+}
+
+// 读取签到事件归类配置（可配置，存于 formConfig.signinCategories）
+function getSigninCategories() {
+  const fc = cloudData.formConfig || DEFAULT_FORM_CONFIG;
+  return (fc.signinCategories && fc.signinCategories.length) ? fc.signinCategories : (DEFAULT_FORM_CONFIG.signinCategories || []);
+}
+
+// 个人汇总：签到事件列手动排序（持久化到 localStorage）
+let signinEventOrder = [];
+try { const _s = localStorage.getItem('sop_signinEventOrder'); if (_s) signinEventOrder = JSON.parse(_s); } catch (e) {}
+function computeSigninEvents() {
+  const categories = getSigninCategories();
+  const evSet = new Set();
+  categories.forEach(cat => (cat.events || []).forEach(ev => { if (ev && ev.trim()) evSet.add(ev.trim()); }));
+  cloudData.visitRecords.forEach(r => { const ev = (r.signinEvent || '').trim(); if (ev) evSet.add(ev); });
+  const catOrder = {}; categories.forEach((c, i) => { catOrder[c.name] = i; });
+  const eventToCat = {};
+  categories.forEach(cat => (cat.events || []).forEach(ev => { if (ev) eventToCat[ev.trim()] = cat.name; }));
+  const all = [...evSet];
+  const saved = (signinEventOrder && signinEventOrder.length) ? signinEventOrder : [];
+  if (!saved.length) {
+    return all.slice().sort((a, b) => {
+      const ca = catOrder[eventToCat[a]] !== undefined ? catOrder[eventToCat[a]] : 999;
+      const cb = catOrder[eventToCat[b]] !== undefined ? catOrder[eventToCat[b]] : 999;
+      if (ca !== cb) return ca - cb;
+      return a.localeCompare(b, 'zh');
+    });
+  }
+  const ordered = saved.filter(ev => all.includes(ev));
+  all.forEach(ev => { if (!ordered.includes(ev)) ordered.push(ev); });
+  return ordered;
+}
+function moveSigninEvent(ev, dir) {
+  const events = computeSigninEvents();
+  const idx = events.indexOf(ev);
+  const ni = idx + dir;
+  if (idx < 0 || ni < 0 || ni >= events.length) return;
+  const arr = events.slice();
+  const t = arr[idx]; arr[idx] = arr[ni]; arr[ni] = t;
+  signinEventOrder = arr;
+  try { localStorage.setItem('sop_signinEventOrder', JSON.stringify(arr)); } catch (e) {}
+  loadVisitStats();
+}
+
+// 个人汇总：表格形式 —— 人员竖排（行）、签到事件横排（列）
+function renderPersonVisitStats(records, s, e) {
+  const categories = getSigninCategories();
+  const catColorMap = { '自拓演示': '#16a34a', '线索演示': '#2563eb', '其他': '#f59e0b', '未归类': '#9ca3af' };
+  const eventToCat = {};
+  categories.forEach(cat => (cat.events || []).forEach(ev => { if (ev) eventToCat[ev.trim()] = cat.name; }));
+  // 列顺序：优先使用手动排序结果（signinEventOrder），否则按归类默认排序
+  const events = computeSigninEvents();
+  // 按员工分组
+  const byEmp = {};
+  records.forEach(r => {
+    const emp = r.employee || '未知';
+    if (!byEmp[emp]) byEmp[emp] = { records: [], dept: r.department || '' };
+    byEmp[emp].records.push(r);
+  });
+  const emps = Object.keys(byEmp).sort();
+  if (!emps.length) return '<div class="empty-state"><div class="icon">📭</div>暂无拜访数据</div>';
+
+  // ===== 矩阵：员工 × 签到事件 =====
+  const matrix = {};
+  emps.forEach(emp => {
+    const m = {}; events.forEach(ev => m[ev] = 0);
+    byEmp[emp].records.forEach(r => { const ev = (r.signinEvent || '').trim(); if (ev && m[ev] !== undefined) m[ev]++; });
+    matrix[emp] = m;
+  });
+  const colTotals = {}; events.forEach(ev => colTotals[ev] = 0);
+  const rowTotals = {};
+  emps.forEach(emp => {
+    let t = 0; events.forEach(ev => { t += matrix[emp][ev]; colTotals[ev] += matrix[emp][ev]; });
+    rowTotals[emp] = t;
+  });
+  const grandTotal = emps.reduce((acc, emp) => acc + rowTotals[emp], 0);
+
+  // ===== 表1：按签到事件（人员竖排 × 事件横排）=====
+  const thCells = events.map(ev => {
+    const cat = eventToCat[ev];
+    const color = cat ? (catColorMap[cat] || '#6366f1') : '#6366f1';
+    const evJson = JSON.stringify(ev);
+    return `<th style="text-align:center;white-space:nowrap;font-size:12px;padding:8px 10px">
+      <div>${ev}</div>
+      <div style="font-size:10px;color:${color};font-weight:400;margin-bottom:2px">${cat || '—'}</div>
+      <div style="display:flex;justify-content:center;gap:2px">
+        <button onclick="moveSigninEvent(${evJson},-1)" title="前移" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:#6b7280">▲</button>
+        <button onclick="moveSigninEvent(${evJson},1)" title="后移" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:#6b7280">▼</button>
+      </div>
+    </th>`;
+  }).join('');
+  const bodyRows = emps.map(emp => {
+    const cells = events.map(ev => `<td style="text-align:center;padding:6px 8px">${matrix[emp][ev] || ''}</td>`).join('');
+    return `<tr>
+      <td style="white-space:nowrap;font-weight:600;padding:8px 10px">${emp}<br><span style="font-size:11px;color:var(--gray-500);font-weight:400">${byEmp[emp].dept || ''}</span></td>
+      ${cells}
+      <td style="text-align:center;font-weight:700;background:var(--gray-50);padding:6px 8px">${rowTotals[emp]}</td>
+    </tr>`;
+  }).join('');
+  const totalRow = `<tr style="font-weight:700;background:var(--gray-50)">
+    <td style="padding:8px 10px">合计</td>
+    ${events.map(ev => `<td style="text-align:center;padding:6px 8px">${colTotals[ev]}</td>`).join('')}
+    <td style="text-align:center;padding:6px 8px">${grandTotal}</td>
+  </tr>`;
+  const table1 = `<div class="card" style="margin-bottom:20px;overflow:hidden">
+    <div class="card-header" style="padding:12px 16px;background:var(--gray-50)">
+      <h4 style="margin:0;font-size:15px">📌 按签到事件统计（人员竖排 × 事件横排）</h4>
+    </div>
+    <div class="card-body" style="padding:16px">
+      <div class="table-wrap"><table style="font-size:13px;min-width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--gray-50)">
+          <th style="text-align:left;padding:8px 10px">人员 / 部门</th>${thCells}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计</th>
+        </tr></thead>
+        <tbody>${bodyRows}${totalRow}</tbody>
+      </table></div>
+    </div></div>`;
+
+  // ===== 矩阵：员工 × 归类 =====
+  const usedCats = new Set();
+  emps.forEach(emp => byEmp[emp].records.forEach(r => {
+    const ev = (r.signinEvent || '').trim();
+    const cat = ev ? (eventToCat[ev] || '未归类') : '未归类';
+    usedCats.add(cat);
+  }));
+  const catNames = [...new Set([...categories.map(c => c.name), ...usedCats])];
+  const catMatrix = {};
+  emps.forEach(emp => {
+    const m = {}; catNames.forEach(c => m[c] = 0);
+    byEmp[emp].records.forEach(r => {
+      const ev = (r.signinEvent || '').trim();
+      const cat = ev ? (eventToCat[ev] || '未归类') : '未归类';
+      m[cat] = (m[cat] || 0) + 1;
+    });
+    catMatrix[emp] = m;
+  });
+  const catTotals = {}; catNames.forEach(c => catTotals[c] = 0);
+  const catRowTotals = {};
+  emps.forEach(emp => {
+    let t = 0; catNames.forEach(c => { t += catMatrix[emp][c] || 0; catTotals[c] += catMatrix[emp][c] || 0; });
+    catRowTotals[emp] = t;
+  });
+  const catGrand = emps.reduce((a, emp) => a + catRowTotals[emp], 0);
+  const catTh = catNames.map(c => `<th style="text-align:center;white-space:nowrap;padding:8px 10px;color:${catColorMap[c] || '#6366f1'}">${c}</th>`).join('');
+  const catBody = emps.map(emp => {
+    const cells = catNames.map(c => {
+      const v = catMatrix[emp][c] || 0;
+      const color = catColorMap[c] || '#6366f1';
+      return `<td style="text-align:center;padding:6px 8px${v ? ';color:' + color + ';font-weight:600' : ''}">${v || ''}</td>`;
+    }).join('');
+    return `<tr>
+      <td style="white-space:nowrap;font-weight:600;padding:8px 10px">${emp}</td>
+      ${cells}
+      <td style="text-align:center;font-weight:700;background:var(--gray-50);padding:6px 8px">${catRowTotals[emp]}</td>
+    </tr>`;
+  }).join('');
+  const catTotalRow = `<tr style="font-weight:700;background:var(--gray-50)">
+    <td style="padding:8px 10px">合计</td>
+    ${catNames.map(c => `<td style="text-align:center;padding:6px 8px">${catTotals[c]}</td>`).join('')}
+    <td style="text-align:center;padding:6px 8px">${catGrand}</td>
+  </tr>`;
+  const table2 = `<div class="card" style="margin-bottom:20px;overflow:hidden">
+    <div class="card-header" style="padding:12px 16px;background:var(--gray-50)">
+      <h4 style="margin:0;font-size:15px">🗂️ 签到事件归类汇总（人员竖排 × 归类横排）</h4>
+    </div>
+    <div class="card-body" style="padding:16px">
+      <div class="table-wrap"><table style="font-size:13px;min-width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--gray-50)">
+          <th style="text-align:left;padding:8px 10px">人员</th>${catTh}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计</th>
+        </tr></thead>
+        <tbody>${catBody}${catTotalRow}</tbody>
+      </table></div>
+    </div></div>`;
+
+  const intro = `<div style="font-size:13px;color:var(--gray-500);margin-bottom:12px">个人汇总（按人员，共 ${emps.length} 人）· ${s || '全部'} 至 ${e || '全部'}<span style="margin-left:8px;color:var(--gray-400)">提示：点击「按签到事件统计」表头的 ▲▼ 可手动调整列顺序（自动保存）</span></div>`;
+  return intro + table1 + table2;
 }
 
 // ============ Modal ============
