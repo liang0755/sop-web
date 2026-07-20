@@ -2562,6 +2562,21 @@ function getDepartments() {
     : [...new Set(cloudData.users.map(u => u.department).filter(d => d))].sort();
 }
 
+// ===== 部门名归一化（修复 "KA二部" 与 "KA 二部" 空格不一致导致匹配失败）=====
+// 比较时去掉所有空白；存储时尽量映射回主数据里的规范（带空格）部门名
+function normDeptKey(d) { return (d || '').replace(/\s/g, ''); }
+function getDeptCanonicalMap() {
+  const map = {};
+  getDepartments().forEach(d => { if (d) map[normDeptKey(d)] = d; });
+  return map;
+}
+function canonDept(d) {
+  if (!d) return d;
+  const map = getDeptCanonicalMap();
+  const key = normDeptKey(d);
+  return map[key] || d;
+}
+
 function renderUserManagement() {
   if (!hasPermission('userManagement')) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
@@ -4081,7 +4096,7 @@ function renderVisitTable() {
   let records = [...cloudData.visitRecords];
   if (s) records = records.filter(r => (r.contactTime || '').split(' ')[0] >= s);
   if (e) records = records.filter(r => (r.contactTime || '').split(' ')[0] <= e);
-  if (fDept) records = records.filter(r => r.department === fDept);
+  if (fDept) records = records.filter(r => normDeptKey(r.department) === normDeptKey(fDept));
   if (fPerson) records = records.filter(r => r.employee === fPerson);
   if (fResult === 'empty') records = records.filter(r => !r.visitResult);
   else if (fResult === 'filled') records = records.filter(r => !!r.visitResult);
@@ -4413,7 +4428,7 @@ async function handleVisitUpload(input) {
         signoutTime: r[colMap.signoutTime] || '',
         duration: r[colMap.duration] || '',
         signoutStatus: r[colMap.signoutStatus] || '',
-        employee, department: r[colMap.department] || '',
+        employee, department: canonDept(r[colMap.department] || ''),
           signinAddress: r[colMap.signinAddress] || '',
           remark: r[colMap.remark] || '',
           visitResult: (colMap.visitResult !== undefined && r[colMap.visitResult]) ? r[colMap.visitResult] : '',
@@ -4483,7 +4498,7 @@ function getRecentWeeks(count) {
 function getVisitSummaryForWeek(weekStart, weekEnd, department) {
   const records = cloudData.visitRecords.filter(r => {
     const d = (r.contactTime || '').split(' ')[0];
-    return d >= weekStart && d <= weekEnd && (r.department || '未分组') === department;
+    return d >= weekStart && d <= weekEnd && normDeptKey(r.department || '未分组') === normDeptKey(department);
   });
   const vc = getVisitConfig();
   const allResults = vc.visitResults || [];
@@ -4520,9 +4535,15 @@ async function renderMgrReport() {
         <div class="filter-bar" style="margin-bottom:16px">
           <div class="form-group">
             <label>选择周次</label>
-            <select class="form-control" id="mgrWeekSel" onchange="updateMgrVisitSummary()">
-              ${weeks.map(w => `<option value="${w.weekStart}|${w.weekEnd}|${w.label}">${w.label}</option>`).join('')}
-            </select>
+            ${(() => {
+              // 默认选中「包含最新拜访记录」的那一周，避免用户选了部门却因默认是当前空周而看不到数据
+              const latest = cloudData.visitRecords.map(r => (r.contactTime || '').split(' ')[0]).filter(Boolean).sort().pop() || '';
+              let dv = weeks.length ? (weeks[0].weekStart + '|' + weeks[0].weekEnd + '|' + weeks[0].label) : '';
+              for (const w of weeks) { if (latest >= w.weekStart && latest <= w.weekEnd) { dv = w.weekStart + '|' + w.weekEnd + '|' + w.label; break; } }
+              return `<select class="form-control" id="mgrWeekSel" onchange="updateMgrVisitSummary()">` +
+                weeks.map(w => { const v = w.weekStart + '|' + w.weekEnd + '|' + w.label; return `<option value="${v}"${v === dv ? ' selected' : ''}>${w.label}</option>`; }).join('') +
+                `</select>`;
+            })()}
           </div>
           <div class="form-group">
             <label>选择部门</label>
@@ -4846,7 +4867,7 @@ function loadVisitStats() {
   // ===== 按部门→拜访结果分组 =====
   const deptGroups = {};
   records.forEach(r => {
-    const dept = r.department || '未分组';
+    const dept = canonDept(r.department || '未分组');
     if (!deptGroups[dept]) deptGroups[dept] = [];
     deptGroups[dept].push(r);
   });
