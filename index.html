@@ -3854,7 +3854,6 @@ function renderConfigContent() {
   }
   // ===== 日报/周报配置 tab =====
   const channels = getChannels(configTab);
-  const c = document.getElementById('configContent');
   c.innerHTML = channels.map((ch, idx) => {
     const fieldRows = FIELD_DEFS.map(fd => {
       const rule = getFieldRule(ch, fd.key);
