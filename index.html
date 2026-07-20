@@ -415,6 +415,7 @@ tr:hover td{background:var(--gray-50)}
       <div class="nav-item" data-page="dailyForm" onclick="navTo('dailyForm')"><span class="icon">📝</span> 日报填写</div>
       <div class="nav-item" data-page="weeklyForm" onclick="navTo('weeklyForm')"><span class="icon">📋</span> 周报填写</div>
       <div class="nav-item" data-page="visitData" onclick="navTo('visitData')" id="navVisitData"><span class="icon">📍</span> 拜访数据</div>
+      <div class="nav-item" data-page="mgrReport" onclick="navTo('mgrReport')" id="navMgrReport"><span class="icon">📎</span> 管理周报</div>
       <div class="nav-section-title">数据</div>
       <div class="nav-item" data-page="dailyData" onclick="navTo('dailyData')"><span class="icon">📈</span> 日报数据</div>
       <div class="nav-item" data-page="weeklyData" onclick="navTo('weeklyData')"><span class="icon">📉</span> 周报数据</div>
@@ -447,7 +448,7 @@ tr:hover td{background:var(--gray-50)}
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[]};
 let currentUser = null;
 let isCloudAvailable = false;
 let dataLoaded = false;
@@ -534,6 +535,12 @@ async function loadCoreData() {
         if (role.key !== 'admin' && role.key !== 'manager') {
           if (role.permissions && role.permissions.visitData === true) { role.permissions.visitData = false; roleChanged = true; }
           if (role.permissions && role.permissions.visitStats === true) { role.permissions.visitStats = false; roleChanged = true; }
+          if (role.permissions && role.permissions.mgrReport === true) { role.permissions.mgrReport = false; roleChanged = true; }
+        }
+        // Ensure mgrReport exists on all roles
+        if (role.permissions && role.permissions.mgrReport === undefined) {
+          role.permissions.mgrReport = (role.key === 'admin' || role.key === 'manager');
+          roleChanged = true;
         }
       });
       if (roleChanged) {
@@ -569,15 +576,19 @@ async function loadReportData() {
   try {
     // Only fetch visitRecords if user has visit permissions or not logged in yet
     const needVisit = !currentUser || hasPermission('visitData') || hasPermission('visitStats');
+    // Only fetch mgrReports if user has mgrReport permission or not logged in yet
+    const needMgr = !currentUser || hasPermission('mgrReport');
     const fetches = [
       fetch(FB_BASE + '/dailyReports.json'),
       fetch(FB_BASE + '/weeklyReports.json')
     ];
     if (needVisit) fetches.push(fetch(FB_BASE + '/visitRecords.json'));
+    if (needMgr) fetches.push(fetch(FB_BASE + '/mgrReports.json'));
     const results = await Promise.all(fetches);
     cloudData.dailyReports = results[0].ok ? Object.values(await results[0].json() || {}) : [];
     cloudData.weeklyReports = results[1].ok ? Object.values(await results[1].json() || {}) : [];
     if (results[2]) { cloudData.visitRecords = results[2].ok ? Object.values(await results[2].json() || {}) : []; visitDataLoaded = true; }
+    if (results[3]) { cloudData.mgrReports = results[3].ok ? Object.values(await results[3].json() || {}) : []; }
   } catch(e) {
     console.warn('Report data fetch failed:', e.message);
   }
@@ -589,6 +600,7 @@ async function loadCloudData() {
   dataLoaded = false;
   reportsLoaded = false;
   visitDataLoaded = false;
+  cloudData.mgrReports = [];
   _usersDataPromise = loadUsersOnly();
   await _usersDataPromise;
   _coreDataPromise = loadCoreData();
@@ -721,7 +733,8 @@ function updateNavVisibility() {
     'navFormConfig': 'formConfig',
     'navAIChat': 'aiChat',
     'navVisitData': 'visitData',
-    'navVisitStats': 'visitStats'
+    'navVisitStats': 'visitStats',
+    'navMgrReport': 'mgrReport'
   };
   Object.entries(navMap).forEach(([navId, perm]) => {
     const el = document.getElementById(navId);
@@ -739,7 +752,7 @@ function navTo(page) {
   const cb = document.getElementById('contentBody');
   cb.className = 'content-body';
   // Check page permission (dashboard and settings are always allowed)
-  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','visitData','visitStats'];
+  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','visitData','visitStats','mgrReport'];
   if (restrictedPages.includes(page) && !hasPermission(page)) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面，请联系管理员。</div>';
     closeSidebar();
@@ -747,9 +760,9 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计'};
+  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
-  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats}[page]||(()=>{}))();
+  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport}[page]||(()=>{}))();
   closeSidebar();
   // Background refresh: silently fetch latest data (non-blocking, only for read-only pages)
   silentRefresh(page);
@@ -842,7 +855,7 @@ const DEFAULT_ROLE_CONFIG = {
         roleConfig: true, settings: true,
         editOthers: true, deleteOthers: true, exportData: true,
         brandConfig: true, aiConfig: true,
-        visitData: true, visitStats: true
+        visitData: true, visitStats: true, mgrReport: true
       }
     },
     {
@@ -854,7 +867,7 @@ const DEFAULT_ROLE_CONFIG = {
         roleConfig: false, settings: true,
         editOthers: true, deleteOthers: false, exportData: true,
         brandConfig: false, aiConfig: false,
-        visitData: true, visitStats: true
+        visitData: true, visitStats: true, mgrReport: true
       }
     },
     {
@@ -866,7 +879,7 @@ const DEFAULT_ROLE_CONFIG = {
         roleConfig: false, settings: true,
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
-        visitData: false, visitStats: false
+        visitData: false, visitStats: false, mgrReport: false
       }
     },
     {
@@ -878,7 +891,7 @@ const DEFAULT_ROLE_CONFIG = {
         roleConfig: false, settings: true,
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
-        visitData: false, visitStats: false
+        visitData: false, visitStats: false, mgrReport: false
       }
     }
   ]
@@ -892,11 +905,11 @@ const PERMISSION_LABELS = {
   roleConfig: '角色权限配置', settings: '设置',
   editOthers: '编辑他人数据', deleteOthers: '删除他人数据', exportData: '导出数据',
   brandConfig: '品牌配置', aiConfig: 'AI模型配置',
-  visitData: '拜访数据', visitStats: '拜访统计'
+  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报'
 };
 
 const PERMISSION_GROUPS = [
-  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats'] },
+  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats','mgrReport'] },
   { title: '管理功能', keys: ['userManagement','formConfig','aiChat','roleConfig','settings','brandConfig','aiConfig'] },
   { title: '数据操作', keys: ['editOthers','deleteOthers','exportData'] }
 ];
@@ -4266,6 +4279,304 @@ async function handleVisitUpload(input) {
     if (alertEl) alertEl.innerHTML = '<div class="alert alert-danger">❌ 上传失败: ' + e.message + '</div>';
   }
   input.value = '';
+}
+
+// ============ Management Weekly Report ============
+let mgrReportEditId = null; // track editing state
+
+function getWeekNumber(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+}
+
+function getRecentWeeks(count) {
+  const weeks = [];
+  const now = new Date();
+  const day = now.getDay() || 7;
+  const thisMonday = new Date(now);
+  thisMonday.setDate(now.getDate() - day + 1);
+  thisMonday.setHours(0, 0, 0, 0);
+  for (let i = 0; i < count; i++) {
+    const monday = new Date(thisMonday);
+    monday.setDate(thisMonday.getDate() - i * 7);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const weekNum = getWeekNumber(monday);
+    const year = monday.getFullYear();
+    const fmt = (dt) => { const m = String(dt.getMonth()+1).padStart(2,'0'); const d = String(dt.getDate()).padStart(2,'0'); return `${m}/${d}`; };
+    weeks.push({
+      weekStart: monday.toISOString().split('T')[0],
+      weekEnd: sunday.toISOString().split('T')[0],
+      label: `${year}年第${weekNum}周 (${fmt(monday)}-${fmt(sunday)})`
+    });
+  }
+  return weeks;
+}
+
+function getVisitSummaryForWeek(weekStart, weekEnd, department) {
+  const records = cloudData.visitRecords.filter(r => {
+    const d = (r.contactTime || '').split(' ')[0];
+    return d >= weekStart && d <= weekEnd && (r.department || '未分组') === department;
+  });
+  const vc = getVisitConfig();
+  const allResults = vc.visitResults || [];
+  const byResult = {};
+  allResults.forEach(r => { byResult[r] = 0; });
+  byResult['未标记'] = 0;
+  records.forEach(r => {
+    const vr = r.visitResult || '未标记';
+    if (byResult[vr] === undefined) byResult[vr] = 0;
+    byResult[vr]++;
+  });
+  return { total: records.length, byResult, records };
+}
+
+async function renderMgrReport() {
+  if (!hasPermission('mgrReport')) {
+    document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
+    return;
+  }
+  // Ensure visit records are loaded (lazy-load for managers)
+  if (cloudData.visitRecords.length === 0 && !visitDataLoaded) {
+    document.getElementById('contentBody').innerHTML = '<div style="text-align:center;padding:60px"><div style="font-size:36px;margin-bottom:14px;animation:spin 1.5s linear infinite;display:inline-block">⏳</div><div style="font-size:15px;color:#666">正在加载数据...</div></div>';
+    await ensureVisitDataLoaded();
+  }
+  const body = document.getElementById('contentBody');
+  const weeks = getRecentWeeks(12);
+  const depts = getDepartments();
+  const myReports = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers')).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  body.innerHTML = `
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header"><h4 id="mgrFormTitle">📝 新建管理周报</h4></div>
+      <div class="card-body">
+        <div class="filter-bar" style="margin-bottom:16px">
+          <div class="form-group">
+            <label>选择周次</label>
+            <select class="form-control" id="mgrWeekSel" onchange="updateMgrVisitSummary()">
+              ${weeks.map(w => `<option value="${w.weekStart}|${w.weekEnd}|${w.label}">${w.label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>选择部门</label>
+            <select class="form-control" id="mgrDeptSel" onchange="updateMgrVisitSummary()">
+              <option value="">请选择部门</option>
+              ${depts.map(d => `<option value="${d}">${d}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div id="mgrVisitSummary" style="margin-bottom:16px"></div>
+        <div class="form-group">
+          <label>周报内容</label>
+          <textarea class="form-control" id="mgrContent" rows="10" placeholder="请填写本周工作总结、下周计划等内容..."></textarea>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="saveMgrReport(this)">💾 提交周报</button>
+          <button class="btn btn-outline" onclick="resetMgrForm()">↩️ 重置</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h4>📋 已提交的管理周报</h4></div>
+      <div class="card-body" id="mgrReportList"></div>
+    </div>
+  `;
+
+  // If editing, load data into form
+  if (mgrReportEditId) {
+    const rep = cloudData.mgrReports.find(r => r.id === mgrReportEditId);
+    if (rep) {
+      document.getElementById('mgrFormTitle').textContent = '✏️ 编辑管理周报';
+      const weekVal = `${rep.weekStart}|${rep.weekEnd}|${rep.weekLabel || ''}`;
+      const sel = document.getElementById('mgrWeekSel');
+      // If the week is not in the dropdown, add it
+      if (![...sel.options].some(o => o.value === weekVal)) {
+        const opt = document.createElement('option');
+        opt.value = weekVal;
+        opt.textContent = rep.weekLabel || `${rep.weekStart} ~ ${rep.weekEnd}`;
+        sel.appendChild(opt);
+      }
+      sel.value = weekVal;
+      document.getElementById('mgrDeptSel').value = rep.department || '';
+      document.getElementById('mgrContent').value = rep.content || '';
+      updateMgrVisitSummary();
+    }
+  }
+
+  renderMgrReportList();
+}
+
+function updateMgrVisitSummary() {
+  const weekVal = document.getElementById('mgrWeekSel')?.value || '';
+  const dept = document.getElementById('mgrDeptSel')?.value || '';
+  const container = document.getElementById('mgrVisitSummary');
+  if (!container) return;
+  if (!dept) {
+    container.innerHTML = '<div style="padding:12px;background:var(--gray-50);border-radius:8px;color:var(--gray-500);font-size:13px;text-align:center">👆 请选择部门，将自动带出当周拜访结果汇总</div>';
+    return;
+  }
+  const [weekStart, weekEnd, weekLabel] = weekVal.split('|');
+  const summary = getVisitSummaryForWeek(weekStart, weekEnd, dept);
+  const colors = ['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
+  const vc = getVisitConfig();
+  const allResults = vc.visitResults || [];
+
+  let cards = `<div style="text-align:center;padding:10px;background:var(--gray-50);border-radius:6px"><div style="font-size:20px;font-weight:700;color:var(--primary)">${summary.total}</div><div style="font-size:11px;color:var(--gray-500)">总拜访数</div></div>`;
+  allResults.forEach((result, idx) => {
+    const count = summary.byResult[result] || 0;
+    const color = colors[idx % colors.length];
+    cards += `<div style="text-align:center;padding:10px;background:var(--gray-50);border-radius:6px"><div style="font-size:20px;font-weight:700;color:${color}">${count}</div><div style="font-size:11px;color:var(--gray-500)">${result}</div></div>`;
+  });
+  const unmarked = summary.byResult['未标记'] || 0;
+  cards += `<div style="text-align:center;padding:10px;background:var(--gray-50);border-radius:6px"><div style="font-size:20px;font-weight:700;color:var(--gray-400)">${unmarked}</div><div style="font-size:11px;color:var(--gray-500)">未标记</div></div>`;
+
+  // Employee detail
+  const empMap = {};
+  summary.records.forEach(r => {
+    const emp = r.employee || '未知';
+    if (!empMap[emp]) empMap[emp] = { total: 0, results: {} };
+    empMap[emp].total++;
+    const vr = r.visitResult || '未标记';
+    empMap[emp].results[vr] = (empMap[emp].results[vr] || 0) + 1;
+  });
+  const empRows = Object.keys(empMap).sort().map(emp => {
+    const e = empMap[emp];
+    const resultStr = allResults.filter(r => e.results[r]).map(r => `${r}:${e.results[r]}`).join('，') || (e.results['未标记'] ? `未标记:${e.results['未标记']}` : '');
+    return `<tr><td><strong>${emp}</strong></td><td style="text-align:center">${e.total}</td><td style="font-size:12px;color:var(--gray-600)">${resultStr}</td></tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div style="border:1px solid var(--gray-200);border-radius:8px;overflow:hidden">
+      <div style="padding:10px 14px;background:var(--gray-50);border-bottom:1px solid var(--gray-200);font-size:13px;font-weight:600;color:var(--gray-700)">
+        📊 ${dept} — ${weekLabel} 拜访结果汇总
+      </div>
+      <div style="padding:14px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;margin-bottom:12px">${cards}</div>
+        ${empRows ? `<div class="table-wrap"><table style="font-size:12px"><thead><tr><th>销售人员</th><th style="width:60px;text-align:center">拜访数</th><th>结果明细</th></tr></thead><tbody>${empRows}</tbody></table></div>` : '<div style="text-align:center;color:var(--gray-400);padding:8px;font-size:13px">该部门本周暂无拜访记录</div>'}
+      </div>
+    </div>
+  `;
+}
+
+async function saveMgrReport(btn) {
+  const weekVal = document.getElementById('mgrWeekSel').value;
+  const dept = document.getElementById('mgrDeptSel').value;
+  const content = document.getElementById('mgrContent').value.trim();
+  if (!dept) { showToast('请选择部门', 'warning'); return; }
+  if (!content) { showToast('请填写周报内容', 'warning'); return; }
+  const [weekStart, weekEnd, weekLabel] = weekVal.split('|');
+  // Get visit summary snapshot
+  const summary = getVisitSummaryForWeek(weekStart, weekEnd, dept);
+  const vc = getVisitConfig();
+  const allResults = vc.visitResults || [];
+  const visitSnapshot = { total: summary.total };
+  allResults.forEach(r => { visitSnapshot[r] = summary.byResult[r] || 0; });
+  visitSnapshot['未标记'] = summary.byResult['未标记'] || 0;
+
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 提交中...'; }
+
+  try {
+    if (mgrReportEditId) {
+      // Update existing
+      const existing = cloudData.mgrReports.find(r => r.id === mgrReportEditId);
+      if (existing) {
+        const updated = { ...existing, weekStart, weekEnd, weekLabel, department: dept, content, visitSnapshot, updatedAt: new Date().toISOString() };
+        await apiUpdate('mgrReports', mgrReportEditId, updated);
+        Object.assign(existing, updated);
+      }
+      mgrReportEditId = null;
+      showToast('周报已更新！');
+    } else {
+      // Check for duplicate (same user, same week, same dept)
+      const dup = cloudData.mgrReports.find(r => r.userId === currentUser.id && r.weekStart === weekStart && r.department === dept);
+      if (dup) {
+        if (!confirm('该周次和部门已有周报记录，是否覆盖更新？')) { if (btn) { btn.disabled = false; btn.textContent = '💾 提交周报'; } return; }
+        const updated = { ...dup, weekEnd, weekLabel, content, visitSnapshot, updatedAt: new Date().toISOString() };
+        await apiUpdate('mgrReports', dup.id, updated);
+        Object.assign(dup, updated);
+        showToast('周报已更新！');
+      } else {
+        const newReport = {
+          id: 'mgr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+          userId: currentUser.id,
+          userName: currentUser.name,
+          weekStart, weekEnd, weekLabel,
+          department: dept,
+          content,
+          visitSnapshot,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        await apiCreate('mgrReports', newReport);
+        cloudData.mgrReports.push(newReport);
+        showToast('周报提交成功！');
+      }
+    }
+    resetMgrForm();
+    renderMgrReport();
+  } catch(e) {
+    showToast('提交失败：' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 提交周报'; }
+  }
+}
+
+function resetMgrForm() {
+  mgrReportEditId = null;
+  renderMgrReport();
+}
+
+function editMgrReport(id) {
+  mgrReportEditId = id;
+  renderMgrReport();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function deleteMgrReport(id) {
+  if (!confirm('确认删除该周报？此操作不可撤销。')) return;
+  try {
+    await apiDelete('mgrReports', id);
+    cloudData.mgrReports = cloudData.mgrReports.filter(r => r.id !== id);
+    if (mgrReportEditId === id) { mgrReportEditId = null; }
+    renderMgrReport();
+    showToast('已删除');
+  } catch(e) {
+    showToast('删除失败：' + e.message, 'error');
+  }
+}
+
+function renderMgrReportList() {
+  const container = document.getElementById('mgrReportList');
+  if (!container) return;
+  const myReports = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers')).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  if (!myReports.length) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无管理周报记录</div>';
+    return;
+  }
+  container.innerHTML = myReports.map(r => {
+    const snap = r.visitSnapshot || {};
+    const snapStr = Object.keys(snap).filter(k => k !== 'total' && snap[k] > 0).map(k => `${k}:${snap[k]}`).join('，');
+    const canEdit = r.userId === currentUser.id || hasPermission('editOthers');
+    const canDelete = r.userId === currentUser.id || hasPermission('deleteOthers');
+    return `<div style="border:1px solid var(--gray-200);border-radius:8px;padding:14px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <div>
+          <span style="font-weight:600;font-size:14px">${r.weekLabel || r.weekStart + ' ~ ' + r.weekEnd}</span>
+          <span style="margin-left:8px;background:var(--gray-100);padding:2px 10px;border-radius:10px;font-size:12px;color:var(--gray-600)">${r.department}</span>
+          <span style="margin-left:8px;font-size:12px;color:var(--gray-500)">提交人：${r.userName || '未知'}</span>
+        </div>
+        <div style="display:flex;gap:4px">
+          ${canEdit ? `<button class="btn btn-sm btn-outline" onclick="editMgrReport('${r.id}')">✏️ 编辑</button>` : ''}
+          ${canDelete ? `<button class="btn btn-sm btn-outline" style="color:var(--danger)" onclick="deleteMgrReport('${r.id}')">🗑️ 删除</button>` : ''}
+        </div>
+      </div>
+      ${snapStr ? `<div style="background:var(--gray-50);border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:12px;color:var(--gray-600)">📊 拜访汇总（${snap.total || 0}次）：${snapStr}</div>` : ''}
+      <div style="white-space:pre-wrap;font-size:13px;line-height:1.6;color:var(--gray-700)">${(r.content || '').replace(/</g,'&lt;')}</div>
+      <div style="margin-top:8px;font-size:11px;color:var(--gray-400)">${r.createdAt ? '创建：' + r.createdAt.replace('T',' ').slice(0,16) : ''}${r.updatedAt && r.updatedAt !== r.createdAt ? ' · 更新：' + r.updatedAt.replace('T',' ').slice(0,16) : ''}</div>
+    </div>`;
+  }).join('');
 }
 
 // ============ Visit Statistics Dashboard ============
