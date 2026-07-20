@@ -4607,6 +4607,15 @@ async function renderMgrReport() {
   renderMgrReportList();
 }
 
+// 将拜访汇总快照格式化为「结果→销售人员」明细文本（details 优先，否则回退到计数快照）
+function formatVisitSnapshotDetail(snap) {
+  if (!snap) return '';
+  if (Array.isArray(snap.details) && snap.details.length) {
+    return snap.details.map(d => `${d.result}:${d.count}人[${d.employees.join('、')}]`).join('；');
+  }
+  return Object.keys(snap).filter(k => k !== 'total' && snap[k] > 0).map(k => `${k}:${snap[k]}`).join('；');
+}
+
 function updateMgrVisitSummary() {
   const weekVal = document.getElementById('mgrWeekSel')?.value || '';
   const dept = document.getElementById('mgrDeptSel')?.value || '';
@@ -4637,19 +4646,21 @@ function updateMgrVisitSummary() {
   const unmarked = summary.byResult['未标记'] || 0;
   cards += `<div style="text-align:center;padding:10px;background:var(--gray-50);border-radius:6px"><div style="font-size:20px;font-weight:700;color:var(--gray-400)">${unmarked}</div><div style="font-size:11px;color:var(--gray-500)">未标记</div></div>`;
 
-  // Employee detail
-  const empMap = {};
-  summary.records.forEach(r => {
-    const emp = r.employee || '未知';
-    if (!empMap[emp]) empMap[emp] = { total: 0, results: {} };
-    empMap[emp].total++;
-    const vr = r.visitResult || '未标记';
-    empMap[emp].results[vr] = (empMap[emp].results[vr] || 0) + 1;
+  // 按「拜访结果」统计销售人员
+  const resultMap = {};
+  [...allResults, '未标记'].forEach(res => { if ((summary.byResult[res] || 0) > 0) resultMap[res] = []; });
+  summary.records.forEach(rec => {
+    const vr = rec.visitResult || '未标记';
+    if (!resultMap[vr]) resultMap[vr] = [];
+    const emp = rec.employee || '未知';
+    if (!resultMap[vr].includes(emp)) resultMap[vr].push(emp);
   });
-  const empRows = Object.keys(empMap).sort().map(emp => {
-    const e = empMap[emp];
-    const resultStr = allResults.filter(r => e.results[r]).map(r => `${r}:${e.results[r]}`).join('，') || (e.results['未标记'] ? `未标记:${e.results['未标记']}` : '');
-    return `<tr><td><strong>${emp}</strong></td><td style="text-align:center">${e.total}</td><td style="font-size:12px;color:var(--gray-600)">${resultStr}</td></tr>`;
+  const resultRows = Object.keys(resultMap).map(result => {
+    const emps = resultMap[result];
+    const cnt = summary.byResult[result] || emps.length;
+    const ridx = allResults.indexOf(result);
+    const color = ridx >= 0 ? colors[ridx % colors.length] : 'var(--gray-400)';
+    return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${result}</strong></td><td style="text-align:center">${cnt}</td><td style="font-size:12px;color:var(--gray-600)">${emps.join('、')}</td></tr>`;
   }).join('');
 
   container.innerHTML = `
@@ -4659,7 +4670,7 @@ function updateMgrVisitSummary() {
       </div>
       <div style="padding:14px">
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;margin-bottom:12px">${cards}</div>
-        ${empRows ? `<div class="table-wrap"><table style="font-size:12px"><thead><tr><th>销售人员</th><th style="width:60px;text-align:center">拜访数</th><th>结果明细</th></tr></thead><tbody>${empRows}</tbody></table></div>` : '<div style="text-align:center;color:var(--gray-400);padding:8px;font-size:13px">该部门本周暂无拜访记录</div>'}
+        ${resultRows ? `<div class="table-wrap"><table style="font-size:12px"><thead><tr><th>拜访结果</th><th style="width:60px;text-align:center">次数</th><th>销售人员</th></tr></thead><tbody>${resultRows}</tbody></table></div>` : '<div style="text-align:center;color:var(--gray-400);padding:8px;font-size:13px">该部门本周暂无拜访记录</div>'}
       </div>
     </div>
   `;
@@ -4676,9 +4687,20 @@ async function saveMgrReport(btn) {
   const summary = getVisitSummaryForWeek(weekStart, weekEnd, dept);
   const vc = getVisitConfig();
   const allResults = vc.visitResults || [];
-  const visitSnapshot = { total: summary.total };
-  allResults.forEach(r => { visitSnapshot[r] = summary.byResult[r] || 0; });
-  visitSnapshot['未标记'] = summary.byResult['未标记'] || 0;
+  // 按「拜访结果」归组的销售人员明细，随快照持久化，便于列表展示与导出
+  // 注意：不要把结果名作为快照平铺 key（结果名可能含 "/" 等 Firebase 非法字符），统一用 details 数组
+  const visitSnapshot = {
+    total: summary.total,
+    details: [...allResults, '未标记'].filter(res => (summary.byResult[res] || 0) > 0).map(res => {
+      const emps = [];
+      summary.records.forEach(rec => {
+        const vr = rec.visitResult || '未标记';
+        const emp = rec.employee || '未知';
+        if (vr === res && !emps.includes(emp)) emps.push(emp);
+      });
+      return { result: res, count: summary.byResult[res] || emps.length, employees: emps };
+    })
+  };
 
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 提交中...'; }
 
@@ -4764,7 +4786,7 @@ function renderMgrReportList() {
   }
   container.innerHTML = myReports.map(r => {
     const snap = r.visitSnapshot || {};
-    const snapStr = Object.keys(snap).filter(k => k !== 'total' && snap[k] > 0).map(k => `${k}:${snap[k]}`).join('，');
+    const snapStr = formatVisitSnapshotDetail(snap);
     const canEdit = r.userId === currentUser.id || hasPermission('editOthers');
     const canDelete = r.userId === currentUser.id || hasPermission('deleteOthers');
     return `<div style="border:1px solid var(--gray-200);border-radius:8px;padding:14px;margin-bottom:12px">
@@ -4796,7 +4818,7 @@ function exportMgrReports() {
   const headers = ['周次', '部门', '提交人', '总拜访数', '拜访结果明细', '周报内容', '创建时间', '更新时间'];
   const rows = list.map(r => {
     const snap = r.visitSnapshot || {};
-    const snapStr = Object.keys(snap).filter(k => k !== 'total' && snap[k] > 0).map(k => `${k}:${snap[k]}`).join('；');
+    const snapStr = formatVisitSnapshotDetail(snap);
     return [
       r.weekLabel || (r.weekStart + ' ~ ' + r.weekEnd),
       r.department || '',
