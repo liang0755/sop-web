@@ -4876,10 +4876,31 @@ function formatVisitSnapshotDetail(snap) {
         if (e && typeof e === 'object') return `${e.name}(${e.count})`;
         return String(e);
       }).join('、') : '';
-      return `${d.result}:${d.count}人[${empStr}]`;
+      return `${d.result}：${d.count}人 [${empStr}]`;
     }).join('\n');
   }
-  return Object.keys(snap).filter(k => k !== 'total' && snap[k] > 0).map(k => `${k}:${snap[k]}`).join('\n');
+  return Object.keys(snap).filter(k => k !== 'total' && snap[k] > 0).map(k => `${k}：${snap[k]}`).join('\n');
+}
+
+// 将快照渲染为卡片内美观的明细表格（已提交周报查看用）
+function renderSnapshotCardHTML(snap) {
+  if (!snap || !Array.isArray(snap.details) || !snap.details.length) return '';
+  const total = snap.total || 0;
+  const rows = snap.details.map(d => {
+    const empStr = Array.isArray(d.employees) ? d.employees.map(e => {
+      if (e && typeof e === 'object') return `${e.name}(${e.count})`;
+      return String(e);
+    }).join('、') : '';
+    return `<div style="display:table-row">
+      <div style="display:table-cell;white-space:nowrap;padding:3px 10px 3px 0;color:var(--gray-700);font-weight:500">${d.result}：</div>
+      <div style="display:table-cell;white-space:nowrap;text-align:right;padding:3px 12px 3px 0;color:var(--gray-700);font-weight:600;min-width:46px">${d.count}人</div>
+      <div style="display:table-cell;padding:3px 0;color:var(--gray-600);font-family:var(--font-sans);word-break:break-all">[${empStr}]</div>
+    </div>`;
+  }).join('');
+  return `<div style="background:var(--gray-50);border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:12px">
+    <div style="font-weight:600;color:var(--gray-700);margin-bottom:6px;font-size:13px">📊 拜访汇总（${total}次）</div>
+    <div style="display:table;width:100%;line-height:1.6">${rows}</div>
+  </div>`;
 }
 
 function updateMgrVisitSummary() {
@@ -5041,7 +5062,7 @@ function renderMgrReportList() {
   }
   container.innerHTML = myReports.map(r => {
     const snap = r.visitSnapshot || {};
-    const snapStr = formatVisitSnapshotDetail(snap);
+    const snapCard = renderSnapshotCardHTML(snap);
     const canEdit = r.userId === currentUser.id || hasPermission('editOthers');
     const canDelete = r.userId === currentUser.id || hasPermission('deleteOthers');
     return `<div style="border:1px solid var(--gray-200);border-radius:8px;padding:14px;margin-bottom:12px">
@@ -5057,7 +5078,7 @@ function renderMgrReportList() {
           ${canDelete ? `<button class="btn btn-sm btn-outline" style="color:var(--danger)" onclick="deleteMgrReport('${r.id}')">🗑️ 删除</button>` : ''}
         </div>
       </div>
-      ${snapStr ? `<div style="background:var(--gray-50);border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:12px;color:var(--gray-600);white-space:pre-wrap;line-height:1.7">📊 拜访汇总（${snap.total || 0}次）：${snapStr}</div>` : ''}
+      ${snapCard}
       <div style="white-space:pre-wrap;font-size:13px;line-height:1.6;color:var(--gray-700)">${(r.content || '').replace(/</g,'&lt;')}</div>
       <div style="margin-top:8px;font-size:11px;color:var(--gray-400)">${r.createdAt ? '创建：' + r.createdAt.replace('T',' ').slice(0,16) : ''}${r.updatedAt && r.updatedAt !== r.createdAt ? ' · 更新：' + r.updatedAt.replace('T',' ').slice(0,16) : ''}</div>
     </div>`;
