@@ -4193,7 +4193,7 @@ async function renderVisitData() {
         </div>
         <div class="form-group"><label>部门</label><select class="form-control" id="visitFDept" onchange="resetVisitPage()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}">${d}</option>`).join('')}</select></div>
         <div class="form-group"><label>销售</label><select class="form-control" id="visitFPerson" onchange="resetVisitPage()"><option value="">全部人员</option>${persons.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div>
-        <div class="form-group"><label>拜访结果</label><select class="form-control" id="visitFResult" onchange="resetVisitPage()"><option value="">全部</option><option value="empty">⚠️ 未填写结果</option><option value="filled">已填写结果</option></select></div>
+        <div class="form-group"><label>拜访结果</label><select class="form-control" id="visitFResult" onchange="resetVisitPage()"><option value="">全部</option>${batchResultOpts}<option value="empty">⚠️ 未填写结果</option><option value="filled">已填写结果</option></select></div>
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}"></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="resetVisitPage()">🔍 查询</button></div>
@@ -4205,7 +4205,7 @@ async function renderVisitData() {
     <div class="sticky-submit-bar" id="visitBatchBar" style="display:none">
       <span id="visitSelCount" style="color:var(--gray-600);font-size:13px">已选 0 条</span>
       <select class="form-control form-control-sm" id="visitBatchResult" style="width:auto;display:inline-block">
-        <option value="">批量设置拜访结果...</option>
+        <option value="">← 选择拜访结果（来自配置）</option>
         ${batchResultOpts}
       </select>
       <button class="btn btn-primary btn-sm" onclick="batchSetVisitResult()">🎯 批量修改结果</button>
@@ -4238,6 +4238,7 @@ function renderVisitTable() {
   if (fPerson) records = records.filter(r => r.employee === fPerson);
   if (fResult === 'empty') records = records.filter(r => !r.visitResult);
   else if (fResult === 'filled') records = records.filter(r => !!r.visitResult);
+  else if (fResult) records = records.filter(r => (r.visitResult || '') === fResult);
   records.sort((a, b) => (b.contactTime || '').localeCompare(a.contactTime || ''));
   const total = records.length;
   const pages = Math.max(1, Math.ceil(total / visitPageSize));
