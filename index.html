@@ -52,7 +52,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft Y
 .btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-dark)}
 .btn-success{background:var(--success);color:#fff}
 .btn-danger{background:var(--danger);color:#fff}
-.btn-outline{background:#fff;border:1px solid var(--gray-300);color:var(--gray-700)}.btn-outline:hover{border-color:var(--primary);color:var(--primary)}
+.btn-outline{background:#fff;border:1px solid var(--gray-300);color:var(--gray-700)}.btn-outline:hover{border-color:var(--primary);color:var(--primary)}.btn-outline.active{background:var(--primary);border-color:var(--primary);color:#fff}
 .btn-sm{padding:5px 12px;font-size:12px}
 .btn-lg{padding:12px 28px;font-size:15px}
 .form-group{margin-bottom:18px}
@@ -414,10 +414,12 @@ tr:hover td{background:var(--gray-50)}
       <div class="nav-item active" data-page="dashboard" onclick="navTo('dashboard')"><span class="icon">🏠</span> 首页</div>
       <div class="nav-item" data-page="dailyForm" onclick="navTo('dailyForm')"><span class="icon">📝</span> 日报填写</div>
       <div class="nav-item" data-page="weeklyForm" onclick="navTo('weeklyForm')"><span class="icon">📋</span> 周报填写</div>
+      <div class="nav-item" data-page="visitData" onclick="navTo('visitData')" id="navVisitData"><span class="icon">📍</span> 拜访数据</div>
       <div class="nav-section-title">数据</div>
       <div class="nav-item" data-page="dailyData" onclick="navTo('dailyData')"><span class="icon">📈</span> 日报数据</div>
       <div class="nav-item" data-page="weeklyData" onclick="navTo('weeklyData')"><span class="icon">📉</span> 周报数据</div>
       <div class="nav-item" data-page="summary" onclick="navTo('summary')"><span class="icon">👥</span> 团队汇总</div>
+      <div class="nav-item" data-page="visitStats" onclick="navTo('visitStats')" id="navVisitStats"><span class="icon">📊</span> 拜访统计</div>
       <div class="nav-section-title">管理</div>
       <div class="nav-item" data-page="userManagement" onclick="navTo('userManagement')" id="navUserMgmt"><span class="icon">👤</span> 用户管理</div>
       <div class="nav-item" data-page="roleConfig" onclick="navTo('roleConfig')" id="navRoleConfig"><span class="icon">🛡️</span> 角色权限</div>
@@ -445,7 +447,7 @@ tr:hover td{background:var(--gray-50)}
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null};
 let currentUser = null;
 let isCloudAvailable = false;
 let dataLoaded = false;
@@ -486,12 +488,13 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
       fetch(FB_BASE + '/aiConfig.json'),
-      fetch(FB_BASE + '/roleConfig.json')
+      fetch(FB_BASE + '/roleConfig.json'),
+      fetch(FB_BASE + '/visitConfig.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -524,6 +527,12 @@ async function loadCoreData() {
     if (!rcData) {
       try { await fetch(FB_BASE + '/roleConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.roleConfig)}); } catch(e) {}
     }
+    // Load visit config
+    const vcData = vRes.ok ? await vRes.json() : null;
+    cloudData.visitConfig = vcData || JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
+    if (!vcData) {
+      try { await fetch(FB_BASE + '/visitConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.visitConfig)}); } catch(e) {}
+    }
     isCloudAvailable = true;
   } catch(e) {
     console.warn('Core config fetch failed:', e.message);
@@ -532,6 +541,7 @@ async function loadCoreData() {
     cloudData.departments = [...new Set(cloudData.users.map(u => u.department).filter(d => d))].sort();
     cloudData.aiConfig = JSON.parse(JSON.stringify(DEFAULT_AI_CONFIG));
     cloudData.roleConfig = JSON.parse(JSON.stringify(DEFAULT_ROLE_CONFIG));
+    cloudData.visitConfig = JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
   }
 }
 
@@ -539,12 +549,14 @@ async function loadCoreData() {
 async function loadReportData() {
   if (reportsLoaded) return;
   try {
-    const [dRes, wRes] = await Promise.all([
+    const [dRes, wRes, visitRes] = await Promise.all([
       fetch(FB_BASE + '/dailyReports.json'),
-      fetch(FB_BASE + '/weeklyReports.json')
+      fetch(FB_BASE + '/weeklyReports.json'),
+      fetch(FB_BASE + '/visitRecords.json')
     ]);
     cloudData.dailyReports = dRes.ok ? Object.values(await dRes.json() || {}) : [];
     cloudData.weeklyReports = wRes.ok ? Object.values(await wRes.json() || {}) : [];
+    cloudData.visitRecords = visitRes.ok ? Object.values(await visitRes.json() || {}) : [];
   } catch(e) {
     console.warn('Report data fetch failed:', e.message);
   }
@@ -685,7 +697,9 @@ function updateNavVisibility() {
     'navUserMgmt': 'userManagement',
     'navRoleConfig': 'roleConfig',
     'navFormConfig': 'formConfig',
-    'navAIChat': 'aiChat'
+    'navAIChat': 'aiChat',
+    'navVisitData': 'visitData',
+    'navVisitStats': 'visitStats'
   };
   Object.entries(navMap).forEach(([navId, perm]) => {
     const el = document.getElementById(navId);
@@ -703,7 +717,7 @@ function navTo(page) {
   const cb = document.getElementById('contentBody');
   cb.className = 'content-body';
   // Check page permission (dashboard and settings are always allowed)
-  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat'];
+  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','visitData','visitStats'];
   if (restrictedPages.includes(page) && !hasPermission(page)) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面，请联系管理员。</div>';
     closeSidebar();
@@ -711,9 +725,9 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置'};
+  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
-  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings}[page]||(()=>{}))();
+  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats}[page]||(()=>{}))();
   closeSidebar();
   // Background refresh: silently fetch latest data (non-blocking, only for read-only pages)
   silentRefresh(page);
@@ -724,24 +738,27 @@ async function silentRefresh(page) {
   if (bgRefreshInFlight) return;
   if (Date.now() - lastRefreshTime < REFRESH_INTERVAL) return;
   // Only background-refresh read-only pages (not forms with user input)
-  if (!['dashboard','dailyData','weeklyData','summary'].includes(page)) return;
+  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats'].includes(page)) return;
   bgRefreshInFlight = true;
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
   try {
-    const [dRes, wRes] = await Promise.all([
+    const [dRes, wRes, vRes] = await Promise.all([
       fetch(FB_BASE + '/dailyReports.json'),
-      fetch(FB_BASE + '/weeklyReports.json')
+      fetch(FB_BASE + '/weeklyReports.json'),
+      fetch(FB_BASE + '/visitRecords.json')
     ]);
     const newDaily = dRes.ok ? Object.values(await dRes.json() || {}) : [];
     const newWeekly = wRes.ok ? Object.values(await wRes.json() || {}) : [];
+    const newVisit = vRes.ok ? Object.values(await vRes.json() || {}) : [];
     // Only update + re-render if data count changed (new records added by others)
-    if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length) {
+    if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length) {
       cloudData.dailyReports = newDaily;
       cloudData.weeklyReports = newWeekly;
+      cloudData.visitRecords = newVisit;
       const activePage = document.querySelector('.nav-item.active')?.dataset.page;
       if (activePage === page) {
-        ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary}[page]||(()=>{}))();
+        ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats}[page]||(()=>{}))();
       }
     }
   } catch(e) { /* silent fail */ }
@@ -800,7 +817,8 @@ const DEFAULT_ROLE_CONFIG = {
         userManagement: true, formConfig: true, aiChat: true,
         roleConfig: true, settings: true,
         editOthers: true, deleteOthers: true, exportData: true,
-        brandConfig: true, aiConfig: true
+        brandConfig: true, aiConfig: true,
+        visitData: true, visitStats: true
       }
     },
     {
@@ -811,7 +829,8 @@ const DEFAULT_ROLE_CONFIG = {
         userManagement: false, formConfig: false, aiChat: true,
         roleConfig: false, settings: true,
         editOthers: true, deleteOthers: false, exportData: true,
-        brandConfig: false, aiConfig: false
+        brandConfig: false, aiConfig: false,
+        visitData: true, visitStats: true
       }
     },
     {
@@ -822,7 +841,8 @@ const DEFAULT_ROLE_CONFIG = {
         userManagement: false, formConfig: false, aiChat: false,
         roleConfig: false, settings: true,
         editOthers: false, deleteOthers: false, exportData: false,
-        brandConfig: false, aiConfig: false
+        brandConfig: false, aiConfig: false,
+        visitData: true, visitStats: true
       }
     },
     {
@@ -833,7 +853,8 @@ const DEFAULT_ROLE_CONFIG = {
         userManagement: false, formConfig: false, aiChat: false,
         roleConfig: false, settings: true,
         editOthers: false, deleteOthers: false, exportData: false,
-        brandConfig: false, aiConfig: false
+        brandConfig: false, aiConfig: false,
+        visitData: true, visitStats: true
       }
     }
   ]
@@ -846,16 +867,23 @@ const PERMISSION_LABELS = {
   userManagement: '用户管理', formConfig: '表单配置', aiChat: 'AI助手',
   roleConfig: '角色权限配置', settings: '设置',
   editOthers: '编辑他人数据', deleteOthers: '删除他人数据', exportData: '导出数据',
-  brandConfig: '品牌配置', aiConfig: 'AI模型配置'
+  brandConfig: '品牌配置', aiConfig: 'AI模型配置',
+  visitData: '拜访数据', visitStats: '拜访统计'
 };
 
 const PERMISSION_GROUPS = [
-  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary'] },
+  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats'] },
   { title: '管理功能', keys: ['userManagement','formConfig','aiChat','roleConfig','settings','brandConfig','aiConfig'] },
   { title: '数据操作', keys: ['editOthers','deleteOthers','exportData'] }
 ];
 
 function getRoleConfig() { return cloudData.roleConfig || DEFAULT_ROLE_CONFIG; }
+
+// ============ Visit Data Config ============
+const DEFAULT_VISIT_CONFIG = {
+  visitResults: ['已成交', '高意向', '待跟进', '暂无意向', '已流失']
+};
+function getVisitConfig() { return cloudData.visitConfig || DEFAULT_VISIT_CONFIG; }
 
 function hasPermission(perm) {
   if (!currentUser) return false;
@@ -3751,6 +3779,7 @@ function renderFormConfig() {
     <div class="summary-tabs" style="margin-bottom:20px">
       <div class="summary-tab ${configTab==='daily'?'active':''}" onclick="switchConfigTab('daily')">日报配置</div>
       <div class="summary-tab ${configTab==='weekly'?'active':''}" onclick="switchConfigTab('weekly')">周报配置</div>
+      <div class="summary-tab ${configTab==='visitResults'?'active':''}" onclick="switchConfigTab('visitResults')">拜访结果配置</div>
     </div>
     <div id="configContent"></div>
     <div style="margin-top:12px;font-size:12px;color:var(--gray-500)">
@@ -3773,6 +3802,33 @@ function switchConfigTab(tab) {
 }
 
 function renderConfigContent() {
+  const c = document.getElementById('configContent');
+  // ===== 拜访结果配置 tab =====
+  if (configTab === 'visitResults') {
+    const vc = getVisitConfig();
+    const results = vc.visitResults || [];
+    c.innerHTML = `
+      <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
+        💡 配置"拜访结果"单选项，保存后在拜访数据页面使用。已有记录的拜访结果不会丢失。
+      </div>
+      <div id="visitResultList">
+        ${results.map((r, idx) => `
+          <div class="channel-card" style="margin-bottom:12px">
+            <div class="channel-card-header" style="padding:10px 16px">
+              <div style="display:flex;align-items:center;gap:8px;flex:1">
+                <span class="badge badge-gray" style="font-size:12px">${idx + 1}</span>
+                <input type="text" class="form-control" value="${r.replace(/"/g,'&quot;')}" onchange="updateVisitResultOption(${idx}, this.value)" style="flex:1" placeholder="如：已成交">
+              </div>
+              <button class="btn btn-danger btn-sm" onclick="deleteVisitResultOption(${idx})">🗑 删除</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn btn-outline" style="width:100%;padding:12px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addVisitResultOption()">➕ 添加选项</button>
+    `;
+    return;
+  }
+  // ===== 日报/周报配置 tab =====
   const channels = getChannels(configTab);
   const c = document.getElementById('configContent');
   c.innerHTML = channels.map((ch, idx) => {
@@ -3856,6 +3912,11 @@ async function saveFormConfig() {
       method:'PUT', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(cloudData.formConfig)
     });
+    // Also save visit config
+    await fetch(FB_BASE + '/visitConfig.json', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(cloudData.visitConfig || DEFAULT_VISIT_CONFIG)
+    });
     showToast('配置已保存并生效！', 'success');
     if (alertEl) alertEl.innerHTML = '';
   } catch(e) {
@@ -3869,7 +3930,438 @@ async function saveFormConfig() {
 function resetFormConfig() {
   if (!confirm('确定恢复默认配置吗？当前修改将丢失（需点击保存才会写入云端）。')) return;
   cloudData.formConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
+  cloudData.visitConfig = JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
   renderConfigContent();
+}
+
+// ============ Visit Result Option Management ============
+function updateVisitResultOption(idx, value) {
+  if (!cloudData.visitConfig) cloudData.visitConfig = JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
+  if (cloudData.visitConfig.visitResults[idx] !== undefined) {
+    cloudData.visitConfig.visitResults[idx] = value;
+  }
+}
+function addVisitResultOption() {
+  if (!cloudData.visitConfig) cloudData.visitConfig = JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
+  cloudData.visitConfig.visitResults.push('新选项');
+  renderConfigContent();
+}
+function deleteVisitResultOption(idx) {
+  if (!cloudData.visitConfig) return;
+  cloudData.visitConfig.visitResults.splice(idx, 1);
+  renderConfigContent();
+}
+
+// ============ Visit Data Management ============
+let visitEditBuffer = {};
+
+function renderVisitData() {
+  if (!hasPermission('visitData')) {
+    document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
+    return;
+  }
+  const body = document.getElementById('contentBody');
+  const today = new Date().toISOString().split('T')[0];
+  const mAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
+  const depts = [...new Set(cloudData.users.map(u => u.department).filter(d => d))].sort();
+  const persons = [...new Set(cloudData.users.map(u => u.name))].sort();
+  body.innerHTML = `
+    <div id="visitAlert"></div>
+    <div class="card" style="margin-bottom:20px"><div class="card-body">
+      <div class="filter-bar">
+        <div class="form-group">
+          <label>上传拜访数据</label>
+          <input type="file" id="visitFileInput" accept=".csv" style="display:none" onchange="handleVisitUpload(this)">
+          <button class="btn btn-success" onclick="document.getElementById('visitFileInput').click()">📤 上传CSV</button>
+        </div>
+        <div class="form-group"><label>部门</label><select class="form-control" id="visitFDept" onchange="renderVisitTable()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}">${d}</option>`).join('')}</select></div>
+        <div class="form-group"><label>销售</label><select class="form-control" id="visitFPerson" onchange="renderVisitTable()"><option value="">全部人员</option>${persons.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div>
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}"></div>
+        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}"></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="renderVisitTable()">🔍 查询</button></div>
+      </div>
+    </div></div>
+    <div id="visitResults"></div>
+    <div style="height:70px"></div>
+    <div class="sticky-submit-bar" id="visitSaveBar" style="display:none">
+      <span style="color:var(--gray-600);font-size:13px" id="visitEditCount">0条修改</span>
+      <button class="btn btn-primary" onclick="saveVisitEdits()">💾 保存修改</button>
+    </div>
+  `;
+  visitEditBuffer = {};
+  renderVisitTable();
+}
+
+function renderVisitTable() {
+  const s = document.getElementById('visitFStart')?.value || '';
+  const e = document.getElementById('visitFEnd')?.value || '';
+  const fDept = document.getElementById('visitFDept')?.value || '';
+  const fPerson = document.getElementById('visitFPerson')?.value || '';
+  let records = [...cloudData.visitRecords];
+  if (s) records = records.filter(r => (r.contactTime || '').split(' ')[0] >= s);
+  if (e) records = records.filter(r => (r.contactTime || '').split(' ')[0] <= e);
+  if (fDept) records = records.filter(r => r.department === fDept);
+  if (fPerson) records = records.filter(r => r.employee === fPerson);
+  records.sort((a, b) => (b.contactTime || '').localeCompare(a.contactTime || ''));
+  const c = document.getElementById('visitResults');
+  if (!records.length) {
+    c.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无拜访数据，请点击"上传CSV"按钮上传</div>';
+    document.getElementById('visitSaveBar').style.display = 'none';
+    return;
+  }
+  const vc = getVisitConfig();
+  const resultOptions = vc.visitResults.map(r => `<option value="${r}">${r}</option>`).join('');
+  c.innerHTML = `<div class="card"><div class="table-wrap"><table style="font-size:12px">
+    <thead><tr>
+      <th>联系时间</th><th>客户</th><th>联系人</th><th>手机号</th><th>签到事件</th>
+      <th>员工</th><th>部门</th><th>签到地址</th><th>备注</th>
+      <th style="min-width:120px">拜访结果</th><th style="min-width:200px">卡点说明</th>
+    </tr></thead>
+    <tbody>
+      ${records.map(r => {
+        const vr = visitEditBuffer[r.id]?.visitResult !== undefined ? visitEditBuffer[r.id].visitResult : (r.visitResult || '');
+        const bn = visitEditBuffer[r.id]?.blockerNote !== undefined ? visitEditBuffer[r.id].blockerNote : (r.blockerNote || '');
+        return `<tr data-id="${r.id}">
+          <td>${r.contactTime || ''}</td>
+          <td>${r.customer || ''}</td>
+          <td>${r.contactPerson || ''}</td>
+          <td>${r.phone || ''}</td>
+          <td>${r.signinEvent || ''}</td>
+          <td>${r.employee || ''}</td>
+          <td>${r.department || ''}</td>
+          <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.signinAddress || '').replace(/"/g,'&quot;')}">${r.signinAddress || ''}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.remark || '').replace(/"/g,'&quot;').replace(/\n/g,' ')}">${(r.remark || '').substring(0,50).replace(/\n/g,' ')}${(r.remark||'').length>50?'...':''}</td>
+          <td><select class="form-control form-control-sm" onchange="onVisitEdit('${r.id}','visitResult',this.value)">
+            <option value="">未设置</option>
+            ${resultOptions}
+          </select></td>
+          <td><input type="text" class="form-control form-control-sm" value="${bn.replace(/"/g,'&quot;').replace(/</g,'&lt;')}" onchange="onVisitEdit('${r.id}','blockerNote',this.value)" placeholder="输入卡点说明"></td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table></div></div>`;
+  // Restore select values
+  records.forEach(r => {
+    const vr = visitEditBuffer[r.id]?.visitResult !== undefined ? visitEditBuffer[r.id].visitResult : (r.visitResult || '');
+    const select = c.querySelector(`tr[data-id="${r.id}"] select`);
+    if (select) select.value = vr;
+  });
+  updateVisitSaveBar();
+}
+
+function onVisitEdit(recordId, field, value) {
+  if (!visitEditBuffer[recordId]) visitEditBuffer[recordId] = {};
+  visitEditBuffer[recordId][field] = value;
+  updateVisitSaveBar();
+}
+
+function updateVisitSaveBar() {
+  let count = 0;
+  Object.keys(visitEditBuffer).forEach(id => {
+    const buf = visitEditBuffer[id];
+    const orig = cloudData.visitRecords.find(r => r.id === id) || {};
+    const origVR = orig.visitResult || '';
+    const origBN = orig.blockerNote || '';
+    if ((buf.visitResult !== undefined && buf.visitResult !== origVR) || (buf.blockerNote !== undefined && buf.blockerNote !== origBN)) {
+      count++;
+    }
+  });
+  const bar = document.getElementById('visitSaveBar');
+  if (bar) {
+    bar.style.display = count > 0 ? '' : 'none';
+    const countEl = document.getElementById('visitEditCount');
+    if (countEl) countEl.textContent = count + '条修改';
+  }
+}
+
+async function saveVisitEdits() {
+  const changes = [];
+  Object.keys(visitEditBuffer).forEach(id => {
+    const buf = visitEditBuffer[id];
+    const orig = cloudData.visitRecords.find(r => r.id === id);
+    if (!orig) return;
+    const origVR = orig.visitResult || '';
+    const origBN = orig.blockerNote || '';
+    const newVR = buf.visitResult !== undefined ? buf.visitResult : origVR;
+    const newBN = buf.blockerNote !== undefined ? buf.blockerNote : origBN;
+    if (newVR !== origVR || newBN !== origBN) {
+      changes.push({ id, orig, visitResult: newVR, blockerNote: newBN });
+    }
+  });
+  if (!changes.length) { alert('没有修改需要保存'); return; }
+  const alertEl = document.getElementById('visitAlert');
+  if (alertEl) alertEl.innerHTML = '<div class="alert alert-info">正在保存...</div>';
+  try {
+    for (const ch of changes) {
+      await apiUpdate('visitRecords', ch.id, { visitResult: ch.visitResult, blockerNote: ch.blockerNote });
+      ch.orig.visitResult = ch.visitResult;
+      ch.orig.blockerNote = ch.blockerNote;
+    }
+    visitEditBuffer = {};
+    if (alertEl) alertEl.innerHTML = '<div class="alert alert-success">✅ 已保存 ' + changes.length + ' 条修改</div>';
+    setTimeout(() => { const a = document.getElementById('visitAlert'); if (a) a.innerHTML = ''; }, 3000);
+    renderVisitTable();
+  } catch(e) {
+    if (alertEl) alertEl.innerHTML = '<div class="alert alert-danger">❌ 保存失败: ' + e.message + '</div>';
+  }
+}
+
+function parseVisitCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i+1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else { field += c; }
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c === '\r') {}
+      else field += c;
+    }
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+async function handleVisitUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const alertEl = document.getElementById('visitAlert');
+  if (alertEl) alertEl.innerHTML = '<div class="alert alert-info">正在解析CSV文件...</div>';
+  try {
+    const text = await file.text();
+    const rows = parseVisitCSV(text);
+    if (rows.length < 2) {
+      if (alertEl) alertEl.innerHTML = '<div class="alert alert-warning">CSV文件没有数据行</div>';
+      input.value = '';
+      return;
+    }
+    const headers = rows[0].map(h => h.trim());
+    const colMap = {};
+    headers.forEach((h, i) => {
+      if (h.includes('联系时间')) colMap.contactTime = i;
+      else if (h.includes('客户') && !h.includes('单位')) colMap.customer = i;
+      else if (h.includes('工作单位') || h.includes('联系人')) colMap.contactPerson = i;
+      else if (h.includes('手机')) colMap.phone = i;
+      else if (h.includes('签到事件')) colMap.signinEvent = i;
+      else if (h.includes('签退时间')) colMap.signoutTime = i;
+      else if (h.includes('时长')) colMap.duration = i;
+      else if (h.includes('签退状态')) colMap.signoutStatus = i;
+      else if (h.includes('员工')) colMap.employee = i;
+      else if (h.includes('部门')) colMap.department = i;
+      else if (h.includes('签到记录') || h.includes('签到地址')) colMap.signinAddress = i;
+      else if (h.includes('备注')) colMap.remark = i;
+    });
+    const newRecords = [];
+    let dupCount = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r[colMap.contactTime] && !r[colMap.employee]) continue;
+      const contactTime = r[colMap.contactTime] || '';
+      const employee = r[colMap.employee] || '';
+      const customer = r[colMap.customer] || '';
+      const existing = cloudData.visitRecords.find(e =>
+        e.contactTime === contactTime && e.employee === employee && e.customer === customer
+      );
+      if (existing) {
+        // Update existing record fields but keep visitResult/blockerNote
+        Object.assign(existing, {
+          contactPerson: r[colMap.contactPerson] || '',
+          phone: r[colMap.phone] || '',
+          signinEvent: r[colMap.signinEvent] || '',
+          signoutTime: r[colMap.signoutTime] || '',
+          duration: r[colMap.duration] || '',
+          signoutStatus: r[colMap.signoutStatus] || '',
+          department: r[colMap.department] || '',
+          signinAddress: r[colMap.signinAddress] || '',
+          remark: r[colMap.remark] || ''
+        });
+        await apiUpdate('visitRecords', existing.id, existing);
+        dupCount++;
+      } else {
+        const record = {
+          id: genId(),
+          contactTime, customer,
+          contactPerson: r[colMap.contactPerson] || '',
+          phone: r[colMap.phone] || '',
+          signinEvent: r[colMap.signinEvent] || '',
+          signoutTime: r[colMap.signoutTime] || '',
+          duration: r[colMap.duration] || '',
+          signoutStatus: r[colMap.signoutStatus] || '',
+          employee, department: r[colMap.department] || '',
+          signinAddress: r[colMap.signinAddress] || '',
+          remark: r[colMap.remark] || '',
+          visitResult: '', blockerNote: '',
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: currentUser.name
+        };
+        newRecords.push(record);
+      }
+    }
+    let saved = 0;
+    for (const rec of newRecords) {
+      try {
+        await apiCreate('visitRecords', rec);
+        cloudData.visitRecords.push(rec);
+        saved++;
+      } catch(e) { console.warn('Failed to save visit record:', e); }
+    }
+    if (alertEl) alertEl.innerHTML = '<div class="alert alert-success">✅ 上传完成！新增 ' + saved + ' 条记录，更新 ' + dupCount + ' 条已有记录</div>';
+    setTimeout(() => { const a = document.getElementById('visitAlert'); if (a) a.innerHTML = ''; }, 5000);
+    renderVisitTable();
+  } catch(e) {
+    if (alertEl) alertEl.innerHTML = '<div class="alert alert-danger">❌ 上传失败: ' + e.message + '</div>';
+  }
+  input.value = '';
+}
+
+// ============ Visit Statistics Dashboard ============
+function renderVisitStats() {
+  if (!hasPermission('visitStats')) {
+    document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
+    return;
+  }
+  const body = document.getElementById('contentBody');
+  const today = new Date().toISOString().split('T')[0];
+  const mAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
+  body.innerHTML = `
+    <div class="card" style="margin-bottom:20px"><div class="card-body">
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap" id="visitDateBtns">
+        <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('yesterday', this)">昨天</button>
+        <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('thisWeek', this)">本周</button>
+        <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('lastWeek', this)">上周</button>
+        <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('thisMonth', this)">本月</button>
+        <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('thisYear', this)">本年</button>
+        <button class="btn btn-sm btn-outline active" onclick="setVisitDateRange('custom', this)">自定义</button>
+      </div>
+      <div class="filter-bar">
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitStatsStart" value="${mAgo}"></div>
+        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitStatsEnd" value="${today}"></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="loadVisitStats()">🔍 统计</button></div>
+      </div>
+    </div></div>
+    <div id="visitStatsResults"></div>
+  `;
+  loadVisitStats();
+}
+
+function setVisitDateRange(type, btn) {
+  const now = new Date();
+  let start, end;
+  const todayStr = now.toISOString().split('T')[0];
+  if (type === 'yesterday') {
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    start = end = y.toISOString().split('T')[0];
+  } else if (type === 'thisWeek') {
+    const day = now.getDay() || 7;
+    const monday = new Date(now); monday.setDate(monday.getDate() - day + 1);
+    start = monday.toISOString().split('T')[0]; end = todayStr;
+  } else if (type === 'lastWeek') {
+    const day = now.getDay() || 7;
+    const monday = new Date(now); monday.setDate(monday.getDate() - day + 1 - 7);
+    const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
+    start = monday.toISOString().split('T')[0]; end = sunday.toISOString().split('T')[0];
+  } else if (type === 'thisMonth') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]; end = todayStr;
+  } else if (type === 'thisYear') {
+    start = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0]; end = todayStr;
+  }
+  if (start) document.getElementById('visitStatsStart').value = start;
+  if (end) document.getElementById('visitStatsEnd').value = end;
+  if (btn) {
+    document.querySelectorAll('#visitDateBtns button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  loadVisitStats();
+}
+
+function loadVisitStats() {
+  const s = document.getElementById('visitStatsStart')?.value || '';
+  const e = document.getElementById('visitStatsEnd')?.value || '';
+  let records = cloudData.visitRecords.filter(r => {
+    const d = (r.contactTime || '').split(' ')[0];
+    return (!s || d >= s) && (!e || d <= e);
+  });
+  const c = document.getElementById('visitStatsResults');
+  if (!records.length) {
+    c.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无拜访数据</div>';
+    return;
+  }
+  const vc = getVisitConfig();
+  const allResults = vc.visitResults || [];
+  const totalVisits = records.length;
+  const totalResulted = records.filter(r => r.visitResult).length;
+  const colors = ['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
+  // ===== 全部汇总 =====
+  let summaryCards = `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:var(--primary)">${totalVisits}</div><div style="font-size:12px;color:var(--gray-500)">总拜访数</div></div>`;
+  summaryCards += `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:var(--success)">${totalResulted}</div><div style="font-size:12px;color:var(--gray-500)">已标记结果</div></div>`;
+  allResults.forEach((result, idx) => {
+    const count = records.filter(r => r.visitResult === result).length;
+    const pct = totalVisits > 0 ? (count / totalVisits * 100).toFixed(1) : '0';
+    const color = colors[idx % colors.length];
+    summaryCards += `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:${color}">${count}</div><div style="font-size:12px;color:var(--gray-500)">${result} (${pct}%)</div></div>`;
+  });
+  const unmarked = totalVisits - totalResulted;
+  summaryCards += `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:var(--gray-400)">${unmarked}</div><div style="font-size:12px;color:var(--gray-500)">未标记</div></div>`;
+  let summaryHtml = `<div class="card" style="margin-bottom:16px"><div class="card-header"><h4>📋 全部汇总（${s || '全部'} 至 ${e || '全部'}）</h4></div><div class="card-body"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px">${summaryCards}</div></div></div>`;
+  // ===== 按部门→拜访结果分组 =====
+  const deptGroups = {};
+  records.forEach(r => {
+    const dept = r.department || '未分组';
+    if (!deptGroups[dept]) deptGroups[dept] = [];
+    deptGroups[dept].push(r);
+  });
+  const dColors = ['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
+  let groupHtml = '';
+  let ci = 0;
+  Object.keys(deptGroups).sort().forEach(dept => {
+    const deptRecords = deptGroups[dept];
+    const color = dColors[ci % dColors.length]; ci++;
+    const resultCounts = {};
+    allResults.forEach(r => { resultCounts[r] = 0; });
+    resultCounts['未标记'] = 0;
+    deptRecords.forEach(r => {
+      const vr = r.visitResult || '未标记';
+      if (resultCounts[vr] === undefined) resultCounts[vr] = 0;
+      resultCounts[vr]++;
+    });
+    // Stat bar
+    const statBar = Object.keys(resultCounts).filter(k => resultCounts[k] > 0).map(k => {
+      const kColor = k === '未标记' ? 'var(--gray-400)' : (colors[allResults.indexOf(k) % colors.length] || 'var(--primary)');
+      return `<div style="text-align:center;padding:8px 6px;background:var(--gray-50);border-radius:6px"><div style="font-size:16px;font-weight:700;color:${kColor}">${resultCounts[k]}</div><div style="font-size:10px;color:var(--gray-500)">${k}</div></div>`;
+    }).join('');
+    // Detail table
+    const detailRows = Object.keys(resultCounts).filter(k => resultCounts[k] > 0).map(k => {
+      const kColor = k === '未标记' ? 'var(--gray-400)' : (colors[allResults.indexOf(k) % colors.length] || 'var(--primary)');
+      const empSet = [...new Set(deptRecords.filter(r => (r.visitResult || '未标记') === k).map(r => r.employee))];
+      const sampleEmployees = empSet.slice(0, 5).join(', ');
+      return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${kColor};margin-right:6px"></span><strong>${k}</strong></td><td style="text-align:center">${resultCounts[k]}</td><td style="color:var(--gray-500);font-size:12px">${sampleEmployees}${empSet.length > 5 ? '...' : ''}</td></tr>`;
+    }).join('');
+    groupHtml += `<div class="card" style="margin-bottom:16px;overflow:hidden">
+      <div class="card-header" style="border-left:4px solid ${color};padding:12px 16px;background:var(--gray-50)">
+        <h4 style="display:flex;align-items:center;gap:8px;font-size:15px;margin:0">
+          📍 ${dept}
+          <span style="font-size:12px;font-weight:400;color:var(--gray-500);background:var(--gray-100);padding:2px 10px;border-radius:10px">${deptRecords.length}次拜访</span>
+        </h4>
+      </div>
+      <div class="card-body" style="padding:16px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;margin-bottom:16px">${statBar}</div>
+        <div class="table-wrap"><table style="font-size:13px"><thead><tr><th>拜访结果</th><th style="width:80px;text-align:center">次数</th><th>销售人员</th></tr></thead><tbody>
+          ${detailRows}
+          <tr style="font-weight:700;background:var(--gray-50);border-top:2px solid ${color}"><td>小计</td><td style="text-align:center">${deptRecords.length}</td><td></td></tr>
+        </tbody></table></div>
+      </div>
+    </div>`;
+  });
+  c.innerHTML = summaryHtml + groupHtml;
 }
 
 // ============ Modal ============
