@@ -4176,6 +4176,11 @@ async function renderVisitData() {
   const mAgo = localYMD(new Date(Date.now()-30*86400000));
   const depts = [...new Set(cloudData.users.map(u => u.department).filter(d => d))].sort();
   const persons = [...new Set(cloudData.users.map(u => u.name))].sort();
+  const vc = getVisitConfig();
+  const batchResultOpts = (vc.visitResults || []).map(r => {
+    const col = getVisitResultColor(r);
+    return `<option value="${r.replace(/"/g,'&quot;')}" style="color:${col};font-weight:600">${r}</option>`;
+  }).join('');
   body.innerHTML = `
     <div id="visitAlert"></div>
     <div class="card" style="margin-bottom:20px"><div class="card-body">
@@ -4201,7 +4206,7 @@ async function renderVisitData() {
       <span id="visitSelCount" style="color:var(--gray-600);font-size:13px">已选 0 条</span>
       <select class="form-control form-control-sm" id="visitBatchResult" style="width:auto;display:inline-block">
         <option value="">批量设置拜访结果...</option>
-        ${['已成交','高意向','待跟进','暂无意向','已流失'].map(r => `<option value="${r}">${r}</option>`).join('')}
+        ${batchResultOpts}
       </select>
       <button class="btn btn-primary btn-sm" onclick="batchSetVisitResult()">🎯 批量修改结果</button>
       <button class="btn btn-danger btn-sm" onclick="batchDeleteVisit()">🗑️ 批量删除</button>
