@@ -4527,6 +4527,10 @@ async function renderMgrReport() {
   const weeks = getRecentWeeks(12);
   const depts = getDepartments();
   const myReports = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers')).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  // 已提交周报中出现过的周次（用于列表的按周筛选）
+  const weekLabelMap = {};
+  cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers')).forEach(r => { if (r.weekStart) weekLabelMap[r.weekStart] = r.weekLabel || (r.weekStart + ' ~ ' + r.weekEnd); });
+  const weekOptions = Object.keys(weekLabelMap).sort().reverse().map(ws => `<option value="${ws}">${weekLabelMap[ws]}</option>`).join('');
 
   body.innerHTML = `
     <div class="card" style="margin-bottom:20px">
@@ -4565,7 +4569,16 @@ async function renderMgrReport() {
       </div>
     </div>
     <div class="card">
-      <div class="card-header"><h4>📋 已提交的管理周报</h4></div>
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h4>📋 已提交的管理周报</h4>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select class="form-control form-control-sm" id="mgrReportWeekFilter" onchange="renderMgrReportList()" style="min-width:190px">
+            <option value="">全部周次</option>
+            ${weekOptions}
+          </select>
+          <button class="btn btn-sm btn-outline" onclick="exportMgrReports()">📥 导出</button>
+        </div>
+      </div>
       <div class="card-body" id="mgrReportList"></div>
     </div>
   `;
@@ -4741,9 +4754,12 @@ async function deleteMgrReport(id) {
 function renderMgrReportList() {
   const container = document.getElementById('mgrReportList');
   if (!container) return;
-  const myReports = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers')).sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const fw = document.getElementById('mgrReportWeekFilter')?.value || '';
+  let myReports = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers'));
+  if (fw) myReports = myReports.filter(r => r.weekStart === fw);
+  myReports.sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   if (!myReports.length) {
-    container.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无管理周报记录</div>';
+    container.innerHTML = '<div class="empty-state"><div class="icon">📭</div>' + (fw ? '该周次暂无管理周报记录' : '暂无管理周报记录') + '</div>';
     return;
   }
   container.innerHTML = myReports.map(r => {
@@ -4768,6 +4784,39 @@ function renderMgrReportList() {
       <div style="margin-top:8px;font-size:11px;color:var(--gray-400)">${r.createdAt ? '创建：' + r.createdAt.replace('T',' ').slice(0,16) : ''}${r.updatedAt && r.updatedAt !== r.createdAt ? ' · 更新：' + r.updatedAt.replace('T',' ').slice(0,16) : ''}</div>
     </div>`;
   }).join('');
+}
+
+// 导出「管理周报」列表（按当前周次筛选结果）
+function exportMgrReports() {
+  const fw = document.getElementById('mgrReportWeekFilter')?.value || '';
+  let list = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers'));
+  if (fw) list = list.filter(r => r.weekStart === fw);
+  if (!list.length) { showToast('没有可导出的周报', 'warning'); return; }
+  const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const headers = ['周次', '部门', '提交人', '总拜访数', '拜访结果明细', '周报内容', '创建时间', '更新时间'];
+  const rows = list.map(r => {
+    const snap = r.visitSnapshot || {};
+    const snapStr = Object.keys(snap).filter(k => k !== 'total' && snap[k] > 0).map(k => `${k}:${snap[k]}`).join('；');
+    return [
+      r.weekLabel || (r.weekStart + ' ~ ' + r.weekEnd),
+      r.department || '',
+      r.userName || '未知',
+      snap.total || 0,
+      snapStr,
+      (r.content || '').replace(/\n/g, ' '),
+      (r.createdAt || '').replace('T', ' ').slice(0, 16),
+      (r.updatedAt || '').replace('T', ' ').slice(0, 16)
+    ];
+  });
+  const csv = '\uFEFF' + [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '管理周报' + (fw ? '_' + fw : '_全部') + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('已导出 ' + list.length + ' 条周报');
 }
 
 // ============ Visit Statistics Dashboard ============
