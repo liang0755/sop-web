@@ -4611,7 +4611,13 @@ async function renderMgrReport() {
 function formatVisitSnapshotDetail(snap) {
   if (!snap) return '';
   if (Array.isArray(snap.details) && snap.details.length) {
-    return snap.details.map(d => `${d.result}:${d.count}人[${d.employees.join('、')}]`).join('；');
+    return snap.details.map(d => {
+      const empStr = Array.isArray(d.employees) ? d.employees.map(e => {
+        if (e && typeof e === 'object') return `${e.name}(${e.count})`;
+        return String(e);
+      }).join('、') : '';
+      return `${d.result}:${d.count}人[${empStr}]`;
+    }).join('；');
   }
   return Object.keys(snap).filter(k => k !== 'total' && snap[k] > 0).map(k => `${k}:${snap[k]}`).join('；');
 }
@@ -4646,21 +4652,23 @@ function updateMgrVisitSummary() {
   const unmarked = summary.byResult['未标记'] || 0;
   cards += `<div style="text-align:center;padding:10px;background:var(--gray-50);border-radius:6px"><div style="font-size:20px;font-weight:700;color:var(--gray-400)">${unmarked}</div><div style="font-size:11px;color:var(--gray-500)">未标记</div></div>`;
 
-  // 按「拜访结果」统计销售人员
+  // 按「拜访结果」统计销售人员（记录每人次数）
   const resultMap = {};
-  [...allResults, '未标记'].forEach(res => { if ((summary.byResult[res] || 0) > 0) resultMap[res] = []; });
+  [...allResults, '未标记'].forEach(res => { if ((summary.byResult[res] || 0) > 0) resultMap[res] = {}; });
   summary.records.forEach(rec => {
     const vr = rec.visitResult || '未标记';
-    if (!resultMap[vr]) resultMap[vr] = [];
+    if (!resultMap[vr]) resultMap[vr] = {};
     const emp = rec.employee || '未知';
-    if (!resultMap[vr].includes(emp)) resultMap[vr].push(emp);
+    resultMap[vr][emp] = (resultMap[vr][emp] || 0) + 1;
   });
   const resultRows = Object.keys(resultMap).map(result => {
-    const emps = resultMap[result];
-    const cnt = summary.byResult[result] || emps.length;
+    const empMap = resultMap[result];
+    const emps = Object.keys(empMap).map(name => ({ name, count: empMap[name] }));
+    const cnt = summary.byResult[result] || emps.reduce((s, e) => s + e.count, 0);
     const ridx = allResults.indexOf(result);
     const color = ridx >= 0 ? colors[ridx % colors.length] : 'var(--gray-400)';
-    return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${result}</strong></td><td style="text-align:center">${cnt}</td><td style="font-size:12px;color:var(--gray-600)">${emps.join('、')}</td></tr>`;
+    const empStr = emps.map(e => `${e.name}(${e.count})`).join('、');
+    return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${result}</strong></td><td style="text-align:center">${cnt}</td><td style="font-size:12px;color:var(--gray-600)">${empStr}</td></tr>`;
   }).join('');
 
   container.innerHTML = `
@@ -4692,13 +4700,14 @@ async function saveMgrReport(btn) {
   const visitSnapshot = {
     total: summary.total,
     details: [...allResults, '未标记'].filter(res => (summary.byResult[res] || 0) > 0).map(res => {
-      const emps = [];
+      const empMap = {};
       summary.records.forEach(rec => {
         const vr = rec.visitResult || '未标记';
         const emp = rec.employee || '未知';
-        if (vr === res && !emps.includes(emp)) emps.push(emp);
+        if (vr === res) empMap[emp] = (empMap[emp] || 0) + 1;
       });
-      return { result: res, count: summary.byResult[res] || emps.length, employees: emps };
+      const employees = Object.keys(empMap).map(name => ({ name, count: empMap[name] }));
+      return { result: res, count: summary.byResult[res] || employees.reduce((s, e) => s + e.count, 0), employees };
     })
   };
 
