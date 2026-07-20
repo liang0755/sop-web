@@ -2227,8 +2227,13 @@ function exportSummaryCSV() {
   const a = document.createElement('a');
   a.href = url;
   const tabLabel = summaryTab==='byPerson'?'按人员':summaryTab==='byDepartment'?'按部门':summaryTab==='byChannel'?'按渠道':'总计';
-  const deptTag = summaryFilters.dept ? '_' + summaryFilters.dept : '';
-  a.download = typeLabel + '汇总_' + tabLabel + deptTag + '_' + new Date().toISOString().split('T')[0] + '.csv';
+  let nameParts = [typeLabel + '汇总_' + tabLabel];
+  if (s || e) nameParts.push((s||'') + '至' + (e||''));
+  if (summaryFilters.dept) nameParts.push(summaryFilters.dept);
+  if (summaryFilters.person) nameParts.push(summaryFilters.person);
+  if (summaryFilters.channel) nameParts.push(summaryFilters.channel);
+  nameParts.push(new Date().toISOString().split('T')[0]);
+  a.download = nameParts.join('_') + '.csv';
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -2761,7 +2766,12 @@ function exportCSV(type) {
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `${type==='weekly'?'周报':'日报'}数据_${new Date().toISOString().split('T')[0]}.csv`;
+  let nameParts = [type==='weekly'?'周报':'日报' + '数据'];
+  if (s || e) nameParts.push((s||'') + '至' + (e||''));
+  if (fDept) nameParts.push(fDept);
+  if (fPerson) nameParts.push(fPerson);
+  nameParts.push(new Date().toISOString().split('T')[0]);
+  a.download = nameParts.join('_') + '.csv';
   a.click();
   URL.revokeObjectURL(url);
 }
