@@ -5282,8 +5282,8 @@ function renderGroupedVisitStats(records, s, e, mode) {
       <div>${ev}</div>
       <div style="font-size:10px;color:${color};font-weight:400;margin-bottom:2px">${cat || '—'}</div>
       <div style="display:flex;justify-content:center;gap:2px">
-        <button onclick="setPersonSort(${evJson},'asc')" title="按此列升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'asc' ? '#16a34a' : '#6b7280'}">▲</button>
-        <button onclick="setPersonSort(${evJson},'desc')" title="按此列降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'desc' ? '#dc2626' : '#6b7280'}">▼</button>
+        <button onclick='setPersonSort(${evJson},"asc")' title="按此列升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'asc' ? '#16a34a' : '#6b7280'}">▲</button>
+        <button onclick='setPersonSort(${evJson},"desc")' title="按此列降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'desc' ? '#dc2626' : '#6b7280'}">▼</button>
       </div>
     </th>`;
   }).join('');
@@ -5325,8 +5325,8 @@ function renderGroupedVisitStats(records, s, e, mode) {
     const active = personSortKey === c;
     return `<th style="text-align:center;white-space:nowrap;padding:8px 10px;color:${catColorMap[c] || '#6366f1'}">${c}
       <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
-        <button onclick="setPersonSort(${cJson},'asc')" title="按此列升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'asc' ? '#16a34a' : '#6b7280'}">▲</button>
-        <button onclick="setPersonSort(${cJson},'desc')" title="按此列降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'desc' ? '#dc2626' : '#6b7280'}">▼</button>
+        <button onclick='setPersonSort(${cJson},"asc")' title="按此列升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'asc' ? '#16a34a' : '#6b7280'}">▲</button>
+        <button onclick='setPersonSort(${cJson},"desc")' title="按此列降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && personSortDir === 'desc' ? '#dc2626' : '#6b7280'}">▼</button>
       </div>
     </th>`;
   }).join('');
