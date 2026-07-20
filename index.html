@@ -4021,6 +4021,8 @@ function deleteVisitResultOption(idx) {
 let visitEditBuffer = {};
 let selectedVisitIds = new Set(); // for batch operations
 let visitDataLoaded = false; // track whether visitRecords have been fetched
+let visitPageSize = 30;      // 拜访数据每页条数（默认 30，可选 30/50/100/200）
+let visitCurrentPage = 1;    // 拜访数据当前页码
 
 // Lazy-load visit records for managers who didn't get them during initial load
 async function ensureVisitDataLoaded() {
@@ -4057,12 +4059,13 @@ async function renderVisitData() {
           <button class="btn btn-success" onclick="document.getElementById('visitFileInput').click()">📤 上传CSV</button>
           <button class="btn btn-outline" onclick="downloadVisitTemplate()">📥 下载模板</button>
         </div>
-        <div class="form-group"><label>部门</label><select class="form-control" id="visitFDept" onchange="renderVisitTable()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}">${d}</option>`).join('')}</select></div>
-        <div class="form-group"><label>销售</label><select class="form-control" id="visitFPerson" onchange="renderVisitTable()"><option value="">全部人员</option>${persons.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div>
-        <div class="form-group"><label>拜访结果</label><select class="form-control" id="visitFResult" onchange="renderVisitTable()"><option value="">全部</option><option value="empty">⚠️ 未填写结果</option><option value="filled">已填写结果</option></select></div>
+        <div class="form-group"><label>部门</label><select class="form-control" id="visitFDept" onchange="resetVisitPage()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}">${d}</option>`).join('')}</select></div>
+        <div class="form-group"><label>销售</label><select class="form-control" id="visitFPerson" onchange="resetVisitPage()"><option value="">全部人员</option>${persons.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div>
+        <div class="form-group"><label>拜访结果</label><select class="form-control" id="visitFResult" onchange="resetVisitPage()"><option value="">全部</option><option value="empty">⚠️ 未填写结果</option><option value="filled">已填写结果</option></select></div>
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}"></div>
-        <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="renderVisitTable()">🔍 查询</button></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="resetVisitPage()">🔍 查询</button></div>
+        <div class="form-group"><label>每页</label><select class="form-control" id="visitPageSize" onchange="onVisitPageSizeChange()"><option value="30"${visitPageSize===30?' selected':''}>30</option><option value="50"${visitPageSize===50?' selected':''}>50</option><option value="100"${visitPageSize===100?' selected':''}>100</option><option value="200"${visitPageSize===200?' selected':''}>200</option></select></div>
       </div>
     </div></div>
     <div id="visitResults"></div>
@@ -4093,6 +4096,9 @@ function renderVisitTable() {
   const fDept = document.getElementById('visitFDept')?.value || '';
   const fPerson = document.getElementById('visitFPerson')?.value || '';
   const fResult = document.getElementById('visitFResult')?.value || '';
+  // 同步每页条数（来自筛选栏下拉）
+  const psSel = document.getElementById('visitPageSize');
+  if (psSel) visitPageSize = parseInt(psSel.value, 10) || 30;
   let records = [...cloudData.visitRecords];
   if (s) records = records.filter(r => (r.contactTime || '').split(' ')[0] >= s);
   if (e) records = records.filter(r => (r.contactTime || '').split(' ')[0] <= e);
@@ -4101,21 +4107,28 @@ function renderVisitTable() {
   if (fResult === 'empty') records = records.filter(r => !r.visitResult);
   else if (fResult === 'filled') records = records.filter(r => !!r.visitResult);
   records.sort((a, b) => (b.contactTime || '').localeCompare(a.contactTime || ''));
+  const total = records.length;
+  const pages = Math.max(1, Math.ceil(total / visitPageSize));
+  if (visitCurrentPage > pages) visitCurrentPage = pages;
+  if (visitCurrentPage < 1) visitCurrentPage = 1;
+  const startIdx = (visitCurrentPage - 1) * visitPageSize;
+  const pageRecords = records.slice(startIdx, startIdx + visitPageSize);
   const c = document.getElementById('visitResults');
-  if (!records.length) {
+  if (!total) {
+    visitCurrentPage = 1;
     c.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无拜访数据，请点击"上传CSV"按钮上传</div>';
     document.getElementById('visitSaveBar').style.display = 'none';
     return;
   }
   const vc = getVisitConfig();
   const resultOptions = vc.visitResults.map(r => {
-    const c = getVisitResultColor(r);
-    return `<option value="${r}" style="color:${c};font-weight:600">● ${r}</option>`;
+    const col = getVisitResultColor(r);
+    return `<option value="${r}" style="color:${col};font-weight:600">● ${r}</option>`;
   }).join('');
   // Color legend
   const legend = vc.visitResults.map(r => {
-    const c = getVisitResultColor(r);
-    return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--gray-600)"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${c}"></span>${r}</span>`;
+    const col = getVisitResultColor(r);
+    return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--gray-600)"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${col}"></span>${r}</span>`;
   }).join('<span style="color:var(--gray-300);margin:0 6px">|</span>');
   c.innerHTML = `<div style="margin-bottom:10px;padding:8px 12px;background:var(--gray-50);border-radius:6px;display:flex;align-items:center;gap:4px;flex-wrap:wrap">
     <span style="font-size:12px;font-weight:600;color:var(--gray-700);margin-right:4px">🎨 拜访结果颜色：</span>${legend}
@@ -4128,7 +4141,7 @@ function renderVisitTable() {
       <th style="min-width:130px">拜访结果</th><th style="min-width:200px">卡点说明</th>
     </tr></thead>
     <tbody>
-      ${records.map(r => {
+      ${pageRecords.map(r => {
         const vr = visitEditBuffer[r.id]?.visitResult !== undefined ? visitEditBuffer[r.id].visitResult : (r.visitResult || '');
         const bn = visitEditBuffer[r.id]?.blockerNote !== undefined ? visitEditBuffer[r.id].blockerNote : (r.blockerNote || '');
         const vrColor = getVisitResultColor(vr);
@@ -4154,21 +4167,66 @@ function renderVisitTable() {
         </tr>`;
       }).join('')}
     </tbody>
-  </table></div></div>`;
+  </table></div></div>
+  ${renderVisitPager(total, pages, visitCurrentPage)}`;
   // Restore select values
-  records.forEach(r => {
+  pageRecords.forEach(r => {
     const vr = visitEditBuffer[r.id]?.visitResult !== undefined ? visitEditBuffer[r.id].visitResult : (r.visitResult || '');
     const select = c.querySelector(`tr[data-id="${r.id}"] select`);
     if (select) select.value = vr;
   });
-  // Sync select-all checkbox state
+  // Sync select-all checkbox state（仅当前页）
   const selAll = document.getElementById('visitSelectAll');
   if (selAll) {
-    const allSelected = records.length > 0 && records.every(r => selectedVisitIds.has(r.id));
+    const allSelected = pageRecords.length > 0 && pageRecords.every(r => selectedVisitIds.has(r.id));
     selAll.checked = allSelected;
   }
   updateVisitBatchBar();
   updateVisitSaveBar();
+}
+
+// 拜访数据分页控件
+function renderVisitPager(total, pages, cur) {
+  const window = 2;
+  const startP = Math.max(1, cur - window);
+  const endP = Math.min(pages, cur + window);
+  const nums = [];
+  for (let i = startP; i <= endP; i++) nums.push(i);
+  if (startP > 1) { if (startP > 2) nums.unshift('...'); nums.unshift(1); }
+  if (endP < pages) { if (endP < pages - 1) nums.push('...'); nums.push(pages); }
+  const btns = nums.map(n => {
+    if (n === '...') return '<span style="padding:0 6px;color:var(--gray-400)">…</span>';
+    const active = n === cur;
+    return `<button class="btn btn-sm ${active ? 'btn-primary' : 'btn-outline'}" onclick="gotoVisitPage(${n})" ${active ? 'disabled' : ''}>${n}</button>`;
+  }).join('');
+  return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;justify-content:space-between">
+    <div style="font-size:13px;color:var(--gray-600)">共 ${total} 条，第 ${cur} / ${pages} 页</div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-sm btn-outline" onclick="gotoVisitPage(1)" ${cur <= 1 ? 'disabled' : ''}>« 首页</button>
+      <button class="btn btn-sm btn-outline" onclick="gotoVisitPage(${cur - 1})" ${cur <= 1 ? 'disabled' : ''}>‹ 上一页</button>
+      ${btns}
+      <button class="btn btn-sm btn-outline" onclick="gotoVisitPage(${cur + 1})" ${cur >= pages ? 'disabled' : ''}>下一页 ›</button>
+      <button class="btn btn-sm btn-outline" onclick="gotoVisitPage(${pages})" ${cur >= pages ? 'disabled' : ''}>末页 »</button>
+    </div>
+  </div>`;
+}
+function gotoVisitPage(p) {
+  const n = parseInt(p, 10);
+  if (isNaN(n)) return;
+  visitCurrentPage = n;
+  renderVisitTable();
+  const el = document.getElementById('visitResults');
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function onVisitPageSizeChange() {
+  const sel = document.getElementById('visitPageSize');
+  if (sel) visitPageSize = parseInt(sel.value, 10) || 30;
+  visitCurrentPage = 1;
+  renderVisitTable();
+}
+function resetVisitPage() {
+  visitCurrentPage = 1;
+  renderVisitTable();
 }
 
 function onVisitEdit(recordId, field, value) {
