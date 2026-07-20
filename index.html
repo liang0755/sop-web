@@ -4004,6 +4004,7 @@ function deleteVisitResultOption(idx) {
 
 // ============ Visit Data Management ============
 let visitEditBuffer = {};
+let selectedVisitIds = new Set(); // for batch operations
 let visitDataLoaded = false; // track whether visitRecords have been fetched
 
 // Lazy-load visit records for managers who didn't get them during initial load
@@ -4049,12 +4050,23 @@ async function renderVisitData() {
     </div></div>
     <div id="visitResults"></div>
     <div style="height:70px"></div>
+    <div class="sticky-submit-bar" id="visitBatchBar" style="display:none">
+      <span id="visitSelCount" style="color:var(--gray-600);font-size:13px">已选 0 条</span>
+      <select class="form-control form-control-sm" id="visitBatchResult" style="width:auto;display:inline-block">
+        <option value="">批量设置拜访结果...</option>
+        ${['已成交','高意向','待跟进','暂无意向','已流失'].map(r => `<option value="${r}">${r}</option>`).join('')}
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="batchSetVisitResult()">🎯 批量修改结果</button>
+      <button class="btn btn-danger btn-sm" onclick="batchDeleteVisit()">🗑️ 批量删除</button>
+      <button class="btn btn-outline btn-sm" onclick="clearVisitSelection()">✖ 取消选择</button>
+    </div>
     <div class="sticky-submit-bar" id="visitSaveBar" style="display:none">
       <span style="color:var(--gray-600);font-size:13px" id="visitEditCount">0条修改</span>
       <button class="btn btn-primary" onclick="saveVisitEdits()">💾 保存修改</button>
     </div>
   `;
   visitEditBuffer = {};
+  selectedVisitIds.clear();
   renderVisitTable();
 }
 
@@ -4090,6 +4102,7 @@ function renderVisitTable() {
   </div>
   <div class="card"><div class="table-wrap"><table style="font-size:12px">
     <thead><tr>
+      <th style="width:34px;text-align:center"><input type="checkbox" id="visitSelectAll" onchange="toggleVisitSelectAll(this)"></th>
       <th>联系时间</th><th>客户</th><th>联系人</th><th>手机号</th><th>签到事件</th>
       <th>员工</th><th>部门</th><th>签到地址</th><th>备注</th>
       <th style="min-width:130px">拜访结果</th><th style="min-width:200px">卡点说明</th>
@@ -4100,7 +4113,9 @@ function renderVisitTable() {
         const bn = visitEditBuffer[r.id]?.blockerNote !== undefined ? visitEditBuffer[r.id].blockerNote : (r.blockerNote || '');
         const vrColor = getVisitResultColor(vr);
         const vrBg = getVisitResultBg(vr);
+        const checked = selectedVisitIds.has(r.id) ? 'checked' : '';
         return `<tr data-id="${r.id}">
+          <td style="text-align:center"><input type="checkbox" class="visit-row-cb" data-id="${r.id}" ${checked} onchange="onVisitSelect('${r.id}', this.checked)"></td>
           <td>${r.contactTime || ''}</td>
           <td>${r.customer || ''}</td>
           <td>${r.contactPerson || ''}</td>
@@ -4126,6 +4141,13 @@ function renderVisitTable() {
     const select = c.querySelector(`tr[data-id="${r.id}"] select`);
     if (select) select.value = vr;
   });
+  // Sync select-all checkbox state
+  const selAll = document.getElementById('visitSelectAll');
+  if (selAll) {
+    const allSelected = records.length > 0 && records.every(r => selectedVisitIds.has(r.id));
+    selAll.checked = allSelected;
+  }
+  updateVisitBatchBar();
   updateVisitSaveBar();
 }
 
@@ -4136,7 +4158,7 @@ function onVisitEdit(recordId, field, value) {
   if (field === 'visitResult') {
     const row = document.querySelector(`tr[data-id="${recordId}"]`);
     if (row) {
-      const td = row.querySelector('td:nth-child(10)');
+      const td = row.querySelector('td:nth-child(11)');
       const select = td?.querySelector('select');
       const color = getVisitResultColor(value);
       const bg = getVisitResultBg(value);
@@ -4163,6 +4185,88 @@ function updateVisitSaveBar() {
     bar.style.display = count > 0 ? '' : 'none';
     const countEl = document.getElementById('visitEditCount');
     if (countEl) countEl.textContent = count + '条修改';
+  }
+}
+
+function onVisitSelect(id, checked) {
+  if (checked) selectedVisitIds.add(id);
+  else selectedVisitIds.delete(id);
+  updateVisitBatchBar();
+  // Sync select-all checkbox
+  const selAll = document.getElementById('visitSelectAll');
+  if (selAll) {
+    const rows = document.querySelectorAll('.visit-row-cb');
+    selAll.checked = rows.length > 0 && [...rows].every(cb => cb.checked);
+  }
+}
+
+function toggleVisitSelectAll(cb) {
+  const rows = document.querySelectorAll('.visit-row-cb');
+  rows.forEach(box => {
+    box.checked = cb.checked;
+    const id = box.getAttribute('data-id');
+    if (cb.checked) selectedVisitIds.add(id);
+    else selectedVisitIds.delete(id);
+  });
+  updateVisitBatchBar();
+}
+
+function updateVisitBatchBar() {
+  const bar = document.getElementById('visitBatchBar');
+  if (bar) {
+    bar.style.display = selectedVisitIds.size > 0 ? '' : 'none';
+    const countEl = document.getElementById('visitSelCount');
+    if (countEl) countEl.textContent = '已选 ' + selectedVisitIds.size + ' 条';
+  }
+}
+
+function clearVisitSelection() {
+  selectedVisitIds.clear();
+  document.querySelectorAll('.visit-row-cb').forEach(cb => cb.checked = false);
+  const selAll = document.getElementById('visitSelectAll');
+  if (selAll) selAll.checked = false;
+  updateVisitBatchBar();
+}
+
+async function batchSetVisitResult() {
+  const result = document.getElementById('visitBatchResult')?.value || '';
+  if (!result) { showToast('请先在下拉框选择拜访结果', 'warning'); return; }
+  const ids = [...selectedVisitIds];
+  if (!ids.length) { showToast('请先勾选拜访数据', 'warning'); return; }
+  const alertEl = document.getElementById('visitAlert');
+  if (alertEl) alertEl.innerHTML = '<div class="alert alert-info">正在批量修改拜访结果...</div>';
+  try {
+    for (const id of ids) {
+      const rec = cloudData.visitRecords.find(r => r.id === id);
+      if (!rec) continue;
+      rec.visitResult = result;
+      await apiUpdate('visitRecords', id, { visitResult: result });
+    }
+    if (alertEl) alertEl.innerHTML = '<div class="alert alert-success">✅ 已批量修改 ' + ids.length + ' 条记录的拜访结果为「' + result + '」</div>';
+    setTimeout(() => { const a = document.getElementById('visitAlert'); if (a) a.innerHTML = ''; }, 3000);
+    renderVisitTable();
+  } catch(e) {
+    if (alertEl) alertEl.innerHTML = '<div class="alert alert-danger">❌ 批量修改失败: ' + e.message + '</div>';
+  }
+}
+
+async function batchDeleteVisit() {
+  const ids = [...selectedVisitIds];
+  if (!ids.length) { showToast('请先勾选拜访数据', 'warning'); return; }
+  if (!confirm('确认删除选中的 ' + ids.length + ' 条拜访数据？此操作不可撤销。')) return;
+  const alertEl = document.getElementById('visitAlert');
+  if (alertEl) alertEl.innerHTML = '<div class="alert alert-info">正在批量删除...</div>';
+  try {
+    for (const id of ids) {
+      try { await apiDelete('visitRecords', id); } catch(e) { console.warn('Delete failed:', id, e.message); }
+    }
+    cloudData.visitRecords = cloudData.visitRecords.filter(r => !selectedVisitIds.has(r.id));
+    selectedVisitIds.clear();
+    if (alertEl) alertEl.innerHTML = '<div class="alert alert-success">✅ 已删除 ' + ids.length + ' 条拜访数据</div>';
+    setTimeout(() => { const a = document.getElementById('visitAlert'); if (a) a.innerHTML = ''; }, 3000);
+    renderVisitTable();
+  } catch(e) {
+    if (alertEl) alertEl.innerHTML = '<div class="alert alert-danger">❌ 批量删除失败: ' + e.message + '</div>';
   }
 }
 
@@ -4260,49 +4364,40 @@ async function handleVisitUpload(input) {
     });
     const newRecords = [];
     let dupCount = 0;
+    // Keys already in DB (contactTime|employee|customer) — duplicates to be filtered out
+    const existingKeys = new Set(cloudData.visitRecords.map(e => (e.contactTime||'') + '|' + (e.employee||'') + '|' + (e.customer||'')));
+    // Keys already added in this batch — avoid within-file duplicates too
+    const batchKeys = new Set();
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
       if (!r[colMap.contactTime] && !r[colMap.employee]) continue;
       const contactTime = r[colMap.contactTime] || '';
       const employee = r[colMap.employee] || '';
       const customer = r[colMap.customer] || '';
-      const existing = cloudData.visitRecords.find(e =>
-        e.contactTime === contactTime && e.employee === employee && e.customer === customer
-      );
-      if (existing) {
-        // Update existing record fields but keep visitResult/blockerNote
-        Object.assign(existing, {
-          contactPerson: r[colMap.contactPerson] || '',
-          phone: r[colMap.phone] || '',
-          signinEvent: r[colMap.signinEvent] || '',
-          signoutTime: r[colMap.signoutTime] || '',
-          duration: r[colMap.duration] || '',
-          signoutStatus: r[colMap.signoutStatus] || '',
-          department: r[colMap.department] || '',
-          signinAddress: r[colMap.signinAddress] || '',
-          remark: r[colMap.remark] || ''
-        });
-        await apiUpdate('visitRecords', existing.id, existing);
+      const key = contactTime + '|' + employee + '|' + customer;
+      // Skip duplicates: already in DB or already in this batch → auto filter out
+      if (existingKeys.has(key) || batchKeys.has(key)) {
         dupCount++;
-      } else {
-        const record = {
-          id: genId(),
-          contactTime, customer,
-          contactPerson: r[colMap.contactPerson] || '',
-          phone: r[colMap.phone] || '',
-          signinEvent: r[colMap.signinEvent] || '',
-          signoutTime: r[colMap.signoutTime] || '',
-          duration: r[colMap.duration] || '',
-          signoutStatus: r[colMap.signoutStatus] || '',
-          employee, department: r[colMap.department] || '',
-          signinAddress: r[colMap.signinAddress] || '',
-          remark: r[colMap.remark] || '',
-          visitResult: '', blockerNote: '',
-          uploadedAt: new Date().toISOString(),
-          uploadedBy: currentUser.name
-        };
-        newRecords.push(record);
+        continue;
       }
+      batchKeys.add(key);
+      const record = {
+        id: genId(),
+        contactTime, customer,
+        contactPerson: r[colMap.contactPerson] || '',
+        phone: r[colMap.phone] || '',
+        signinEvent: r[colMap.signinEvent] || '',
+        signoutTime: r[colMap.signoutTime] || '',
+        duration: r[colMap.duration] || '',
+        signoutStatus: r[colMap.signoutStatus] || '',
+        employee, department: r[colMap.department] || '',
+        signinAddress: r[colMap.signinAddress] || '',
+        remark: r[colMap.remark] || '',
+        visitResult: '', blockerNote: '',
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: currentUser.name
+      };
+      newRecords.push(record);
     }
     let saved = 0;
     for (const rec of newRecords) {
@@ -4312,7 +4407,11 @@ async function handleVisitUpload(input) {
         saved++;
       } catch(e) { console.warn('Failed to save visit record:', e); }
     }
-    if (alertEl) alertEl.innerHTML = '<div class="alert alert-success">✅ 上传完成！新增 ' + saved + ' 条记录，更新 ' + dupCount + ' 条已有记录</div>';
+    if (alertEl) {
+      let msg = '✅ 上传完成！新增 ' + saved + ' 条记录';
+      if (dupCount > 0) msg += '，已自动过滤 ' + dupCount + ' 条重复记录';
+      alertEl.innerHTML = '<div class="alert alert-success">' + msg + '</div>';
+    }
     setTimeout(() => { const a = document.getElementById('visitAlert'); if (a) a.innerHTML = ''; }, 5000);
     renderVisitTable();
   } catch(e) {
