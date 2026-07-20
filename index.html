@@ -2066,10 +2066,16 @@ function exportSummaryCSV() {
   }
 
   // Add filter info at top
+  const deptLabel = summaryFilters.dept || '全部部门';
+  const personLabel = summaryFilters.person || '全部人员';
+  const channelLabel = summaryFilters.channel || '全部渠道';
   const filterInfo = [
     '# ' + typeLabel + '汇总数据导出',
     '# 查询区间: ' + (s||'全部') + ' 至 ' + (e||'全部'),
     '# 汇总维度: ' + (summaryTab==='byPerson'?'按人员':summaryTab==='byDepartment'?'按部门':summaryTab==='byChannel'?'按渠道':'总计'),
+    '# 筛选部门: ' + deptLabel,
+    '# 筛选人员: ' + personLabel,
+    '# 筛选渠道: ' + channelLabel,
     '# 导出时间: ' + new Date().toLocaleString('zh-CN'),
     ''
   ];
@@ -2078,7 +2084,9 @@ function exportSummaryCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = typeLabel + '汇总_' + (summaryTab==='byPerson'?'按人员':summaryTab==='byDepartment'?'按部门':summaryTab==='byChannel'?'按渠道':'总计') + '_' + new Date().toISOString().split('T')[0] + '.csv';
+  const tabLabel = summaryTab==='byPerson'?'按人员':summaryTab==='byDepartment'?'按部门':summaryTab==='byChannel'?'按渠道':'总计';
+  const deptTag = summaryFilters.dept ? '_' + summaryFilters.dept : '';
+  a.download = typeLabel + '汇总_' + tabLabel + deptTag + '_' + new Date().toISOString().split('T')[0] + '.csv';
   a.click();
   URL.revokeObjectURL(url);
 }
