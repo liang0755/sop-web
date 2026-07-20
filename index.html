@@ -4044,6 +4044,11 @@ async function renderVisitData() {
     document.getElementById('contentBody').innerHTML = '<div style="text-align:center;padding:60px"><div style="font-size:36px;margin-bottom:14px;animation:spin 1.5s linear infinite;display:inline-block">⏳</div><div style="font-size:15px;color:#666">正在加载拜访数据...</div></div>';
     await ensureVisitDataLoaded();
   }
+  // 恢复上次记忆的每页条数
+  try {
+    const saved = parseInt(localStorage.getItem('sop_visitPageSize') || '', 10);
+    if (saved === 30 || saved === 50 || saved === 100 || saved === 200) visitPageSize = saved;
+  } catch(e) {}
   const body = document.getElementById('contentBody');
   const today = new Date().toISOString().split('T')[0];
   const mAgo = new Date(Date.now()-30*86400000).toISOString().split('T')[0];
@@ -4207,6 +4212,11 @@ function renderVisitPager(total, pages, cur) {
       ${btns}
       <button class="btn btn-sm btn-outline" onclick="gotoVisitPage(${cur + 1})" ${cur >= pages ? 'disabled' : ''}>下一页 ›</button>
       <button class="btn btn-sm btn-outline" onclick="gotoVisitPage(${pages})" ${cur >= pages ? 'disabled' : ''}>末页 »</button>
+      <span style="display:inline-block;width:1px;height:20px;background:var(--gray-200);margin:0 4px"></span>
+      <span style="font-size:13px;color:var(--gray-600)">跳至</span>
+      <input type="number" id="visitJumpPage" min="1" max="${pages}" value="${cur}" class="form-control form-control-sm" style="width:64px" onkeydown="if(event.key==='Enter')gotoVisitPage(this.value)">
+      <span style="font-size:13px;color:var(--gray-600)">页</span>
+      <button class="btn btn-sm btn-outline" onclick="gotoVisitPage(document.getElementById('visitJumpPage')?.value)">跳转</button>
     </div>
   </div>`;
 }
@@ -4221,6 +4231,7 @@ function gotoVisitPage(p) {
 function onVisitPageSizeChange() {
   const sel = document.getElementById('visitPageSize');
   if (sel) visitPageSize = parseInt(sel.value, 10) || 30;
+  try { localStorage.setItem('sop_visitPageSize', String(visitPageSize)); } catch(e) {}
   visitCurrentPage = 1;
   renderVisitTable();
 }
