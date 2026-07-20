@@ -4040,9 +4040,11 @@ async function renderVisitData() {
           <label>上传拜访数据</label>
           <input type="file" id="visitFileInput" accept=".csv" style="display:none" onchange="handleVisitUpload(this)">
           <button class="btn btn-success" onclick="document.getElementById('visitFileInput').click()">📤 上传CSV</button>
+          <button class="btn btn-outline" onclick="downloadVisitTemplate()">📥 下载模板</button>
         </div>
         <div class="form-group"><label>部门</label><select class="form-control" id="visitFDept" onchange="renderVisitTable()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}">${d}</option>`).join('')}</select></div>
         <div class="form-group"><label>销售</label><select class="form-control" id="visitFPerson" onchange="renderVisitTable()"><option value="">全部人员</option>${persons.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div>
+        <div class="form-group"><label>拜访结果</label><select class="form-control" id="visitFResult" onchange="renderVisitTable()"><option value="">全部</option><option value="empty">⚠️ 未填写结果</option><option value="filled">已填写结果</option></select></div>
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}"></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="renderVisitTable()">🔍 查询</button></div>
@@ -4075,11 +4077,14 @@ function renderVisitTable() {
   const e = document.getElementById('visitFEnd')?.value || '';
   const fDept = document.getElementById('visitFDept')?.value || '';
   const fPerson = document.getElementById('visitFPerson')?.value || '';
+  const fResult = document.getElementById('visitFResult')?.value || '';
   let records = [...cloudData.visitRecords];
   if (s) records = records.filter(r => (r.contactTime || '').split(' ')[0] >= s);
   if (e) records = records.filter(r => (r.contactTime || '').split(' ')[0] <= e);
   if (fDept) records = records.filter(r => r.department === fDept);
   if (fPerson) records = records.filter(r => r.employee === fPerson);
+  if (fResult === 'empty') records = records.filter(r => !r.visitResult);
+  else if (fResult === 'filled') records = records.filter(r => !!r.visitResult);
   records.sort((a, b) => (b.contactTime || '').localeCompare(a.contactTime || ''));
   const c = document.getElementById('visitResults');
   if (!records.length) {
@@ -4302,6 +4307,22 @@ async function saveVisitEdits() {
   }
 }
 
+function downloadVisitTemplate() {
+  // Template headers match the import mapping; 拜访结果 and 卡点说明 are the last two columns
+  const headers = ['联系时间','客户','联系人','手机号','签到事件','签退时间','时长','签退状态','员工','部门','签到地址','备注','拜访结果','卡点说明'];
+  const csv = '﻿' + headers.join(',') + '\n';
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '拜访数据导入模板.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('模板已下载，请按表头格式填写后上传', 'success');
+}
+
 function parseVisitCSV(text) {
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   const rows = [];
@@ -4361,6 +4382,8 @@ async function handleVisitUpload(input) {
       else if (h.includes('部门')) colMap.department = i;
       else if (h.includes('签到记录') || h.includes('签到地址')) colMap.signinAddress = i;
       else if (h.includes('备注')) colMap.remark = i;
+      else if (h.includes('拜访结果')) colMap.visitResult = i;
+      else if (h.includes('卡点') || h.includes('说明')) colMap.blockerNote = i;
     });
     const newRecords = [];
     let dupCount = 0;
@@ -4391,9 +4414,10 @@ async function handleVisitUpload(input) {
         duration: r[colMap.duration] || '',
         signoutStatus: r[colMap.signoutStatus] || '',
         employee, department: r[colMap.department] || '',
-        signinAddress: r[colMap.signinAddress] || '',
-        remark: r[colMap.remark] || '',
-        visitResult: '', blockerNote: '',
+          signinAddress: r[colMap.signinAddress] || '',
+          remark: r[colMap.remark] || '',
+          visitResult: (colMap.visitResult !== undefined && r[colMap.visitResult]) ? r[colMap.visitResult] : '',
+          blockerNote: (colMap.blockerNote !== undefined && r[colMap.blockerNote]) ? r[colMap.blockerNote] : '',
         uploadedAt: new Date().toISOString(),
         uploadedBy: currentUser.name
       };
@@ -4446,9 +4470,10 @@ function getRecentWeeks(count) {
     const weekNum = getWeekNumber(monday);
     const year = monday.getFullYear();
     const fmt = (dt) => { const m = String(dt.getMonth()+1).padStart(2,'0'); const d = String(dt.getDate()).padStart(2,'0'); return `${m}/${d}`; };
+    const fmtDate = (dt) => { const y = dt.getFullYear(); const m = String(dt.getMonth()+1).padStart(2,'0'); const d = String(dt.getDate()).padStart(2,'0'); return `${y}-${m}-${d}`; };
     weeks.push({
-      weekStart: monday.toISOString().split('T')[0],
-      weekEnd: sunday.toISOString().split('T')[0],
+      weekStart: fmtDate(monday),
+      weekEnd: fmtDate(sunday),
       label: `${year}年第${weekNum}周 (${fmt(monday)}-${fmt(sunday)})`
     });
   }
@@ -4562,6 +4587,12 @@ function updateMgrVisitSummary() {
   const colors = ['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
   const vc = getVisitConfig();
   const allResults = vc.visitResults || [];
+
+  // If there is no visit data for this week+dept, do NOT show the summary
+  if (summary.total === 0) {
+    container.innerHTML = '<div style="padding:12px;background:var(--gray-50);border-radius:8px;color:var(--gray-400);font-size:13px;text-align:center">📭 该部门当周暂无拜访数据，无需带出汇总</div>';
+    return;
+  }
 
   let cards = `<div style="text-align:center;padding:10px;background:var(--gray-50);border-radius:6px"><div style="font-size:20px;font-weight:700;color:var(--primary)">${summary.total}</div><div style="font-size:11px;color:var(--gray-500)">总拜访数</div></div>`;
   allResults.forEach((result, idx) => {
