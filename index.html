@@ -241,6 +241,9 @@ tr:hover td{background:var(--gray-50)}
 .sidebar-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:998;opacity:0;transition:opacity .3s}
 .sidebar-overlay.show{display:block;opacity:1}
 
+/* Member dashboard "my submission" row — stacks cleanly on mobile */
+.member-submit-row{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
+
 @media(max-width:768px){
   /* Sidebar becomes a slide-out drawer */
   .sidebar{position:fixed;top:0;left:0;height:100vh;width:240px;z-index:999;transform:translateX(-100%);transition:transform .3s ease;display:flex;flex-direction:column}
@@ -330,6 +333,9 @@ tr:hover td{background:var(--gray-50)}
   .card-header h4{font-size:14px}
   .card-header > div{flex-wrap:wrap;gap:6px}
   .card-body{padding:14px}
+
+  /* Member "my submission" row stacks vertically on mobile */
+  .member-submit-row{flex-direction:column;align-items:flex-start;gap:10px}
 
   /* Brand config inputs */
   #settingsBody .form-group label{font-size:13px}
@@ -578,28 +584,118 @@ async function loadCoreData() {
 }
 
 // Phase 2: Load report data (dailyReports, weeklyReports) — larger, needed after login
-async function loadReportData() {
-  if (reportsLoaded) return;
+// 判断当前用户是否需要「全部」报表数据（管理者可看他人；成员/查看者只加载自己的）
+function needsAllReports() {
+  return !currentUser || hasPermission('editOthers') || hasPermission('visitData') || hasPermission('mgrReport');
+}
+
+// ---------- 报表数据本地缓存：加速普通成员打开系统 / 填写日报周报 ----------
+const REPORTS_CACHE_KEY = 'sop_reports_cache_v1';
+const REPORTS_CACHE_TTL = 30 * 60 * 1000; // 30 分钟
+function saveReportsCache() {
   try {
-    // Only fetch visitRecords if user has visit permissions or not logged in yet
-    const needVisit = !currentUser || hasPermission('visitData') || hasPermission('visitStats');
-    // Only fetch mgrReports if user has mgrReport permission or not logged in yet
-    const needMgr = !currentUser || hasPermission('mgrReport');
-    const fetches = [
-      fetch(FB_BASE + '/dailyReports.json'),
-      fetch(FB_BASE + '/weeklyReports.json')
-    ];
-    if (needVisit) fetches.push(fetch(FB_BASE + '/visitRecords.json'));
-    if (needMgr) fetches.push(fetch(FB_BASE + '/mgrReports.json'));
-    const results = await Promise.all(fetches);
-    cloudData.dailyReports = results[0].ok ? Object.values(await results[0].json() || {}) : [];
-    cloudData.weeklyReports = results[1].ok ? Object.values(await results[1].json() || {}) : [];
-    if (results[2]) { cloudData.visitRecords = results[2].ok ? Object.values(await results[2].json() || {}) : []; visitDataLoaded = true; }
-    if (results[3]) { cloudData.mgrReports = results[3].ok ? Object.values(await results[3].json() || {}) : []; }
+    const payload = {
+      t: Date.now(),
+      mgr: needsAllReports(),
+      daily: cloudData.dailyReports,
+      weekly: cloudData.weeklyReports,
+      visit: cloudData.visitRecords,
+      mgrR: cloudData.mgrReports
+    };
+    const s = JSON.stringify(payload);
+    if (s.length > 4 * 1024 * 1024) return; // 过大不缓存，避免撑爆 localStorage
+    localStorage.setItem(REPORTS_CACHE_KEY, s);
+  } catch(e) {}
+}
+function loadReportsCache() {
+  try {
+    const raw = localStorage.getItem(REPORTS_CACHE_KEY);
+    if (!raw) return false;
+    const p = JSON.parse(raw);
+    if (!p || typeof p.t !== 'number') return false;
+    if (Date.now() - p.t > REPORTS_CACHE_TTL) return false;     // 过期
+    if (p.mgr !== needsAllReports()) return false;              // 角色变化 → 缓存失效
+    cloudData.dailyReports = Array.isArray(p.daily) ? p.daily : [];
+    cloudData.weeklyReports = Array.isArray(p.weekly) ? p.weekly : [];
+    cloudData.visitRecords = Array.isArray(p.visit) ? p.visit : [];
+    cloudData.mgrReports = Array.isArray(p.mgrR) ? p.mgrR : [];
+    return true;
+  } catch(e) { return false; }
+}
+
+// 实际发起网络请求拉取报表数据；成员优先用 userId 范围查询（库已建索引时极快），失败回退全量
+async function fetchReportsFromCloud() {
+  const needVisit = !currentUser || hasPermission('visitData') || hasPermission('visitStats');
+  const needMgr = !currentUser || hasPermission('mgrReport');
+  const all = needsAllReports();
+  let dailyUrl = FB_BASE + '/dailyReports.json';
+  let weeklyUrl = FB_BASE + '/weeklyReports.json';
+  if (!all && currentUser) {
+    const q = 'orderBy="userId"&equalTo="' + encodeURIComponent(currentUser.id) + '"';
+    dailyUrl += '?' + q;
+    weeklyUrl += '?' + q;
+  }
+  const fetches = [fetch(dailyUrl), fetch(weeklyUrl)];
+  if (needVisit) fetches.push(fetch(FB_BASE + '/visitRecords.json'));
+  if (needMgr) fetches.push(fetch(FB_BASE + '/mgrReports.json'));
+  const res = await Promise.all(fetches);
+  const okJson = async (r) => { if (!r || !r.ok) return null; const j = await r.json().catch(() => null); return (j && !j.error) ? j : null; };
+  let dj = await okJson(res[0]);
+  let wj = await okJson(res[1]);
+  // 范围查询未命中（多半是库未对 userId 建索引）→ 回退全量拉取
+  if (dj == null || wj == null) {
+    const fr = await Promise.all([fetch(FB_BASE + '/dailyReports.json'), fetch(FB_BASE + '/weeklyReports.json')]);
+    dj = await okJson(fr[0]);
+    wj = await okJson(fr[1]);
+  }
+  const out = {
+    daily: dj != null ? Object.values(dj) : [],
+    weekly: wj != null ? Object.values(wj) : []
+  };
+  if (needVisit && res[2]) out.visit = Object.values(await okJson(res[2]) || {});
+  if (needMgr && res[3]) out.mgr = Object.values(await okJson(res[3]) || {});
+  return out;
+}
+
+async function loadReportData(opts) {
+  if (reportsLoaded && !(opts && opts.force)) return;
+  // 缓存优先：普通成员/查看者可直接用本地缓存秒开，随后后台静默刷新
+  if (!opts || !opts.force) {
+    if (loadReportsCache()) {
+      reportsLoaded = true;
+      visitDataLoaded = true;
+      refreshReportsInBackground();
+      return;
+    }
+  }
+  try {
+    const data = await fetchReportsFromCloud();
+    cloudData.dailyReports = data.daily;
+    cloudData.weeklyReports = data.weekly;
+    if (data.visit) cloudData.visitRecords = data.visit;
+    if (data.mgr !== undefined) cloudData.mgrReports = data.mgr;
   } catch(e) {
     console.warn('Report data fetch failed:', e.message);
   }
   reportsLoaded = true;
+  visitDataLoaded = true;
+  saveReportsCache();
+}
+
+// 后台静默刷新（不阻塞界面）：拿到最新数据后更新内存 + 缓存，并刷新当前已打开的报表页
+async function refreshReportsInBackground() {
+  try {
+    const data = await fetchReportsFromCloud();
+    cloudData.dailyReports = data.daily;
+    cloudData.weeklyReports = data.weekly;
+    if (data.visit) cloudData.visitRecords = data.visit;
+    if (data.mgr !== undefined) cloudData.mgrReports = data.mgr;
+    saveReportsCache();
+    const activePage = document.querySelector('.nav-item.active')?.dataset.page;
+    if (activePage === 'dashboard') renderDashboard();
+    else if (activePage === 'dailyData') loadDataView('daily');
+    else if (activePage === 'weeklyData') loadDataView('weekly');
+  } catch(e) {}
 }
 
 // Full load (for refresh scenarios — always re-fetches everything)
@@ -612,7 +708,7 @@ async function loadCloudData() {
   await _usersDataPromise;
   _coreDataPromise = loadCoreData();
   await _coreDataPromise;
-  await loadReportData();
+  await loadReportData({force: true});
   return cloudData;
 }
 
@@ -705,7 +801,7 @@ function doLogout() {
 async function showApp() {
   // Wait for config data (formConfig, brandConfig, etc.) to finish loading
   if (_coreDataPromise) { try { await _coreDataPromise; } catch(e){} }
-  // If report data not loaded yet, show loading and wait
+  // If report data not loaded yet, show loading and await (cache hit → near-instant; network → spinner)
   if (!reportsLoaded) {
     const loadingEl = document.getElementById('loginLoading');
     const formBox = document.getElementById('loginFormBox');
@@ -715,8 +811,7 @@ async function showApp() {
       startLoadingCountdown(3);
     }
     if (formBox) formBox.style.display = 'none';
-    let waited = 0;
-    while (!reportsLoaded && waited < 10000) { await new Promise(r => setTimeout(r, 200)); waited += 200; }
+    await loadReportData();
     finishLoadingCountdown();
     if (loadingEl) loadingEl.style.display = 'none';
     if (formBox) formBox.style.display = '';
@@ -1049,6 +1144,40 @@ function renderDashboard() {
   const cloudStatus = isCloudAvailable
     ? `<div class="alert alert-success">☁️ 云端数据已连接 <span style="font-size:12px;color:var(--gray-500)">（上次更新: ${refreshTimeStr}）</span></div>`
     : '<div class="alert alert-danger">⚠️ 云端连接失败，请检查网络后刷新页面</div>';
+
+  // ===== 成员 / 查看者：只展示个人提交情况，避免加载/计算全员数据（更快、且不会因数据被裁剪而显示错乱）=====
+  if (!needsAllReports()) {
+    const thisWeekStart = getWeekStart();
+    const thisWeekEnd = getWeekEnd(thisWeekStart);
+    const todayDaily = myDaily.find(r => r.reportDate === today);
+    const myWeek = myWeekly.find(r => r.weekStart === thisWeekStart);
+    const ym2 = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0');
+    const monthD = myDaily.filter(r => r.reportDate && r.reportDate.startsWith(ym2)).length;
+    const monthW = myWeekly.filter(r => r.weekStart && r.weekStart.startsWith(ym2)).length;
+    const statCard = (icon, bg, fg, val, label) => `<div class="stat-card"><div class="stat-icon" style="background:${bg};color:${fg}">${icon}</div><div class="stat-value">${val}</div><div class="stat-label">${label}</div></div>`;
+    const memberStats = `<div class="stat-grid">
+      ${statCard('📝', todayDaily ? '#dcfce7' : '#fef3c7', todayDaily ? '#16a34a' : '#f59e0b', todayDaily ? '✅' : '⚠️', '今日日报')}
+      ${statCard('📋', myWeek ? '#ede9fe' : '#fef3c7', myWeek ? '#7c3aed' : '#f59e0b', myWeek ? '✅' : '⚠️', '本周周报')}
+      ${statCard('📝', '#dbeafe', '#2563eb', myDaily.length, '我的日报总数')}
+      ${statCard('📋', '#ede9fe', '#7c3aed', myWeekly.length, '我的周报总数')}
+      ${statCard('📅', '#dbeafe', '#2563eb', monthD, '本月日报')}
+      ${statCard('📅', '#ede9fe', '#7c3aed', monthW, '本月周报')}
+    </div>`;
+    const memberPanel = `<div class="card" style="margin-bottom:20px"><div class="card-header"><h4>📌 我的提交情况</h4></div><div class="card-body">
+      <div class="member-submit-row">
+        <div style="font-size:14px">今日日报：${todayDaily ? '<span class="badge badge-success">已提交</span>' : '<span class="badge badge-warning">未提交</span>'}</div>
+        ${todayDaily ? '' : '<button class="btn btn-sm btn-primary" onclick="navTo(\'dailyForm\')">去填写日报 →</button>'}
+        <div style="font-size:14px">本周周报（${thisWeekStart} ~ ${thisWeekEnd}）：${myWeek ? '<span class="badge badge-success">已提交</span>' : '<span class="badge badge-warning">未提交</span>'}</div>
+        ${myWeek ? '' : '<button class="btn btn-sm btn-primary" onclick="navTo(\'weeklyForm\')">去填写周报 →</button>'}
+      </div>
+    </div></div>`;
+    body.innerHTML = cloudStatus + `
+      <div class="entry-grid">
+        <div class="entry-card daily" onclick="navTo('dailyForm')"><div class="entry-icon">📝</div><h4>日报填写</h4><p>记录每日渠道执行数据</p></div>
+        <div class="entry-card weekly" onclick="navTo('weeklyForm')"><div class="entry-icon">📋</div><h4>周报填写</h4><p>记录每周渠道汇总数据</p></div>
+      </div>` + memberStats + memberPanel;
+    return;
+  }
 
   // --- Selected dates (with defaults) ---
   const dailyDate = _dashDailyDate || yesterday;
@@ -5704,8 +5833,8 @@ function finishLoadingCountdown() {
   _coreDataPromise = _usersDataPromise.then(() => loadCoreData()).then(() => {
     applyBrandConfig();
   });
-  // Phase 2: Start loading report data in background (NON-BLOCKING)
-  _coreDataPromise.then(() => loadReportData());
+  // NOTE: 报表数据不再于启动时无条件拉取（那时 currentUser 尚为 null 会触发全量下载）。
+  // 改为登录后（doLogin / 自动登录）再按角色加载，成员仅取自己数据，并用本地缓存秒开。
 
   // Show login form IMMEDIATELY — don't wait for Firebase
   const loadingEl = document.getElementById('loginLoading');
@@ -5726,16 +5855,14 @@ function finishLoadingCountdown() {
       localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
       // Wait for config data before showing dashboard
       if (_coreDataPromise) { try { await _coreDataPromise; } catch(e){} }
-      // Wait for report data before showing dashboard
+      // Wait for report data (cache hit → instant; otherwise spinner) before showing dashboard
       if (!reportsLoaded) {
-        // Show loading screen while reports load
         if (loadingEl) {
           loadingEl.innerHTML = '<div style="font-size:36px;margin-bottom:14px;animation:spin 1.5s linear infinite;display:inline-block">⏳</div><div id="loadingStepText" style="font-size:15px;font-weight:600;margin-bottom:16px;color:#fff">正在加载报表数据...</div><div style="width:260px;height:6px;background:rgba(255,255,255,.15);border-radius:3px;margin:0 auto 10px;overflow:hidden"><div id="loadingProgress" style="width:0%;height:100%;background:linear-gradient(90deg,#3b82f6,#06b6d4);border-radius:3px;transition:width .3s ease"></div></div><div id="loadingCountdown" style="font-size:12px;color:rgba(255,255,255,.55)">正在准备...</div>';
           loadingEl.style.display = '';
         }
         if (formBox) formBox.style.display = 'none';
-        let waited = 0;
-        while (!reportsLoaded && waited < 15000) { await new Promise(r => setTimeout(r, 200)); waited += 200; }
+        await loadReportData();
         if (loadingEl) loadingEl.style.display = 'none';
         if (formBox) formBox.style.display = '';
       }
