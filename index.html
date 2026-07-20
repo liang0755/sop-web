@@ -1879,6 +1879,74 @@ function renderSummaryTab() {
     <div class="card"><div class="card-header"><h4>📊 渠道数据对比</h4></div><div class="card-body"><canvas id="sumChartChannel" style="max-height:300px"></canvas></div></div>
     <div class="card"><div class="card-header"><h4>📈 提交趋势</h4></div><div class="card-body"><canvas id="sumChartTrend" style="max-height:300px"></canvas></div></div>
   </div>`;renderSummaryCharts();return}
+  // ===== 按部门汇总：分组展示，每个部门单独区块，列出门店明细 + 小计 =====
+  if(summaryTab==='byDepartment'){
+    const deptPersons={};
+    summaryData.byPerson.forEach(p=>{const d=p.department||'未分组';if(!deptPersons[d])deptPersons[d]=[];deptPersons[d].push(p);});
+    const deptSummary={};
+    summaryData.byDepartment.forEach(d=>{deptSummary[d.department||'未分组']=d;});
+    if(Object.keys(deptPersons).length===0){c.innerHTML='<div class="empty-state"><div class="icon">📭</div>暂无数据</div>';return;}
+    let html=`<div class="card" style="margin-bottom:16px"><div class="card-header"><h4>📊 部门数据对比图</h4></div><div class="card-body"><canvas id="sumChartCompare" style="max-height:300px"></canvas></div></div>`;
+    const dColors=['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
+    let ci=0;
+    Object.keys(deptPersons).sort().forEach(dept=>{
+      const persons=deptPersons[dept];
+      const ds=deptSummary[dept]||{};
+      const color=dColors[ci%dColors.length];ci++;
+      const statBar=[
+        {l:'报告数',v:ds.count||0},
+        {l:'新增线索',v:f(ds.newLeads)},
+        {l:'有效建联',v:f(ds.effectiveContacts)},
+        {l:'AB意向',v:f(ds.abIntent)},
+        {l:'成交客户',v:f(ds.closedCustomers)},
+        {l:'成交金额',v:fm(ds.dealAmount)},
+        {l:'目标金额',v:fm(ds.targetAmount)},
+        {l:'完成率',v:ds.completionRate||'0%'},
+      ].map(s=>`<div style="text-align:center;padding:10px 6px;background:var(--gray-50);border-radius:8px"><div style="font-size:16px;font-weight:700;color:${color}">${s.v}</div><div style="font-size:11px;color:var(--gray-500);margin-top:2px">${s.l}</div></div>`).join('');
+      html+=`<div class="card" style="margin-bottom:16px;overflow:hidden">
+        <div class="card-header" style="border-left:4px solid ${color};padding:12px 16px;background:var(--gray-50)">
+          <h4 style="display:flex;align-items:center;gap:8px;font-size:15px;margin:0">
+            📍 ${dept}
+            <span style="font-size:12px;font-weight:400;color:var(--gray-500);background:var(--gray-100);padding:2px 10px;border-radius:10px">${persons.length}人</span>
+          </h4>
+        </div>
+        <div class="card-body" style="padding:16px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(95px,1fr));gap:8px;margin-bottom:16px">${statBar}</div>
+          <div class="table-wrap"><table><thead><tr>
+            <th>姓名</th><th>报告数</th><th>新增线索</th><th>有效建联</th><th>AB意向</th><th>成交客户</th><th>成交金额</th><th>建联转AB率</th><th>目标金额</th><th>完成率</th>
+          </tr></thead><tbody>
+            ${persons.map(p=>`<tr>
+              <td><strong>${p.name}</strong></td>
+              <td>${p.count||0}</td>
+              <td>${f(p.newLeads)}</td>
+              <td>${f(p.effectiveContacts)}</td>
+              <td>${f(p.abIntent)}</td>
+              <td>${f(p.closedCustomers)}</td>
+              <td style="font-weight:600;color:var(--success)">${fm(p.dealAmount)}</td>
+              <td>${p.contactToAbRate}</td>
+              <td>${fm(p.targetAmount)}</td>
+              <td style="font-weight:600;color:${p.completionRate!=='0%'?'var(--primary)':'var(--gray-400)'}">${p.completionRate}</td>
+            </tr>`).join('')}
+            <tr style="font-weight:700;background:var(--gray-50);border-top:2px solid ${color}">
+              <td>小计</td>
+              <td>${ds.count||0}</td>
+              <td>${f(ds.newLeads)}</td>
+              <td>${f(ds.effectiveContacts)}</td>
+              <td>${f(ds.abIntent)}</td>
+              <td>${f(ds.closedCustomers)}</td>
+              <td style="color:var(--success)">${fm(ds.dealAmount)}</td>
+              <td>${ds.contactToAbRate}</td>
+              <td>${fm(ds.targetAmount)}</td>
+              <td style="color:${ds.completionRate!=='0%'?'var(--primary)':'var(--gray-400)'}">${ds.completionRate}</td>
+            </tr>
+          </tbody></table></div>
+        </div>
+      </div>`;
+    });
+    c.innerHTML=html;
+    renderSummaryCharts();
+    return;
+  }
   let data,titleCol;
   if(summaryTab==='byPerson'){data=summaryData.byPerson;titleCol='姓名'}
   else if(summaryTab==='byDepartment'){data=summaryData.byDepartment;titleCol='部门'}
@@ -2042,14 +2110,29 @@ function exportSummaryCSV() {
     rows.push('建联转AB率,' + t.contactToAbRate);
     rows.push('目标金额,' + fm(t.targetAmount));
     rows.push('完成率,' + t.completionRate);
+  } else if (summaryTab === 'byDepartment') {
+    // 按部门分组导出：每个部门一个小节，列出门店明细 + 小计行
+    const deptPersons = {};
+    summaryData.byPerson.forEach(p => { const d = p.department || '未分组'; if(!deptPersons[d]) deptPersons[d] = []; deptPersons[d].push(p); });
+    const deptSummary = {};
+    summaryData.byDepartment.forEach(d => { deptSummary[d.department || '未分组'] = d; });
+    const personHeaders = ['姓名','报告数','新增线索','有效建联','AB意向','成交客户','成交金额','建联转AB率','目标金额','完成率'];
+    Object.keys(deptPersons).sort().forEach(dept => {
+      const persons = deptPersons[dept];
+      const ds = deptSummary[dept] || {};
+      rows.push('');
+      rows.push('【' + dept + '】（' + persons.length + '人）');
+      rows.push(personHeaders.join(','));
+      persons.forEach(p => {
+        rows.push([p.name, p.count||0, f(p.newLeads), f(p.effectiveContacts), f(p.abIntent), f(p.closedCustomers), fm(p.dealAmount), p.contactToAbRate, fm(p.targetAmount), p.completionRate].join(','));
+      });
+      rows.push(['小计', ds.count||0, f(ds.newLeads), f(ds.effectiveContacts), f(ds.abIntent), f(ds.closedCustomers), fm(ds.dealAmount), ds.contactToAbRate, fm(ds.targetAmount), ds.completionRate].join(','));
+    });
   } else {
     let data, titleCol, headers;
     if (summaryTab === 'byPerson') {
       data = summaryData.byPerson; titleCol = '姓名';
       headers = ['姓名','部门','报告数','新增线索','有效建联','AB意向','成交客户','成交金额','建联转AB率','目标金额','完成率'];
-    } else if (summaryTab === 'byDepartment') {
-      data = summaryData.byDepartment; titleCol = '部门';
-      headers = ['部门','报告数','新增线索','有效建联','AB意向','成交客户','成交金额','建联转AB率','目标金额','完成率'];
     } else {
       data = summaryData.byChannel; titleCol = '渠道';
       headers = ['渠道','报告数','新增线索','有效建联','AB意向','成交客户','成交金额','建联转AB率','目标金额','完成率'];
