@@ -527,11 +527,29 @@ async function loadCoreData() {
     if (!rcData) {
       try { await fetch(FB_BASE + '/roleConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.roleConfig)}); } catch(e) {}
     }
-    // Load visit config
-    const vcData = vRes.ok ? await vRes.json() : null;
-    cloudData.visitConfig = vcData || JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
-    if (!vcData) {
-      try { await fetch(FB_BASE + '/visitConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.visitConfig)}); } catch(e) {}
+    // Migration: restrict visit permissions to management roles only (admin, manager)
+    if (cloudData.roleConfig && cloudData.roleConfig.roles) {
+      let roleChanged = false;
+      cloudData.roleConfig.roles.forEach(role => {
+        if (role.key !== 'admin' && role.key !== 'manager') {
+          if (role.permissions && role.permissions.visitData === true) { role.permissions.visitData = false; roleChanged = true; }
+          if (role.permissions && role.permissions.visitStats === true) { role.permissions.visitStats = false; roleChanged = true; }
+        }
+      });
+      if (roleChanged) {
+        try { await fetch(FB_BASE + '/roleConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.roleConfig)}); } catch(e) {}
+      }
+    }
+    // Load visit config (only if user has visit permissions or not logged in yet)
+    const needVisitConfig = !currentUser || hasPermission('visitData') || hasPermission('visitStats');
+    if (needVisitConfig) {
+      const vcData = vRes.ok ? await vRes.json() : null;
+      cloudData.visitConfig = vcData || JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
+      if (!vcData) {
+        try { await fetch(FB_BASE + '/visitConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.visitConfig)}); } catch(e) {}
+      }
+    } else {
+      cloudData.visitConfig = JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
     }
     isCloudAvailable = true;
   } catch(e) {
@@ -549,14 +567,17 @@ async function loadCoreData() {
 async function loadReportData() {
   if (reportsLoaded) return;
   try {
-    const [dRes, wRes, visitRes] = await Promise.all([
+    // Only fetch visitRecords if user has visit permissions or not logged in yet
+    const needVisit = !currentUser || hasPermission('visitData') || hasPermission('visitStats');
+    const fetches = [
       fetch(FB_BASE + '/dailyReports.json'),
-      fetch(FB_BASE + '/weeklyReports.json'),
-      fetch(FB_BASE + '/visitRecords.json')
-    ]);
-    cloudData.dailyReports = dRes.ok ? Object.values(await dRes.json() || {}) : [];
-    cloudData.weeklyReports = wRes.ok ? Object.values(await wRes.json() || {}) : [];
-    cloudData.visitRecords = visitRes.ok ? Object.values(await visitRes.json() || {}) : [];
+      fetch(FB_BASE + '/weeklyReports.json')
+    ];
+    if (needVisit) fetches.push(fetch(FB_BASE + '/visitRecords.json'));
+    const results = await Promise.all(fetches);
+    cloudData.dailyReports = results[0].ok ? Object.values(await results[0].json() || {}) : [];
+    cloudData.weeklyReports = results[1].ok ? Object.values(await results[1].json() || {}) : [];
+    if (results[2]) { cloudData.visitRecords = results[2].ok ? Object.values(await results[2].json() || {}) : []; visitDataLoaded = true; }
   } catch(e) {
     console.warn('Report data fetch failed:', e.message);
   }
@@ -567,6 +588,7 @@ async function loadReportData() {
 async function loadCloudData() {
   dataLoaded = false;
   reportsLoaded = false;
+  visitDataLoaded = false;
   _usersDataPromise = loadUsersOnly();
   await _usersDataPromise;
   _coreDataPromise = loadCoreData();
@@ -743,14 +765,16 @@ async function silentRefresh(page) {
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
   try {
-    const [dRes, wRes, vRes] = await Promise.all([
+    const needVisit = hasPermission('visitData') || hasPermission('visitStats');
+    const fetches = [
       fetch(FB_BASE + '/dailyReports.json'),
-      fetch(FB_BASE + '/weeklyReports.json'),
-      fetch(FB_BASE + '/visitRecords.json')
-    ]);
-    const newDaily = dRes.ok ? Object.values(await dRes.json() || {}) : [];
-    const newWeekly = wRes.ok ? Object.values(await wRes.json() || {}) : [];
-    const newVisit = vRes.ok ? Object.values(await vRes.json() || {}) : [];
+      fetch(FB_BASE + '/weeklyReports.json')
+    ];
+    if (needVisit) fetches.push(fetch(FB_BASE + '/visitRecords.json'));
+    const results = await Promise.all(fetches);
+    const newDaily = results[0].ok ? Object.values(await results[0].json() || {}) : [];
+    const newWeekly = results[1].ok ? Object.values(await results[1].json() || {}) : [];
+    const newVisit = results[2] ? (results[2].ok ? Object.values(await results[2].json() || {}) : []) : cloudData.visitRecords;
     // Only update + re-render if data count changed (new records added by others)
     if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length) {
       cloudData.dailyReports = newDaily;
@@ -842,7 +866,7 @@ const DEFAULT_ROLE_CONFIG = {
         roleConfig: false, settings: true,
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
-        visitData: true, visitStats: true
+        visitData: false, visitStats: false
       }
     },
     {
@@ -854,7 +878,7 @@ const DEFAULT_ROLE_CONFIG = {
         roleConfig: false, settings: true,
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
-        visitData: true, visitStats: true
+        visitData: false, visitStats: false
       }
     }
   ]
@@ -3954,11 +3978,27 @@ function deleteVisitResultOption(idx) {
 
 // ============ Visit Data Management ============
 let visitEditBuffer = {};
+let visitDataLoaded = false; // track whether visitRecords have been fetched
 
-function renderVisitData() {
+// Lazy-load visit records for managers who didn't get them during initial load
+async function ensureVisitDataLoaded() {
+  if (visitDataLoaded) return;
+  visitDataLoaded = true;
+  try {
+    const res = await fetch(FB_BASE + '/visitRecords.json');
+    cloudData.visitRecords = res.ok ? Object.values(await res.json() || {}) : [];
+  } catch(e) { cloudData.visitRecords = []; }
+}
+
+async function renderVisitData() {
   if (!hasPermission('visitData')) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
     return;
+  }
+  // Ensure visit records are loaded (lazy-load for managers)
+  if (cloudData.visitRecords.length === 0) {
+    document.getElementById('contentBody').innerHTML = '<div style="text-align:center;padding:60px"><div style="font-size:36px;margin-bottom:14px;animation:spin 1.5s linear infinite;display:inline-block">⏳</div><div style="font-size:15px;color:#666">正在加载拜访数据...</div></div>';
+    await ensureVisitDataLoaded();
   }
   const body = document.getElementById('contentBody');
   const today = new Date().toISOString().split('T')[0];
@@ -4224,10 +4264,15 @@ async function handleVisitUpload(input) {
 }
 
 // ============ Visit Statistics Dashboard ============
-function renderVisitStats() {
+async function renderVisitStats() {
   if (!hasPermission('visitStats')) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
     return;
+  }
+  // Ensure visit records are loaded (lazy-load for managers)
+  if (cloudData.visitRecords.length === 0) {
+    document.getElementById('contentBody').innerHTML = '<div style="text-align:center;padding:60px"><div style="font-size:36px;margin-bottom:14px;animation:spin 1.5s linear infinite;display:inline-block">⏳</div><div style="font-size:15px;color:#666">正在加载拜访数据...</div></div>';
+    await ensureVisitDataLoaded();
   }
   const body = document.getElementById('contentBody');
   const today = new Date().toISOString().split('T')[0];
