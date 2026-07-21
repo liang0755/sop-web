@@ -505,7 +505,7 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
       <div class="nav-item" data-page="summary" onclick="navTo('summary')"><span class="icon">👥</span> 团队汇总</div>
       <div class="nav-item" data-page="visitStats" onclick="navTo('visitStats')" id="navVisitStats"><span class="icon">📊</span> 拜访统计</div>
       <div class="nav-item" data-page="salesBoard" onclick="navTo('salesBoard')" id="navSalesBoard"><span class="icon">📺</span> 业绩看板</div>
-      <div class="nav-item" data-page="salesGrade" onclick="navTo('salesGrade')" id="navSalesGrade"><span class="icon">🎯</span> 销售升降级看板</div>
+      <div class="nav-item" data-page="salesGrade" onclick="navTo('salesGrade')" id="navSalesGrade"><span class="icon">🎯</span> 销售评级看板</div>
       <div class="nav-section-title">管理</div>
       <div class="nav-item" data-page="userManagement" onclick="navTo('userManagement')" id="navUserMgmt"><span class="icon">👤</span> 用户管理</div>
       <div class="nav-item" data-page="roleConfig" onclick="navTo('roleConfig')" id="navRoleConfig"><span class="icon">🛡️</span> 角色权限</div>
@@ -983,7 +983,7 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售升降级看板'};
+  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
   ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade}[page]||(()=>{}))();
   closeSidebar();
@@ -1137,7 +1137,7 @@ const PERMISSION_LABELS = {
   roleConfig: '角色权限配置', settings: '设置',
   editOthers: '编辑他人数据', deleteOthers: '删除他人数据', exportData: '导出数据',
   brandConfig: '品牌配置', aiConfig: 'AI模型配置',
-  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报', salesDetail: '业绩明细', salesBoard: '业绩看板', salesGrade: '销售升降级看板'
+  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报', salesDetail: '业绩明细', salesBoard: '业绩看板', salesGrade: '销售评级看板'
 };
 
 const PERMISSION_GROUPS = [
@@ -7858,6 +7858,8 @@ function saveGradeByKey(key, patch) {
 }
 
 let salesGradeYear = '';
+let salesGradeTab = 'matrix';
+let salesGradeMonth = (new Date().getMonth() + 1);
 function renderSalesGrade() {
   const records = cloudData.salesRecords || [];
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
@@ -7868,19 +7870,26 @@ function renderSalesGrade() {
   document.getElementById('contentBody').innerHTML = `
     <div class="card">
       <div class="card-header">
-        <h4>🎯 销售升降级看板</h4>
-        <button class="btn btn-outline btn-sm" onclick="exportSalesGrade()">⬇️ 导出 Excel</button>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <h4>🎯 销售评级看板</h4>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm ${salesGradeTab==='matrix'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='matrix';renderSalesGrade()">升降级矩阵</button>
+            <button class="btn btn-sm ${salesGradeTab==='single'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='single';renderSalesGrade()">单月评级看板</button>
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="${salesGradeTab==='single'?'exportSalesGradeSingle()':'exportSalesGrade()'}">⬇️ 导出 Excel</button>
       </div>
       <div class="card-body">
         <div class="filter-bar">
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="sgYear" onchange="refreshSalesGrade()">${yearOpts}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="sgYear" onchange="${salesGradeTab==='single'?'refreshSalesGradeSingle()':'refreshSalesGrade()'}">${yearOpts}</select></div>
+          ${salesGradeTab==='single'?`<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="sgMonth" onchange="salesGradeMonth=parseInt(this.value,10);refreshSalesGradeSingle()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===salesGradeMonth?'selected':''}>${m}月</option>`).join('')}</select></div>`:''}
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为当月职级对比上月职级的变化。</div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${salesGradeTab==='single'?'说明：单月评级看板为「升降级矩阵」的表格视图，数据与矩阵<b>联动</b>（评级/备注修改即时同步）。纵向仅显示在册<b>在职</b>销售，横向为：评级业绩（滚动3月）/ 评级 / 升降级 / 备注。':'说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为当月职级对比上月职级的变化。'}</div>
         <div class="table-wrap"><table id="sgTable"></table></div>
       </div>
     </div>`;
   if (document.getElementById('sgYear')) document.getElementById('sgYear').value = year;
-  refreshSalesGrade();
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
 }
 
 function refreshSalesGrade() {
@@ -7896,7 +7905,7 @@ function refreshSalesGrade() {
     const sp = (r.salesperson || '').trim();
     if (!sp) return;
     const st = statusMap[sp];
-    if (st === '离职' || st === '禁用') return; // 仅显示在册在职销售
+    if (st !== '在职') return; // 仅显示带绿色在职标签的在职销售，其余（离职/禁用/未知）一律视为离职并排除
     const m = parseInt(dm.slice(5, 7), 10);
     if (!(m >= 1 && m <= 12)) return;
     if (!base[sp]) base[sp] = {};
@@ -7970,7 +7979,7 @@ function exportSalesGrade() {
     const sp = (r.salesperson || '').trim();
     if (!sp) return;
     const st = statusMap[sp];
-    if (st === '离职' || st === '禁用') return;
+    if (st !== '在职') return; // 仅显示带绿色在职标签的在职销售，其余（离职/禁用/未知）一律视为离职并排除
     const m = parseInt(dm.slice(5, 7), 10);
     if (!(m >= 1 && m <= 12)) return;
     if (!base[sp]) base[sp] = {};
@@ -8017,6 +8026,124 @@ function exportSalesGrade() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '销售升降级');
   XLSX.writeFile(wb, `销售升降级看板_${year}.xlsx`);
+}
+
+function refreshSalesGradeSingle() {
+  const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
+  salesGradeYear = year;
+  const month = document.getElementById('sgMonth') ? parseInt(document.getElementById('sgMonth').value, 10) : salesGradeMonth;
+  salesGradeMonth = month;
+  const records = cloudData.salesRecords || [];
+  const statusMap = buildUserStatusMap();
+  const base = {};
+  const spSet = new Set();
+  records.forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    const st = statusMap[sp];
+    if (st !== '在职') return;
+    const m = parseInt(dm.slice(5, 7), 10);
+    if (!(m >= 1 && m <= 12)) return;
+    if (!base[sp]) base[sp] = {};
+    base[sp][m] = (base[sp][m] || 0) + toNum(r.amount);
+    spSet.add(sp);
+  });
+  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
+  const rows = [...spSet].map(sp => {
+    const row = { sp, roll: {}, single: base[sp] || {} };
+    months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); row.roll[m] = s; });
+    return row;
+  });
+  const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+  const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
+  rows.sort((a, b) => (b.roll[month] || 0) - (a.roll[month] || 0));
+  let h = `<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（在职）</span></th><th class="num">${month}月 评级业绩<br><span style="font-weight:400;font-size:10px;color:var(--gray-400)">滚动3月</span></th><th>评级</th><th style="text-align:center">升降级</th><th>备注</th></tr></thead><tbody>`;
+  if (!rows.length) {
+    h += `<tr><td colspan="5" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售的业绩数据</td></tr>`;
+  }
+  rows.forEach(row => {
+    const v = row.roll[month];
+    const single = row.single[month] || 0;
+    const auto = autoGrade(v, levels);
+    const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month)]) || {};
+    const grade = rec.grade || auto;
+    const note = rec.note || '';
+    let upFlag = '<span style="color:var(--gray-400)">—</span>';
+    if (month > 1) {
+      const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
+      const prevGrade = prevRec.grade || autoGrade(row.roll[month - 1], levels);
+      const ci = gradeOpts.indexOf(grade), pi = gradeOpts.indexOf(prevGrade);
+      if (ci > pi) upFlag = '<span style="color:#16a34a;font-weight:600">▲升级</span>';
+      else if (ci < pi) upFlag = '<span style="color:#dc2626;font-weight:600">▼降级</span>';
+      else upFlag = '<span style="color:var(--gray-400)">持平</span>';
+    }
+    const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
+    const k = gradeKey(year, row.sp, month);
+    h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`
+       + `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div></td>`
+       + `<td><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveGradeByKey('${k}', {grade:this.value})">${opts}</select></td>`
+       + `<td style="text-align:center">${upFlag}</td>`
+       + `<td><input type="text" class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveGradeByKey('${k}', {note:this.value})"></td>`
+       + `</tr>`;
+  });
+  h += '</tbody>';
+  const tbl = document.getElementById('sgTable');
+  if (tbl) tbl.innerHTML = h;
+}
+
+function exportSalesGradeSingle() {
+  const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
+  const month = document.getElementById('sgMonth') ? parseInt(document.getElementById('sgMonth').value, 10) : salesGradeMonth;
+  const statusMap = buildUserStatusMap();
+  const base = {};
+  const spSet = new Set();
+  (cloudData.salesRecords || []).forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    const st = statusMap[sp];
+    if (st !== '在职') return;
+    const m = parseInt(dm.slice(5, 7), 10);
+    if (!(m >= 1 && m <= 12)) return;
+    if (!base[sp]) base[sp] = {};
+    base[sp][m] = (base[sp][m] || 0) + toNum(r.amount);
+    spSet.add(sp);
+  });
+  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
+  const rows = [...spSet].map(sp => {
+    const row = { sp, roll: {}, single: base[sp] || {} };
+    months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); row.roll[m] = s; });
+    return row;
+  }).sort((a, b) => (b.roll[month] || 0) - (a.roll[month] || 0));
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+  const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
+  const aoa = [];
+  aoa.push([`单月评级看板 · ${year}年${month}月（滚动3个月评级业绩）`]);
+  aoa.push(['说明：评级业绩 = 该销售员当月及前2个月业绩之和；评级按表单配置自动评定或手动覆盖；升降级为当月评级对比上月评级；备注为手动填写']);
+  aoa.push(['销售员', '评级业绩(滚动3月)', '单月业绩', '评级', '升降级', '备注']);
+  rows.forEach(row => {
+    const v = Math.round(row.roll[month]);
+    const single = Math.round(row.single[month] || 0);
+    const auto = autoGrade(v, levels);
+    const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month)]) || {};
+    const grade = rec.grade || auto;
+    let chg = '—';
+    if (month > 1) {
+      const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
+      const prevGrade = prevRec.grade || autoGrade(Math.round(row.roll[month - 1]), levels);
+      const ci = gradeOpts.indexOf(grade), pi = gradeOpts.indexOf(prevGrade);
+      chg = ci > pi ? '▲升级' : (ci < pi ? '▼降级' : '持平');
+    }
+    aoa.push([row.sp, v, single, grade, chg, rec.note || '']);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '单月评级');
+  XLSX.writeFile(wb, `单月评级看板_${year}_${month}月.xlsx`);
 }
 
 
