@@ -575,13 +575,14 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
       fetch(FB_BASE + '/aiConfig.json'),
       fetch(FB_BASE + '/roleConfig.json'),
-      fetch(FB_BASE + '/visitConfig.json')
+      fetch(FB_BASE + '/visitConfig.json'),
+      fetch(FB_BASE + '/gradeRecords.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -671,6 +672,9 @@ async function loadCoreData() {
     } else {
       cloudData.visitConfig = JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
     }
+    // Load grade records (manual overrides for sales grade board)
+    const grData = grRes.ok ? await grRes.json() : null;
+    cloudData.gradeRecords = (grData && typeof grData === 'object') ? grData : {};
     isCloudAvailable = true;
   } catch(e) {
     console.warn('Core config fetch failed:', e.message);
@@ -680,6 +684,7 @@ async function loadCoreData() {
     cloudData.aiConfig = JSON.parse(JSON.stringify(DEFAULT_AI_CONFIG));
     cloudData.roleConfig = JSON.parse(JSON.stringify(DEFAULT_ROLE_CONFIG));
     cloudData.visitConfig = JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
+    cloudData.gradeRecords = {};
   }
 }
 
@@ -1252,7 +1257,13 @@ const DEFAULT_FORM_CONFIG = {
     customerProfile: []   // 客户画像
   },
   // 客户汇总数据页面右上角说明文案（支持简单 HTML），在「表单配置-客户标签配置」Tab 中维护。
-  customerSummaryNote: ''
+  customerSummaryNote: '',
+  // 销售升降级看板：评级标准配置。promote=升入该级别所需业绩(下界)；demote=跌破则降出该级别(保底线，需<=升级业绩)。
+  gradeConfig: [
+    { name: '初级销售', promote: 0, demote: 0 },
+    { name: '中级销售', promote: 300000, demote: 200000 },
+    { name: '高级销售', promote: 600000, demote: 400000 }
+  ]
 };
 
 function getChannels(type) {
@@ -4458,6 +4469,7 @@ function renderFormConfig() {
       <div class="summary-tab ${configTab==='signinCategories'?'active':''}" onclick="switchConfigTab('signinCategories')">签到归类配置</div>
       <div class="summary-tab ${configTab==='signinEvents'?'active':''}" onclick="switchConfigTab('signinEvents')">签到事件配置</div>
       <div class="summary-tab ${configTab==='customerTags'?'active':''}" onclick="switchConfigTab('customerTags')">客户标签配置</div>
+      <div class="summary-tab ${configTab==='gradeConfig'?'active':''}" onclick="switchConfigTab('gradeConfig')">评级标准配置</div>
     </div>
     <div id="configContent"></div>
     <div style="margin-top:12px;font-size:12px;color:var(--gray-500)">
@@ -4611,6 +4623,33 @@ function renderConfigContent() {
       </div>`;
     return;
   }
+  // ===== 评级标准配置 tab（销售升降级看板）=====
+  if (configTab === 'gradeConfig') {
+    if (!cloudData.formConfig.gradeConfig || !Array.isArray(cloudData.formConfig.gradeConfig)) {
+      cloudData.formConfig.gradeConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.gradeConfig));
+    }
+    const lv = cloudData.formConfig.gradeConfig;
+    c.innerHTML = `
+      <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
+        💡 配置销售升降级看板的「评级标准」。每行一个级别：<b>升级业绩</b>=达到此业绩即升入该级别（下界）；<b>降级业绩</b>=跌破此值则降出该级别（保底线，需 ≤ 升级业绩）。列表按升级业绩<b>升序</b>排列，第一个级别为基准级（升级业绩建议填 0）。修改后点击底部「保存配置」生效。
+      </div>
+      <div id="gradeLevelList">
+        ${lv.map((g, i) => `
+          <div class="channel-card" style="margin-bottom:12px">
+            <div class="channel-card-header" style="padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span class="badge badge-gray" style="font-size:12px">级别 ${i + 1}</span>
+              <input type="text" class="form-control" value="${g.name.replace(/"/g,'&quot;')}" onchange="updateGradeLevel(${i}, 'name', this.value)" style="flex:1;min-width:140px;max-width:220px" placeholder="级别名称，如：中级销售">
+              <div style="display:flex;align-items:center;gap:6px"><span style="font-size:12px;color:var(--gray-500)">升级业绩</span><input type="number" class="form-control" value="${g.promote}" onchange="updateGradeLevel(${i}, 'promote', parseFloat(this.value)||0)" style="width:120px"></div>
+              <div style="display:flex;align-items:center;gap:6px"><span style="font-size:12px;color:var(--gray-500)">降级业绩</span><input type="number" class="form-control" value="${g.demote}" onchange="updateGradeLevel(${i}, 'demote', parseFloat(this.value)||0)" style="width:120px"></div>
+              <button class="btn btn-danger btn-sm" onclick="deleteGradeLevel(${i})">🗑 删除</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn btn-outline" style="width:100%;padding:12px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addGradeLevel()">➕ 添加级别</button>
+    `;
+    return;
+  }
   // ===== 日报/周报配置 tab =====
   const channels = getChannels(configTab);
   c.innerHTML = channels.map((ch, idx) => {
@@ -4747,6 +4786,22 @@ function addCustomerTagOption(group) {
 function deleteCustomerTagOption(group, i) {
   if (!confirm('确定删除此选项吗？已有客户汇总数据中的该值不会被自动改动。')) return;
   if (cloudData.formConfig.customerTags && cloudData.formConfig.customerTags[group]) cloudData.formConfig.customerTags[group].splice(i, 1);
+  renderConfigContent();
+}
+
+// ===== 评级标准配置 编辑助手 =====
+function updateGradeLevel(i, field, value) {
+  if (!cloudData.formConfig.gradeConfig) cloudData.formConfig.gradeConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.gradeConfig));
+  if (cloudData.formConfig.gradeConfig[i]) cloudData.formConfig.gradeConfig[i][field] = value;
+}
+function addGradeLevel() {
+  if (!cloudData.formConfig.gradeConfig) cloudData.formConfig.gradeConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.gradeConfig));
+  cloudData.formConfig.gradeConfig.push({ name: '新级别', promote: 0, demote: 0 });
+  renderConfigContent();
+}
+function deleteGradeLevel(i) {
+  if (!confirm('确定删除此级别吗？')) return;
+  if (cloudData.formConfig.gradeConfig) cloudData.formConfig.gradeConfig.splice(i, 1);
   renderConfigContent();
 }
 
@@ -7704,6 +7759,23 @@ function renderSalesBoardTable(tid, key) {
 
 
 // ===== 销售升降级看板 =====
+// 自动评定级别：根据滚动业绩对照评级标准（升级业绩分档 + 降级业绩保底）
+function autoGrade(amount, levels) {
+  if (!levels || !levels.length) return '';
+  const sorted = [...levels].sort((a, b) => (a.promote || 0) - (b.promote || 0));
+  let best = sorted[0];
+  sorted.forEach(lv => { if (amount >= (lv.promote || 0)) best = lv; });
+  const idx = sorted.indexOf(best);
+  if (idx > 0 && amount < (best.demote || 0)) best = sorted[idx - 1];
+  return best.name;
+}
+function gradeKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
+function saveGradeByKey(key, patch) {
+  if (!cloudData.gradeRecords) cloudData.gradeRecords = {};
+  cloudData.gradeRecords[key] = Object.assign({}, cloudData.gradeRecords[key] || {}, patch);
+  apiUpdate('gradeRecords', key, cloudData.gradeRecords[key]).catch(e => showToast('保存评级失败: ' + e.message, 'error'));
+}
+
 let salesGradeYear = '';
 function renderSalesGrade() {
   const records = cloudData.salesRecords || [];
@@ -7722,7 +7794,7 @@ function renderSalesGrade() {
         <div class="filter-bar">
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="sgYear" onchange="refreshSalesGrade()">${yearOpts}</select></div>
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月，每个单元格下方小字为该月单月业绩。</div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为当月职级对比上月职级的变化。</div>
         <div class="table-wrap"><table id="sgTable"></table></div>
       </div>
     </div>`;
@@ -7767,13 +7839,31 @@ function refreshSalesGrade() {
   h += '<th class="num">年末评级业绩<br><span style="font-weight:400;font-size:10px;color:var(--gray-400)">10-12月滚动</span></th></tr></thead><tbody>';
   const colTot = {}; months.forEach(m => colTot[m] = 0);
   let decTot = 0;
+  const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+  const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
   rows.forEach(row => {
     h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
     months.forEach(m => {
       const v = row.roll[m];
       colTot[m] += v;
       const single = row.single[m] || 0;
-      h += `<td class="num">${fmtSalesMoney(v)}<div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div></td>`;
+      const auto = autoGrade(v, levels);
+      const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m)]) || {};
+      const grade = rec.grade || auto;
+      const note = rec.note || '';
+      let upFlag = '';
+      if (m > 1) {
+        const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m - 1)]) || {};
+        const prevGrade = prevRec.grade || autoGrade(row.roll[m - 1], levels);
+        const ci = gradeOpts.indexOf(grade), pi = gradeOpts.indexOf(prevGrade);
+        if (ci > pi) upFlag = ' <span style="color:#16a34a;font-size:10px">▲升级</span>';
+        else if (ci < pi) upFlag = ' <span style="color:#dc2626;font-size:10px">▼降级</span>';
+      }
+      const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
+      const k = gradeKey(year, row.sp, m);
+      h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div>`
+         + `<div style="margin-top:4px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveGradeByKey('${k}', {grade:this.value})">${opts}</select>${upFlag}</div>`
+         + `<input type="text" class="form-control form-control-sm" style="font-size:11px;margin-top:3px;padding:1px 4px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveGradeByKey('${k}', {note:this.value})"></td>`;
     });
     decTot += row.dec;
     h += `<td class="num" style="font-weight:700">${fmtSalesMoney(row.dec)}</td></tr>`;
@@ -7814,12 +7904,33 @@ function exportSalesGrade() {
     return row;
   }).sort((a, b) => b.dec - a.dec);
   if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+  const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
   const aoa = [];
   aoa.push([`销售升降级看板 · ${year}年（滚动3个月评级业绩）`]);
-  aoa.push(['说明：每个单元格 = 该销售员当月及前2个月业绩之和；年末评级业绩 = 10-12月滚动合计']);
-  aoa.push(['销售员'].concat(months.map(m => m + '月')).concat(['年末评级业绩']));
+  aoa.push(['说明：每个单元格 = 该销售员当月及前2个月业绩之和；年末评级业绩 = 10-12月滚动合计；评级按表单配置自动评定或手动覆盖，备注为手动填写']);
+  const head = ['销售员'];
+  months.forEach(m => { head.push(m + '月业绩'); head.push(m + '月评级'); head.push(m + '月升降'); head.push(m + '月备注'); });
+  head.push('年末评级业绩');
+  aoa.push(head);
   rows.forEach(row => {
-    aoa.push([row.sp].concat(months.map(m => Math.round(row.roll[m]))).concat([Math.round(row.dec)]));
+    const r = [row.sp];
+    months.forEach(m => {
+      const v = Math.round(row.roll[m]);
+      const auto = autoGrade(v, levels);
+      const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m)]) || {};
+      const grade = rec.grade || auto;
+      let chg = '';
+      if (m > 1) {
+        const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m - 1)]) || {};
+        const prevGrade = prevRec.grade || autoGrade(Math.round(row.roll[m - 1]), levels);
+        const ci = gradeOpts.indexOf(grade), pi = gradeOpts.indexOf(prevGrade);
+        chg = ci > pi ? '▲升级' : (ci < pi ? '▼降级' : '持平');
+      }
+      r.push(v, grade, chg, rec.note || '');
+    });
+    r.push(Math.round(row.dec));
+    aoa.push(r);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
