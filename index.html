@@ -5727,7 +5727,11 @@ function normContactTime(s){
   const parts=String(s).trim().split(/[\sT]/);
   let datePart=parts[0]||'';
   const timePart=parts[1]||'';
+  // 先把中文/斜杠/点/混合分隔统一成 -（如 2026/07/10 或 2026年07月10日 或 2026.7.2）
   datePart=datePart.replace(/[^\d]/g,'-').replace(/-+/g,'-').replace(/^-+|-+$/g,'');
+  // 按年/月/日拆分并补零：年 4 位，月/日 2 位
+  const dp = datePart.split('-').filter(Boolean).map((v,i) => v.padStart(i===0?4:2,'0'));
+  if(dp.length>=3) datePart = `${dp[0]}-${dp[1]}-${dp[2]}`;
   return (datePart+(timePart?' '+timePart:'')).trim();
 }
 function getWeekStart(){const n=new Date(),d=n.getDay()||7;const m=new Date(n);m.setDate(n.getDate()-d+1);return localYMD(m)}
