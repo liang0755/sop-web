@@ -389,10 +389,15 @@ tr:hover td{background:var(--gray-50)}
 /* ===== 业绩明细 / 业绩看板 专用样式 ===== */
 .badge-team{background:var(--primary-light);color:var(--primary)}
 .team-summary{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}
-.team-pill{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:10px 14px;min-width:150px}
+.team-pill{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:10px 14px;flex:1 1 160px;min-width:160px;text-align:center}
+.ts-title{font-size:13px;font-weight:600;color:var(--gray-600);margin:14px 0 8px}
+.ts-pills{display:flex;gap:12px;flex-wrap:wrap;margin-top:4px}
+.stat-box.primary{background:linear-gradient(135deg,var(--primary),#1d4ed8);border-color:transparent}
+.stat-box.primary .v{color:#fff}
+.stat-box.primary .l{color:rgba(255,255,255,.85)}
 .team-pill .t{font-size:12px;color:var(--gray-500)}
 .team-pill .a{font-size:17px;font-weight:700;color:var(--primary)}
-.stat-row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+.stat-row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px}
 .stat-box{flex:1;min-width:160px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:14px 16px}
 .stat-box .v{font-size:20px;font-weight:700;color:var(--primary)}
 .stat-box .l{font-size:12px;color:var(--gray-500);margin-top:4px}
@@ -586,6 +591,7 @@ async function loadCoreData() {
         if (!Array.isArray(cloudData.formConfig.customerTags[k])) cloudData.formConfig.customerTags[k] = [];
       });
     }
+    if (typeof cloudData.formConfig.customerSummaryNote !== 'string') cloudData.formConfig.customerSummaryNote = '';
     if (!fcData) {
       try { await fetch(FB_BASE + '/formConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.formConfig)}); } catch(e) {}
     }
@@ -1224,7 +1230,9 @@ const DEFAULT_FORM_CONFIG = {
     customerSource: [],   // 客户来源
     category: [],         // 品类
     customerProfile: []   // 客户画像
-  }
+  },
+  // 客户汇总数据页面右上角说明文案（支持简单 HTML），在「表单配置-客户标签配置」Tab 中维护。
+  customerSummaryNote: ''
 };
 
 function getChannels(type) {
@@ -4463,11 +4471,21 @@ function renderConfigContent() {
           </div>
         </div>`;
     });
+    const note = (cloudData.formConfig.customerSummaryNote || '').replace(/"/g, '&quot;');
     c.innerHTML = `
       <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
         💡 配置「客户来源 / 品类 / 客户画像」的<b>固定选项</b>，用于业绩看板「客户汇总数据」的后三列<b>单选框</b>。新增/删除后点击底部「保存配置」生效。某组选项为空时，对应单选框仅显示「未设置」。
       </div>
-      ${html2}`;
+      ${html2}
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>📝 客户汇总说明</h4><span style="font-size:12px;color:var(--gray-500)">显示在「客户汇总数据」筛选区域右侧的可配置说明</span></div>
+        <div class="card-body">
+          <div class="form-group" style="margin-bottom:10px">
+            <textarea class="form-control" id="customerSummaryNote" rows="5" placeholder="在此输入说明文案，支持换行。保存后将显示在客户汇总数据页面。" onchange="cloudData.formConfig.customerSummaryNote = this.value">${note}</textarea>
+          </div>
+          <div style="font-size:12px;color:var(--gray-500)">💡 提示：支持纯文本和换行；如需加粗/颜色等样式，可由技术人员写入 HTML 标签。</div>
+        </div>
+      </div>`;
     return;
   }
   // ===== 日报/周报配置 tab =====
@@ -6524,6 +6542,7 @@ async function renderSalesDetail() {
   const all = base.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
   const totalAmount = all.reduce((s, r) => s + toNum(r.amount), 0);
   const custCount = new Set(all.map(r => r.customer).filter(Boolean)).size;
+  const avgAmount = totalRows ? totalAmount / totalRows : 0;
   const teamMap = {};
   all.forEach(r => { teamMap[r.team] = (teamMap[r.team] || 0) + toNum(r.amount); });
   const teamPills = Object.keys(teamMap).map(t => `<div class="team-pill"><div class="t">${esc(t)}</div><div class="a">${fmtSalesMoney(teamMap[t])}</div></div>`).join('');
@@ -6546,7 +6565,7 @@ async function renderSalesDetail() {
     <td><span class="badge badge-team">${esc(r.team) || '-'}</span></td>
     <td>${esc(r.docDate) || '-'}</td>
     <td class="num">${fmtSalesMoney(toNum(r.amount))}</td>
-    <td class="num">${fmtSalesMoney(toNum(r.grossProfit))}</td>
+    <td>${esc(r.customer) || '-'}</td>
     <td>${esc(r.productName)}</td>
     <td>${esc(r.docNo)}</td>
     <td>${esc(r.docType)}</td>
@@ -6593,13 +6612,18 @@ async function renderSalesDetail() {
     </div>
   </div>
   <div class="card">
-    <div class="card-header"><h4>📊 业绩汇总</h4></div>
+    <div class="card-header"><h4>📊 业绩汇总</h4><span style="font-size:12px;color:var(--gray-500)">当前筛选范围内</span></div>
     <div class="card-body">
       <div class="stat-row">
-        <div class="stat-box"><div class="v">${fmtSalesMoney(totalAmount)}</div><div class="l">KA 总业绩（折后金额净额）</div></div>
+        <div class="stat-box primary"><div class="v">${fmtSalesMoney(totalAmount)}</div><div class="l">KA 总业绩（折后金额净额）</div></div>
         <div class="stat-box"><div class="v">${custCount}</div><div class="l">客户总数</div></div>
+        <div class="stat-box"><div class="v">${totalRows}</div><div class="l">单据笔数</div></div>
+        <div class="stat-box"><div class="v">${fmtSalesMoney(avgAmount)}</div><div class="l">平均单笔金额</div></div>
       </div>
-      <div class="team-summary">${teamPills || '<span style="color:var(--gray-400);font-size:13px">暂无数据</span>'}</div>
+      <div class="team-summary">
+        <div class="ts-title">各团队业绩分布</div>
+        <div class="ts-pills">${teamPills || '<span style="color:var(--gray-400);font-size:13px">暂无数据</span>'}</div>
+      </div>
     </div>
   </div>
   <div class="card">
@@ -6613,7 +6637,7 @@ async function renderSalesDetail() {
       </div>` : ''}
       <div class="table-wrap"><table><thead><tr>
         ${canEdit ? `<th style="width:36px"><input type="checkbox" id="salesSelectAll" onchange="toggleSalesSelectAll(this)" ${recs.length && recs.every(r => selectedSalesIds.has(r.id)) ? 'checked' : ''}></th>` : ''}
-        <th>销售员</th><th>团队/门店</th><th>单据日期</th><th class="num">折后金额</th><th class="num">毛利润</th><th>商品名称</th><th>单据编号</th><th>单据类别</th><th>状态</th>${canEdit ? '<th>操作</th>' : ''}
+        <th>销售员</th><th>团队/门店</th><th>单据日期</th><th class="num">折后金额</th><th>客户名称</th><th>商品名称</th><th>单据编号</th><th>单据类别</th><th>状态</th>${canEdit ? '<th>操作</th>' : ''}
       </tr></thead><tbody>${rowsHtml || `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:30px">暂无数据，请导入或新增</td></tr>`}</tbody></table></div>${pager}
     </div>
   </div>`;
@@ -6747,6 +6771,7 @@ async function renderSalesBoard() {
       <div class="summary-tab ${salesBoardTab==='stats'?'active':''}" onclick="switchSalesBoardTab('stats')">📊 业绩统计</div>
       <div class="summary-tab ${salesBoardTab==='customer'?'active':''}" onclick="switchSalesBoardTab('customer')">👥 客户汇总数据</div>
       <div class="summary-tab ${salesBoardTab==='source'?'active':''}" onclick="switchSalesBoardTab('source')">🏷️ 客户来源汇总</div>
+      <div class="summary-tab ${salesBoardTab==='profile'?'active':''}" onclick="switchSalesBoardTab('profile')">👤 客户画像汇总</div>
     </div>
     <div id="sbContent"></div>`;
   document.getElementById('contentBody').innerHTML = html;
@@ -6761,6 +6786,7 @@ function switchSalesBoardTab(t) {
 function renderSalesBoards() {
   if (salesBoardTab === 'customer') { renderSalesBoardCustomer(); return; }
   if (salesBoardTab === 'source') { renderSalesBoardSource(); return; }
+  if (salesBoardTab === 'profile') { renderSalesBoardProfile(); return; }
   renderSalesBoardStats();
 }
 
@@ -6971,6 +6997,169 @@ function exportSourceSummary() {
   showToast('已导出客户来源汇总', 'success');
 }
 
+// ===== 客户画像汇总 =====
+function renderSalesBoardProfile() {
+  const records = cloudData.salesRecords;
+  const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
+  const cont = document.getElementById('sbContent');
+  cont.innerHTML = `
+    <div class="card">
+      <div class="card-header"><h4>👤 客户画像汇总</h4><span style="font-size:12px;color:var(--gray-500)">按年显示，横向1-12月，每月统计客户数与业绩</span></div>
+      <div class="card-body"><div class="filter-bar">
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="profileYear" onchange="refreshSalesBoardProfile()">${yearOpts}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesBoardProfile()">重置为今年</button></div>
+        <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportProfileSummary()">📤 导出</button></div>
+      </div></div>
+    </div>
+    <div class="card"><div class="card-body"><div class="table-wrap" id="profileTableWrap"></div></div></div>`;
+  const yEl = document.getElementById('profileYear'); if (yEl) yEl.value = year;
+  refreshSalesBoardProfile();
+}
+
+function resetSalesBoardProfile() {
+  const records = cloudData.salesRecords;
+  const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  const yEl = document.getElementById('profileYear'); if (yEl) yEl.value = year;
+  refreshSalesBoardProfile();
+}
+
+function refreshSalesBoardProfile() {
+  const year = document.getElementById('profileYear') ? document.getElementById('profileYear').value : new Date().getFullYear().toString();
+  renderProfileSummaryTable(year);
+}
+
+function aggregateProfileSummary(year) {
+  const filtered = cloudData.salesRecords.filter(r => (r.docMonth || '').startsWith(year));
+  // 第一步：按客户汇总数据维度聚合（年月 × 销售员 × 客户）
+  const groups = {};
+  filtered.forEach(r => {
+    const key = (r.docMonth || '') + '|' + (r.salesperson || '') + '|' + (r.customer || '');
+    if (!groups[key]) groups[key] = { docMonth: r.docMonth || '', customer: r.customer || '', customerProfile: r.customerProfile || '', amount: 0 };
+    const g = groups[key];
+    g.amount += toNum(r.amount);
+    if (!g.customerProfile && r.customerProfile) g.customerProfile = r.customerProfile;
+  });
+  // 第二步：按客户画像 + 月份聚合（单数=去重客户数）
+  // 只认可表单配置中的画像选项；非配置值归入「(未设置)」
+  const cfgProfile = (cloudData.formConfig && cloudData.formConfig.customerTags && cloudData.formConfig.customerTags.customerProfile) || [];
+  const profileMap = {};
+  Object.values(groups).forEach(g => {
+    let prof = g.customerProfile || '(未设置)';
+    if (prof !== '(未设置)' && !cfgProfile.includes(prof)) prof = '(未设置)';
+    const mm = g.docMonth.slice(5);
+    if (!profileMap[prof]) profileMap[prof] = {};
+    if (!profileMap[prof][mm]) profileMap[prof][mm] = { countSet: new Set(), amount: 0 };
+    profileMap[prof][mm].countSet.add(g.customer);
+    profileMap[prof][mm].amount += g.amount;
+  });
+  return profileMap;
+}
+
+function renderProfileSummaryTable(year) {
+  const wrap = document.getElementById('profileTableWrap');
+  const profileMap = aggregateProfileSummary(year);
+  const profiles = Object.keys(profileMap).sort((a, b) => a === '(未设置)' ? 1 : (b === '(未设置)' ? -1 : a.localeCompare(b)));
+  const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+  if (!profiles.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无匹配数据</div>'; return; }
+  let head = '<thead><tr><th rowspan="2" style="min-width:120px">客户类型</th>';
+  months.forEach(m => { head += `<th colspan="2">${parseInt(m, 10)}月</th>`; });
+  head += '<th colspan="2">合计</th></tr><tr>';
+  months.forEach(() => { head += '<th class="num">单数</th><th class="num">业绩</th>'; });
+  head += '<th class="num">单数</th><th class="num">业绩</th></tr></thead>';
+  let body = '<tbody>';
+  const colCount = {}, colAmount = {};
+  profiles.forEach(prof => {
+    let rowCount = 0, rowAmount = 0;
+    body += `<tr><td><span class="badge badge-info">${esc(prof)}</span></td>`;
+    months.forEach(m => {
+      const cell = profileMap[prof][m] || { countSet: new Set(), amount: 0 };
+      const c = cell.countSet.size;
+      const a = cell.amount;
+      rowCount += c;
+      rowAmount += a;
+      colCount[m] = (colCount[m] || 0) + c;
+      colAmount[m] = (colAmount[m] || 0) + a;
+      body += `<td class="num">${c || '-'}</td><td class="num">${a ? fmtSalesMoney(a) : '-'}</td>`;
+    });
+    body += `<td class="num" style="font-weight:700">${rowCount}</td><td class="num" style="font-weight:700">${fmtSalesMoney(rowAmount)}</td></tr>`;
+  });
+  body += '</tbody>';
+  let foot = '<tfoot><tr class="total-row"><td>合计</td>';
+  let grandCount = 0, grandAmount = 0;
+  months.forEach(m => {
+    const c = colCount[m] || 0;
+    const a = colAmount[m] || 0;
+    grandCount += c;
+    grandAmount += a;
+    foot += `<td class="num">${c}</td><td class="num">${fmtSalesMoney(a)}</td>`;
+  });
+  foot += `<td class="num">${grandCount}</td><td class="num">${fmtSalesMoney(grandAmount)}</td></tr></tfoot>`;
+  wrap.innerHTML = `<table class="source-summary-table">${head}${body}${foot}</table>`;
+}
+
+function exportProfileSummary() {
+  const year = document.getElementById('profileYear') ? document.getElementById('profileYear').value : new Date().getFullYear().toString();
+  const profileMap = aggregateProfileSummary(year);
+  const profiles = Object.keys(profileMap).sort((a, b) => a === '(未设置)' ? 1 : (b === '(未设置)' ? -1 : a.localeCompare(b)));
+  const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+  if (!profiles.length) { showToast('当前无数据可导出', 'error'); return; }
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  const header1 = ['客户类型'];
+  months.forEach(m => { header1.push(parseInt(m, 10) + '月'); header1.push(''); });
+  header1.push('合计'); header1.push('');
+  const header2 = [''];
+  months.forEach(() => { header2.push('单数'); header2.push('业绩'); });
+  header2.push('单数'); header2.push('业绩');
+  const aoa = [header1, header2];
+  const colCount = {}, colAmount = {};
+  profiles.forEach(prof => {
+    const row = [prof];
+    let rowCount = 0, rowAmount = 0;
+    months.forEach(m => {
+      const cell = profileMap[prof][m] || { countSet: new Set(), amount: 0 };
+      const c = cell.countSet.size;
+      const a = cell.amount;
+      rowCount += c;
+      rowAmount += a;
+      colCount[m] = (colCount[m] || 0) + c;
+      colAmount[m] = (colAmount[m] || 0) + a;
+      row.push(c || 0);
+      row.push(a);
+    });
+    row.push(rowCount);
+    row.push(rowAmount);
+    aoa.push(row);
+  });
+  const totalRow = ['合计'];
+  let grandCount = 0, grandAmount = 0;
+  months.forEach(m => {
+    const c = colCount[m] || 0;
+    const a = colAmount[m] || 0;
+    grandCount += c;
+    grandAmount += a;
+    totalRow.push(c);
+    totalRow.push(a);
+  });
+  totalRow.push(grandCount);
+  totalRow.push(grandAmount);
+  aoa.push(totalRow);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const merges = [];
+  let colIdx = 1;
+  months.forEach(() => { merges.push({ s: { r: 0, c: colIdx }, e: { r: 0, c: colIdx + 1 } }); colIdx += 2; });
+  merges.push({ s: { r: 0, c: colIdx }, e: { r: 0, c: colIdx + 1 } });
+  ws['!merges'] = merges;
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '客户画像汇总');
+  XLSX.writeFile(wb, `客户画像汇总_${year}.xlsx`);
+  showToast('已导出客户画像汇总', 'success');
+}
+
 function csDefaultMonthState() {
   const now = new Date();
   let y = now.getFullYear();
@@ -7014,11 +7203,15 @@ function renderSalesBoardCustomer() {
   const sps = [...new Set(records.map(r => r.salesperson).filter(Boolean))].sort();
   const spOptsCs = ['<option value="">全部人员</option>'].concat(sps.map(s => `<option value="${esc(s)}">${esc(s)}</option>`)).join('');
   csMonths = [def.month];
+  const note = (cloudData.formConfig && cloudData.formConfig.customerSummaryNote) || '';
+  const noteHtml = esc(note).replace(/\n/g, '<br>');
   const cont = document.getElementById('sbContent');
   cont.innerHTML = `
     <div class="card">
       <div class="card-header"><h4>🔍 客户汇总查询</h4></div>
-      <div class="card-body"><div class="filter-bar">
+      <div class="card-body" style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+        <div style="flex:1;min-width:320px">
+          <div class="filter-bar">
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="csYear" onchange="csRefilter()">${yearOpts}</select></div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">部门</label><select class="form-control" id="csTeam" onchange="csRefilter()">${teamOptsCs}</select></div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">人员</label><select class="form-control" id="csSales" onchange="csRefilter()">${spOptsCs}</select></div>
@@ -7028,7 +7221,12 @@ function renderSalesBoardCustomer() {
         <label style="font-size:12px;color:var(--gray-500)">月份（可多选，默认上个月）</label>
         <div id="csMonthChips">${csMonthChipsHtml(csMonths)}</div>
       </div>
-      <div style="font-size:12px;color:var(--gray-500);margin-top:6px">💡 后三列（客户来源 / 品类 / 客户画像）为下拉框，选中后即时保存并着色。${hasPermission('salesDetail') ? '' : '（当前账号仅查看，无编辑权限）'}</div>
+          <div style="font-size:12px;color:var(--gray-500);margin-top:6px">💡 后三列（客户来源 / 品类 / 客户画像）为下拉框，选中后即时保存并着色。${hasPermission('salesDetail') ? '' : '（当前账号仅查看，无编辑权限）'}</div>
+        </div>
+        <div style="flex:1;min-width:260px;max-width:480px;background:var(--primary-light);border:1px solid var(--gray-200);border-radius:8px;padding:14px 16px">
+          <div style="font-size:12px;color:var(--primary);font-weight:600;margin-bottom:8px">📌 说明</div>
+          <div style="font-size:13px;color:var(--gray-700);line-height:1.7;white-space:pre-wrap">${noteHtml || '<span style="color:var(--gray-400)">暂无说明，可在「表单配置 → 客户标签配置」中编辑。</span>'}</div>
+        </div>
       </div>
     </div>
     <div class="card">
@@ -7189,6 +7387,7 @@ async function saveCustomerTag(group, encKey, encVal) {
   }
   saveReportsCache();
   if (salesBoardTab === 'source') renderSalesBoardSource();
+  if (salesBoardTab === 'profile') renderSalesBoardProfile();
   if (fail) showToast('已保存 ' + n + ' 条，' + fail + ' 条缺少存储键未写入', 'error', 2500);
   else showToast('已保存（' + n + ' 条明细）', 'success', 1500);
 }
@@ -7274,6 +7473,7 @@ async function applyCsBatchTags() {
     csSelectedKeys.clear();
     renderCustomerSummary();
     if (salesBoardTab === 'source') renderSalesBoardSource();
+    if (salesBoardTab === 'profile') renderSalesBoardProfile();
     showToast('已批量设置（' + total + ' 条明细）', 'success');
   } catch (e) { showToast('批量设置失败：' + e.message, 'error', 4000); }
 }
