@@ -4633,6 +4633,12 @@ function renderConfigContent() {
       <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
         💡 配置销售升降级看板的「评级标准」。每行一个级别：<b>升级业绩</b>=达到此业绩即升入该级别（下界）；<b>降级业绩</b>=跌破此值则降出该级别（保底线，需 ≤ 升级业绩）。列表按升级业绩<b>升序</b>排列，第一个级别为基准级（升级业绩建议填 0）。修改后点击底部「保存配置」生效。
       </div>
+      <div class="config-toolbar" style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0">
+        <button class="btn btn-outline btn-sm" onclick="downloadGradeTemplate()">📋 下载模板</button>
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('gradeImportFile').click()">📥 导入 Excel</button>
+        <input type="file" id="gradeImportFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="importGradeConfig(this)">
+        <span style="font-size:12px;color:var(--gray-400);align-self:center">支持 .xlsx / .xls / .csv，列名：级别名称、升级业绩、降级业绩</span>
+      </div>
       <div id="gradeLevelList">
         ${lv.map((g, i) => `
           <div class="channel-card" style="margin-bottom:12px">
@@ -4803,6 +4809,81 @@ function deleteGradeLevel(i) {
   if (!confirm('确定删除此级别吗？')) return;
   if (cloudData.formConfig.gradeConfig) cloudData.formConfig.gradeConfig.splice(i, 1);
   renderConfigContent();
+}
+
+// 下载评级标准配置 Excel 模板
+function downloadGradeTemplate() {
+  try {
+    const aoa = [
+      ['级别名称', '升级业绩', '降级业绩'],
+      ['初级销售', 0, 0],
+      ['中级销售', 300000, 200000],
+      ['高级销售', 600000, 400000]
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '评级标准模板');
+    XLSX.writeFile(wb, '评级标准配置模板.xlsx');
+  } catch (e) { alert('下载模板失败：' + (e.message || e)); }
+}
+
+// 从 Excel/CSV 导入评级标准配置
+function importGradeConfig(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (!rows.length) { alert('文件中没有数据行'); input.value = ''; return; }
+      // 列名模糊匹配
+      const headers = Object.keys(rows[0]);
+      const pick = function () {
+        const keys = Array.prototype.slice.call(arguments);
+        for (let h of headers) {
+          const s = String(h || '').trim().toLowerCase();
+          if (keys.some(k => s.indexOf(k) >= 0)) return h;
+        }
+        return null;
+      };
+      const mk = {
+        name: pick('级别名称', '级别', '等级', 'name', '名称'),
+        promote: pick('升级业绩', '升级', '升入', 'promote'),
+        demote: pick('降级业绩', '降级', '保底', 'demote')
+      };
+      if (!mk.name && !mk.promote) {
+        alert('未识别到列。模板列应为：级别名称、升级业绩、降级业绩');
+        input.value = ''; return;
+      }
+      const list = [];
+      rows.forEach(function (r) {
+        const name = mk.name ? String(r[mk.name] || '').trim() : '';
+        if (!name) return;
+        const promote = mk.promote ? (parseFloat(String(r[mk.promote]).replace(/,/g, '')) || 0) : 0;
+        const demote = mk.demote ? (parseFloat(String(r[mk.demote]).replace(/,/g, '')) || 0) : 0;
+        list.push({ name: name, promote: promote, demote: demote });
+      });
+      if (!list.length) { alert('没有有效的级别数据（级别名称为空）'); input.value = ''; return; }
+      if (!confirm('成功识别 ' + list.length + ' 个级别，确定导入并覆盖当前评级标准配置吗？')) { input.value = ''; return; }
+      cloudData.formConfig.gradeConfig = list;
+      renderConfigContent();
+      // 内联保存（不依赖 saveFormConfig 的 event.target）
+      fetch(FB_BASE + '/formConfig.json', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cloudData.formConfig)
+      }).then(function () {
+        showToast('评级配置已导入并保存', 'success');
+      }).catch(function (err) {
+        showToast('保存失败: ' + err.message, 'error', 4000);
+      });
+    } catch (err) {
+      alert('导入失败：' + (err.message || err));
+    }
+    input.value = '';
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 async function saveFormConfig() {
