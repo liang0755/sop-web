@@ -7722,7 +7722,7 @@ function renderSalesGrade() {
         <div class="filter-bar">
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="sgYear" onchange="refreshSalesGrade()">${yearOpts}</select></div>
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。<span style="color:#16a34a">绿色▲</span> 表示较上月评级业绩上升，<span style="color:#dc2626">红色▼</span> 表示下降。</div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月，每个单元格下方小字为该月单月业绩。</div>
         <div class="table-wrap"><table id="sgTable"></table></div>
       </div>
     </div>`;
@@ -7772,20 +7772,8 @@ function refreshSalesGrade() {
     months.forEach(m => {
       const v = row.roll[m];
       colTot[m] += v;
-      let trend = '';
-      if (m > 1) {
-        const prev = row.roll[m - 1];
-        if (prev > 0) {
-          const g = (v - prev) / prev * 100;
-          const up = g >= 0;
-          trend = `<div style="font-size:10px;color:${up ? '#16a34a' : '#dc2626'}">${up ? '▲' : '▼'} ${up ? '+' : ''}${g.toFixed(0)}%</div>`;
-        } else {
-          trend = `<div style="font-size:10px;color:#16a34a">▲ 新</div>`;
-        }
-      }
-      const bg = (m > 1) ? (row.roll[m] >= row.roll[m - 1] ? ' style="background:rgba(34,197,94,.08)"' : ' style="background:rgba(239,68,68,.08)"') : '';
       const single = row.single[m] || 0;
-      h += `<td class="num"${bg}>${fmtSalesMoney(v)}<div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div>${trend}</td>`;
+      h += `<td class="num">${fmtSalesMoney(v)}<div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div></td>`;
     });
     decTot += row.dec;
     h += `<td class="num" style="font-weight:700">${fmtSalesMoney(row.dec)}</td></tr>`;
