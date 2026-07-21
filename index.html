@@ -136,6 +136,11 @@ tr:hover td{background:var(--gray-50)}
 .modal.modal-wide{width:1000px;max-width:95vw}
 .modal h3{font-size:18px;margin-bottom:20px}
 .modal .modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+/* Remark popup */
+.remark-cell{cursor:pointer;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--primary);transition:background .15s}
+.remark-cell:hover{background:var(--primary-light);text-decoration:underline}
+.remark-cell.empty{color:var(--gray-400);text-decoration:none;cursor:default}
+.remark-popup-content{white-space:pre-wrap;word-break:break-word;line-height:1.7;font-size:14px;color:var(--gray-800);max-height:60vh;overflow-y:auto;background:var(--gray-50);border-radius:8px;padding:16px;border:1px solid var(--gray-200)}
 .toast-container{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:10px;align-items:center;pointer-events:none}
 .toast{display:flex;align-items:center;gap:10px;padding:14px 24px;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 8px 30px rgba(0,0,0,.15);animation:toastIn .3s ease;pointer-events:auto;max-width:90vw}
 .toast.success{background:#10b981;color:#fff}
@@ -4503,7 +4508,7 @@ function renderVisitTable() {
           <td>${r.employee || ''}</td>
           <td>${r.department || ''}</td>
           <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.signinAddress || '').replace(/"/g,'&quot;')}">${r.signinAddress || ''}</td>
-          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.remark || '').replace(/"/g,'&quot;').replace(/\n/g,' ')}">${(r.remark || '').substring(0,50).replace(/\n/g,' ')}${(r.remark||'').length>50?'...':''}</td>
+          <td class="remark-cell ${r.remark ? '' : 'empty'}" ${r.remark ? `onclick="showVisitRemarkModal('${r.id}')"` : ''}>${(r.remark || '').substring(0,50).replace(/\n/g,' ')}${(r.remark||'').length>50?'...':''}</td>
           <td style="border-left:4px solid ${vrColor || 'transparent'};background:${vrBg}">
             <select class="form-control form-control-sm" style="border-color:${vrColor};font-weight:${vr?'600':'400'};color:${vrColor || 'inherit'}" onchange="onVisitEdit('${r.id}','visitResult',this.value)">
             <option value="">未设置</option>
@@ -4536,6 +4541,13 @@ function renderVisitTable() {
   }
   updateVisitBatchBar();
   updateVisitSaveBar();
+}
+
+function showVisitRemarkModal(recordId) {
+  const r = cloudData.visitRecords.find(x => x.id === recordId);
+  if (!r) return;
+  const text = (r.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  showModal('备注详情', `<div style="margin-bottom:12px;font-size:13px;color:var(--gray-600)">${r.contactTime || ''} · ${r.customer || ''} · ${r.employee || ''}</div><div class="remark-popup-content">${text || '<span style="color:var(--gray-400)">暂无备注</span>'}</div><div class="modal-footer"><button class="btn btn-primary" onclick="closeModal()">关闭</button></div>`, true);
 }
 
 // 拜访数据分页控件
@@ -5773,7 +5785,7 @@ function renderGroupedVisitStats(records, s, e, mode) {
 }
 
 // ============ Modal ============
-function showModal(title,content,wide){document.getElementById('modalContainer').innerHTML=`<div class="modal-overlay"><div class="modal${wide?' modal-wide':''}"><h3>${title}</h3>${content}</div></div>`}
+function showModal(title,content,wide){document.getElementById('modalContainer').innerHTML=`<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal${wide?' modal-wide':''}"><h3>${title}</h3>${content}</div></div>`}
 function closeModal(){document.getElementById('modalContainer').innerHTML=''}
 function showToast(msg, type='success', duration=2500) {
   const container = document.getElementById('toastContainer');
