@@ -3516,6 +3516,7 @@ function renderAIChat() {
       <div style="display:flex;align-items:center;gap:10px">
         <span class="ai-provider-badge">${providerLabel}</span>
         <button class="btn btn-outline btn-sm" onclick="clearAIChat()" title="清空对话">🗑️ 清空</button>
+        <button class="btn btn-outline btn-sm" onclick="exportAIChatWord()" title="将整个对话导出为Word文档（含表格）">📄 导出Word</button>
       </div>
     </div>
     <div class="ai-chat-fullpage">
@@ -3954,6 +3955,38 @@ function buildAIContext() {
     byDocType: salesByDocType
   };
 
+  // 客户汇总维度聚合（客户来源 / 客户画像 / 品类）—— 让 AI 能回答客户维度分析
+  const custBySource = {}, custByProfile = {}, custByCategory = {};
+  (cloudData.salesRecords || []).forEach(r => {
+    const amt = toNum(r.amount);
+    const src = (r.customerSource || '').trim();
+    const prof = (r.customerProfile || '').trim();
+    const cat = (r.category || '').trim();
+    if (src) { if (!custBySource[src]) custBySource[src] = {count:0, amount:0}; custBySource[src].count++; custBySource[src].amount += amt; }
+    if (prof) { if (!custByProfile[prof]) custByProfile[prof] = {count:0, amount:0}; custByProfile[prof].count++; custByProfile[prof].amount += amt; }
+    if (cat) { if (!custByCategory[cat]) custByCategory[cat] = {count:0, amount:0}; custByCategory[cat].count++; custByCategory[cat].amount += amt; }
+  });
+  const customerSummary = {
+    totalWithSource: Object.values(custBySource).reduce((s, o) => s + o.count, 0),
+    totalWithProfile: Object.values(custByProfile).reduce((s, o) => s + o.count, 0),
+    totalWithCategory: Object.values(custByCategory).reduce((s, o) => s + o.count, 0),
+    bySource: custBySource,
+    byProfile: custByProfile,
+    byCategory: custByCategory,
+    note: '客户来源/客户画像/品类来自「客户汇总数据」中手动维护的标签，未填写则不计入上述聚合'
+  };
+
+  // 管理周报（报表模块）—— 让 AI 能读取管理视角的周报与拜访汇总快照
+  const mgrData = (cloudData.mgrReports || []).map(r => ({
+    weekLabel: r.weekLabel || '',
+    weekStart: r.weekStart || '',
+    weekEnd: r.weekEnd || '',
+    department: r.department || '',
+    author: r.userName || (userMap[r.userId] && userMap[r.userId].name) || '',
+    content: r.content || '',
+    visitSnapshot: r.visitSnapshot ? { total: r.visitSnapshot.total || 0, details: r.visitSnapshot.details || [] } : null
+  })).sort((a, b) => (a.weekStart || '').localeCompare(b.weekStart || ''));
+
   const activeUsers = cloudData.users.filter(u => u.active);
   const context = {
     systemDate: new Date().toLocaleDateString('zh-CN'),
@@ -3980,14 +4013,16 @@ function buildAIContext() {
     signinEventOptions: (cloudData.formConfig && cloudData.formConfig.signinEvents) || [],
     salesRecords: salesData,
     salesSummary: salesSummary,
-    salesTeamOptions: SALES_KA_TEAMS
+    salesTeamOptions: SALES_KA_TEAMS,
+    mgrReports: mgrData,
+    customerSummary: customerSummary
   };
   return JSON.stringify(context, null, 2);
 }
 
 function buildAISystemMessage() {
   const dataContext = buildAIContext();
-  return '你是团队SOP数据管理系统的AI数据分析助手。你可以读取系统的全部数据，包括用户信息、日报数据、周报数据、拜访数据、业绩数据和渠道配置。\n\n'
+  return '你是团队SOP数据管理系统的AI数据分析助手。你可以读取系统的全部数据，包括用户信息、日报数据、周报数据、拜访数据、业绩数据、管理周报（含拜访汇总快照）、客户汇总数据（客户来源/客户画像/品类）和渠道配置。\n\n'
     + '你的职责：\n'
     + '1. 根据用户的问题，对系统数据进行分析、汇总和对比\n'
     + '2. 提供数据洞察、趋势分析和改进建议\n'
@@ -4027,6 +4062,18 @@ function buildAISystemMessage() {
     + '  - amount(折后金额): 销售成交金额，单位元；退货单通常为负数\n'
     + '  - grossProfit(毛利润): 毛利金额，单位元\n'
     + '  - productName(商品名称)/docNo(单据编号)/docType(单据类别, 如 销售单/销售退货单)/status(状态)/customer(客户): 单据明细信息\n\n'
+    + '- 管理周报(mgrReports)字段:\n'
+    + '  - weekLabel/weekStart/weekEnd: 周次标签与起止日期\n'
+    + '  - department: 部门\n'
+    + '  - author: 提交人\n'
+    + '  - content: 周报正文（工作总结、计划等）\n'
+    + '  - visitSnapshot: 该周该部门拜访汇总快照，含 total(总拜访数) 与 details(按拜访结果分组：result/拜访结果、count/次数、employees/销售人员名单及次数)\n'
+    + '- 客户汇总(customerSummary)字段:\n'
+    + '  - bySource/byProfile/byCategory: 分别按 客户来源/客户画像/品类 聚合的 {count 笔数, amount 金额}\n'
+    + '  - 注意：客户来源/画像/品类是「客户汇总数据」中手动维护的标签，未填写的记录不计入上述聚合\n\n'
+    + '【数据来源路由补充】\n'
+    + '- 当用户的问题涉及「管理周报 / 周工作总结 / 部门周报 / 管理视角的拜访汇总 / 某部门某周的拜访情况」时，必须使用 mgrReports 与 visitSnapshot 回答。\n'
+    + '- 当用户的问题涉及「客户来源 / 客户画像 / 品类 / 各类客户业绩分布」时，优先引用 customerSummary（基于销售记录的客户标签聚合）。\n'
     + '以下是当前系统的完整数据（JSON格式）：\n' + dataContext;
 }
 
@@ -4142,6 +4189,61 @@ function downloadAITable(btn, format) {
   }
 }
 
+
+function renderMarkdownForWord(text) {
+  let html = escapeAIHTML(text);
+  html = html.replace(/```([\s\S]*?)```/g, (m, c) => '<pre style="background:#f5f5f5;padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;margin:8px 0"><code>' + c.trim() + '</code></pre>');
+  html = html.replace(/((?:^\|.+\|$\n?)+)/gm, (m, table) => {
+    const lines = table.trim().split('\n');
+    if (lines.length < 2) return m;
+    const parseRow = (line) => line.split('|').map(c => c.trim()).filter(c => c !== '');
+    let header = parseRow(lines[0]);
+    let bodyLines = lines.slice(1);
+    if (lines[1] && /^\|[\s:-]+\|/.test(lines[1])) bodyLines = lines.slice(2);
+    let result = '<table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;margin:8px 0;font-size:12px;width:100%"><thead><tr style="background:#eef2ff">' + header.map(h => '<th style="border:1px solid #ccc;padding:6px;text-align:left">' + h + '</th>').join('') + '</tr></thead><tbody>';
+    bodyLines.forEach(line => {
+      const cells = parseRow(line);
+      result += '<tr>' + cells.map(c => '<td style="border:1px solid #ccc;padding:6px">' + c + '</td>').join('') + '</tr>';
+    });
+    result += '</tbody></table>';
+    return result;
+  });
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+function exportAIChatWord() {
+  if (!aiChatHistory || aiChatHistory.length === 0) { showToast('当前没有可导出的对话内容', 'warning'); return; }
+  if (aiChatLoading) { showToast('请等待AI回答完成后再导出', 'warning'); return; }
+  const title = 'AI数据分析助手对话记录';
+  const dateStr = new Date().toLocaleString('zh-CN');
+  let body = '';
+  aiChatHistory.forEach(m => {
+    const role = m.role;
+    let inner;
+    if (role === 'assistant') inner = renderMarkdownForWord(m.content || '');
+    else inner = (escapeAIHTML(m.content || '')).replace(/\n/g, '<br>');
+    const label = role === 'user' ? '👤 用户' : role === 'assistant' ? '🤖 AI助手' : '⚠️ 系统提示';
+    const bg = role === 'user' ? '#eef6ff' : role === 'assistant' ? '#f6fff8' : '#fff7ed';
+    const border = role === 'user' ? '#3b82f6' : role === 'assistant' ? '#10b981' : '#f59e0b';
+    body += '<div style="margin-bottom:16px;padding:12px 14px;border-left:4px solid ' + border + ';background:' + bg + ';border-radius:6px"><div style="font-weight:600;margin-bottom:6px;color:#374151">' + label + '</div><div>' + inner + '</div></div>';
+  });
+  const docHtml = '<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><title>' + title + '</title><style>body{font-family:"Microsoft YaHei",simsun,sans-serif;line-height:1.6;color:#1f2937;max-width:900px;margin:0 auto;padding:24px}table{border-collapse:collapse}th,td{border:1px solid #ccc}</style></head><body>'
+    + '<h1 style="text-align:center;color:#1e3a8a;margin-bottom:4px">' + title + '</h1>'
+    + '<p style="text-align:center;color:#666;font-size:13px;margin-top:0">导出时间：' + dateStr + '</p>'
+    + body
+    + '</body></html>';
+  const blob = new Blob([String.fromCharCode(0xFEFF) + docHtml], { type: 'application/ms-word;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'AI对话记录_' + new Date().toISOString().slice(0, 10) + '.doc';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('已导出 Word 文档（含表格）', 'success');
+}
+
 function initAIChat() {
   aiChatHistory = [];
   const msgArea = document.getElementById('aiChatMessages');
@@ -4150,7 +4252,7 @@ function initAIChat() {
   if (!cfg.apiKey) {
     msgArea.innerHTML = '<div class="ai-msg system">⚠️ 请先在"设置 → AI模型配置"中设置API Key，保存后即可开始对话</div>';
   } else {
-    msgArea.innerHTML = '<div class="ai-msg assistant">👋 你好！我是AI数据分析助手。我可以读取系统全部数据（用户、日报、周报、渠道配置）进行分析。\n\n你可以问我：\n- 统计各部门提交完成率\n- 分析各渠道转化效果\n- 找出未提交报告的人员\n- 对比不同时期的数据趋势\n\n请问你想了解什么？</div>';
+    msgArea.innerHTML = '<div class="ai-msg assistant">👋 你好！我是AI数据分析助手。我可以读取系统全部数据（用户、日报、周报、拜访、业绩、管理周报、客户汇总、渠道配置）进行分析。\n\n你可以问我：\n- 统计各部门提交完成率\n- 分析各渠道转化效果\n- 找出未提交报告的人员\n- 对比不同时期的数据趋势\n\n请问你想了解什么？</div>';
   }
 }
 
