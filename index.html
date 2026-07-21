@@ -423,6 +423,12 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
 .tag-radio {display:flex;flex-wrap:wrap;gap:3px 10px;font-size:12px;align-items:flex-start}
 .tag-radio label {display:inline-flex;align-items:center;gap:3px;white-space:nowrap;cursor:pointer;margin:0}
 .tag-radio input[type=radio] {margin:0;width:14px;height:14px}
+.month-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.month-chip { padding: 5px 12px; border: 1px solid var(--gray-300); background: #fff; color: var(--gray-600); border-radius: 16px; font-size: 13px; cursor: pointer; transition: all .15s; }
+.month-chip:hover { border-color: var(--primary); color: var(--primary); }
+.month-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+.month-chip-all { border-style: dashed; }
+.month-chip-all.active { background: var(--gray-500); border-color: var(--gray-500); }
 </style>
 </head>
 <body>
@@ -6717,6 +6723,7 @@ let csAllRows = [];
 let csPageRows = [];
 let csPage = 1;
 let csPageSize = 20;
+let csMonths = []; // 客户汇总月份多选（'01'~'12'）；空数组=全部月份
 
 async function renderSalesBoard() {
   const html = `
@@ -6779,29 +6786,64 @@ function refreshSalesBoardStats() {
   renderSalesBoardTable('sbBoard2', 'team');
 }
 
+function csDefaultMonthState() {
+  const now = new Date();
+  let y = now.getFullYear();
+  let m = now.getMonth() - 1; // 上个月
+  if (m < 0) { m = 11; y = y - 1; }
+  return { year: y.toString(), month: String(m + 1).padStart(2, '0') };
+}
+function csMonthChipsHtml(selected) {
+  const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+  let h = '<div class="month-chips">';
+  months.forEach(m => {
+    const active = selected.includes(m) ? ' active' : '';
+    h += `<button type="button" class="month-chip${active}" onclick="csToggleMonth('${m}')">${parseInt(m, 10)}月</button>`;
+  });
+  const allActive = (selected.length === 0) ? ' active' : '';
+  h += `<button type="button" class="month-chip month-chip-all${allActive}" onclick="csClearMonths()">全部</button>`;
+  h += '</div>';
+  return h;
+}
+function csToggleMonth(m) {
+  const i = csMonths.indexOf(m);
+  if (i >= 0) csMonths.splice(i, 1); else csMonths.push(m);
+  csRenderMonthChips();
+  csRefilter();
+}
+function csClearMonths() { csMonths = []; csRenderMonthChips(); csRefilter(); }
+function csRenderMonthChips() {
+  const el = document.getElementById('csMonthChips');
+  if (el) el.innerHTML = csMonthChipsHtml(csMonths);
+}
+
 function renderSalesBoardCustomer() {
   const records = cloudData.salesRecords;
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
-  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  const def = csDefaultMonthState();
+  const year = years.includes(def.year) ? def.year : (years.includes(curYear) ? curYear : (years[years.length - 1] || def.year));
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
-  const monthOptsCs = ['<option value="">全部月份</option>'].concat([...Array(12)].map((_, i) => { const v = String(i+1).padStart(2,'0'); return `<option value="${v}">${v}月</option>`; })).join('');
   const teams = [...new Set(records.map(r => r.team).filter(Boolean))].sort();
   const teamOptsCs = ['<option value="">全部部门</option>'].concat(teams.map(t => `<option value="${esc(t)}">${esc(t)}</option>`)).join('');
   const sps = [...new Set(records.map(r => r.salesperson).filter(Boolean))].sort();
   const spOptsCs = ['<option value="">全部人员</option>'].concat(sps.map(s => `<option value="${esc(s)}">${esc(s)}</option>`)).join('');
+  csMonths = [def.month];
   const cont = document.getElementById('sbContent');
   cont.innerHTML = `
     <div class="card">
       <div class="card-header"><h4>🔍 客户汇总查询</h4></div>
       <div class="card-body"><div class="filter-bar">
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="csYear" onchange="csRefilter()">${yearOpts}</select></div>
-        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="csMonth" onchange="csRefilter()">${monthOptsCs}</select></div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">部门</label><select class="form-control" id="csTeam" onchange="csRefilter()">${teamOptsCs}</select></div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">人员</label><select class="form-control" id="csSales" onchange="csRefilter()">${spOptsCs}</select></div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetCustomerSummary()">重置</button></div>
       </div>
-      <div style="font-size:12px;color:var(--gray-500);margin-top:6px">💡 后三列（客户来源 / 品类 / 客户画像）为单选框，修改后即时保存。${hasPermission('salesDetail') ? '' : '（当前账号仅查看，无编辑权限）'}</div>
+      <div class="form-group" style="margin-top:12px">
+        <label style="font-size:12px;color:var(--gray-500)">月份（可多选，默认上个月）</label>
+        <div id="csMonthChips">${csMonthChipsHtml(csMonths)}</div>
+      </div>
+      <div style="font-size:12px;color:var(--gray-500);margin-top:6px">💡 后三列（客户来源 / 品类 / 客户画像）为下拉框，选中后即时保存并着色。${hasPermission('salesDetail') ? '' : '（当前账号仅查看，无编辑权限）'}</div>
       </div>
     </div>
     <div class="card">
@@ -6818,9 +6860,11 @@ function resetCustomerSummary() {
   const records = cloudData.salesRecords;
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
-  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  const def = csDefaultMonthState();
+  const year = years.includes(def.year) ? def.year : (years.includes(curYear) ? curYear : (years[years.length - 1] || def.year));
   document.getElementById('csYear').value = year;
-  document.getElementById('csMonth').value = '';
+  csMonths = [def.month];
+  csRenderMonthChips();
   document.getElementById('csTeam').value = '';
   document.getElementById('csSales').value = '';
   csPage = 1;
@@ -6859,7 +6903,7 @@ function csPaintTag(sel) {
 
 function renderCustomerSummary() {
   const year = document.getElementById('csYear').value;
-  const month = document.getElementById('csMonth').value || '';
+  const months = csMonths; // 数组，空=全部月份
   const dept = document.getElementById('csTeam').value || '';
   const person = document.getElementById('csSales').value || '';
   const cfg = (cloudData.formConfig && cloudData.formConfig.customerTags) || { customerSource: [], category: [], customerProfile: [] };
@@ -6868,7 +6912,8 @@ function renderCustomerSummary() {
   const filtered = cloudData.salesRecords.filter(r => {
     const dm = r.docMonth || '';
     if (!dm.startsWith(year)) return false;
-    if (month && dm.slice(5) !== month) return false;
+    const mm = dm.slice(5);
+    if (months.length && !months.includes(mm)) return false;
     if (dept && (r.team || '') !== dept) return false;
     if (person && (r.salesperson || '') !== person) return false;
     return true;
@@ -7046,8 +7091,8 @@ function csExportCustomerSummary() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '客户汇总');
   const year = document.getElementById('csYear').value;
-  const month = document.getElementById('csMonth').value || '';
-  const fname = '客户汇总_' + year + (month ? ('_' + month + '月') : '') + '.xlsx';
+  const monthLabel = csMonths.length ? ('_' + csMonths.map(m => (parseInt(m, 10)) + '月').join('')) : '';
+  const fname = '客户汇总_' + year + monthLabel + '.xlsx';
   XLSX.writeFile(wb, fname);
   showToast('已导出 ' + csAllRows.length + ' 条（筛选结果）', 'success');
 }
