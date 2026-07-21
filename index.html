@@ -6223,6 +6223,8 @@ function toNum(x) { if (x == null || x === '') return 0; if (typeof x === 'numbe
 // ===== 业绩 / 用户 模块状态 =====
 let salesDetailPage = 1;
 let salesDetailPageSize = 20;
+let salesDetailFilters = { start:'', end:'', team:'', salesperson:'' };
+const selectedSalesIds = new Set();
 let sbSortCol = null;          // 'total' 或 'YYYY-MM'
 let sbSortDir = 'desc';        // 'asc' | 'desc'
 let sbLastYearTeamMap = {};    // 团队 -> { 'YYYY-MM': 金额 }（上一年，用于同比）
@@ -6411,7 +6413,17 @@ async function deleteSalesRecord(id) {
 
 async function renderSalesDetail() {
   const canEdit = hasPermission('salesDetail');
-  const all = cloudData.salesRecords.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
+  const f = salesDetailFilters;
+  // 筛选
+  const base = cloudData.salesRecords.filter(r => {
+    const d = (r.docDate || '');
+    if (f.start && d && d < f.start) return false;
+    if (f.end && d && d > f.end) return false;
+    if (f.team && (r.team || '') !== f.team) return false;
+    if (f.salesperson && (r.salesperson || '') !== f.salesperson) return false;
+    return true;
+  });
+  const all = base.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
   const totalAmount = all.reduce((s, r) => s + toNum(r.amount), 0);
   const custCount = new Set(all.map(r => r.customer).filter(Boolean)).size;
   const teamMap = {};
@@ -6424,8 +6436,14 @@ async function renderSalesDetail() {
   if (salesDetailPage < 1) salesDetailPage = 1;
   const startIdx = (salesDetailPage - 1) * salesDetailPageSize;
   const recs = all.slice(startIdx, startIdx + salesDetailPageSize);
-  const colCount = canEdit ? 10 : 9;
+  const colCount = 9 + (canEdit ? 2 : 0);
+  // 筛选下拉选项
+  const teams = [...new Set(cloudData.salesRecords.map(r => r.team).filter(Boolean))].sort();
+  const teamOpts = teams.map(t => `<option value="${esc(t)}" ${t === f.team ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  const sps = [...new Set(cloudData.salesRecords.map(r => r.salesperson).filter(Boolean))].sort();
+  const spOpts = sps.map(s => `<option value="${esc(s)}" ${s === f.salesperson ? 'selected' : ''}>${esc(s)}</option>`).join('');
   const rowsHtml = recs.map(r => `<tr>
+    ${canEdit ? `<td><input type="checkbox" class="sales-row-cb" data-id="${r.id}" ${selectedSalesIds.has(r.id) ? 'checked' : ''} onchange="onSalesSelect('${r.id}', this.checked)"></td>` : ''}
     <td>${esc(r.salesperson) || '-'}</td>
     <td><span class="badge badge-team">${esc(r.team) || '-'}</span></td>
     <td>${esc(r.docDate) || '-'}</td>
@@ -6464,6 +6482,18 @@ async function renderSalesDetail() {
     </div>
   </div>
   <div class="card">
+    <div class="card-header"><h4>🔎 筛选</h4></div>
+    <div class="card-body">
+      <div class="filter-bar">
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="sfStart" value="${f.start}" onchange="applySalesFilters()"></div>
+        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="sfEnd" value="${f.end}" onchange="applySalesFilters()"></div>
+        <div class="form-group"><label>部门 / 门店</label><select class="form-control" id="sfTeam" onchange="applySalesFilters()"><option value="">全部</option>${teamOpts}</select></div>
+        <div class="form-group"><label>人员</label><select class="form-control" id="sfSales" onchange="applySalesFilters()"><option value="">全部</option>${spOpts}</select></div>
+        <div class="form-group"><button type="button" class="btn btn-outline btn-sm" onclick="resetSalesFilters()">重置</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
     <div class="card-header"><h4>📊 业绩汇总</h4></div>
     <div class="card-body">
       <div class="stat-row">
@@ -6474,14 +6504,129 @@ async function renderSalesDetail() {
     </div>
   </div>
   <div class="card">
-    <div class="card-header"><h4>📋 业绩明细（共 ${totalRows} 条）</h4></div>
-    <div class="card-body"><div class="table-wrap"><table><thead><tr><th>销售员</th><th>团队/门店</th><th>单据日期</th><th class="num">折后金额</th><th class="num">毛利润</th><th>商品名称</th><th>单据编号</th><th>单据类别</th><th>状态</th>${canEdit ? '<th>操作</th>' : ''}</tr></thead><tbody>${rowsHtml || `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:30px">暂无数据，请导入或新增</td></tr>`}</tbody></table></div>${pager}</div>
+    <div class="card-header"><h4>📋 业绩明细（共 ${totalRows} 条${Object.values(f).some(v => v) ? '，已筛选' : ''}）</h4></div>
+    <div class="card-body">
+      ${canEdit ? `<div class="sticky-submit-bar" id="salesBatchBar" style="display:none">
+        <span id="salesSelCount" style="align-self:center">已选 0 条</span>
+        <button class="btn btn-primary btn-sm" onclick="openBatchEditSalesModal()">批量编辑</button>
+        <button class="btn btn-danger btn-sm" onclick="batchDeleteSales()">批量删除</button>
+        <button class="btn btn-outline btn-sm" onclick="clearSalesSelection()">取消选择</button>
+      </div>` : ''}
+      <div class="table-wrap"><table><thead><tr>
+        ${canEdit ? `<th style="width:36px"><input type="checkbox" id="salesSelectAll" onchange="toggleSalesSelectAll(this)" ${recs.length && recs.every(r => selectedSalesIds.has(r.id)) ? 'checked' : ''}></th>` : ''}
+        <th>销售员</th><th>团队/门店</th><th>单据日期</th><th class="num">折后金额</th><th class="num">毛利润</th><th>商品名称</th><th>单据编号</th><th>单据类别</th><th>状态</th>${canEdit ? '<th>操作</th>' : ''}
+      </tr></thead><tbody>${rowsHtml || `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:30px">暂无数据，请导入或新增</td></tr>`}</tbody></table></div>${pager}
+    </div>
   </div>`;
   document.getElementById('contentBody').innerHTML = html;
+  updateSalesBatchBar();
 }
 
 function salesDetailGoPage(p) { salesDetailPage = p; renderSalesDetail(); }
 function salesDetailSetPageSize(v) { salesDetailPageSize = parseInt(v, 10) || 20; salesDetailPage = 1; renderSalesDetail(); }
+
+function applySalesFilters() {
+  salesDetailFilters.start = (document.getElementById('sfStart').value || '').trim();
+  salesDetailFilters.end = (document.getElementById('sfEnd').value || '').trim();
+  salesDetailFilters.team = document.getElementById('sfTeam').value || '';
+  salesDetailFilters.salesperson = document.getElementById('sfSales').value || '';
+  salesDetailPage = 1;
+  renderSalesDetail();
+}
+function resetSalesFilters() {
+  salesDetailFilters = { start:'', end:'', team:'', salesperson:'' };
+  salesDetailPage = 1;
+  renderSalesDetail();
+}
+
+function onSalesSelect(id, checked) {
+  if (checked) selectedSalesIds.add(id); else selectedSalesIds.delete(id);
+  updateSalesBatchBar();
+  const selAll = document.getElementById('salesSelectAll');
+  if (selAll) { const rows = document.querySelectorAll('.sales-row-cb'); selAll.checked = rows.length > 0 && [...rows].every(cb => cb.checked); }
+}
+function toggleSalesSelectAll(cb) {
+  document.querySelectorAll('.sales-row-cb').forEach(box => { box.checked = cb.checked; const id = box.getAttribute('data-id'); if (cb.checked) selectedSalesIds.add(id); else selectedSalesIds.delete(id); });
+  updateSalesBatchBar();
+}
+function updateSalesBatchBar() {
+  const bar = document.getElementById('salesBatchBar');
+  if (bar) { bar.style.display = selectedSalesIds.size > 0 ? '' : 'none'; const c = document.getElementById('salesSelCount'); if (c) c.textContent = '已选 ' + selectedSalesIds.size + ' 条'; }
+}
+function clearSalesSelection() {
+  selectedSalesIds.clear();
+  document.querySelectorAll('.sales-row-cb').forEach(cb => cb.checked = false);
+  const selAll = document.getElementById('salesSelectAll'); if (selAll) selAll.checked = false;
+  updateSalesBatchBar();
+}
+
+function openBatchEditSalesModal() {
+  const ids = [...selectedSalesIds];
+  if (!ids.length) { showToast('请先勾选要编辑的记录', 'warning'); return; }
+  const teamOpts = SALES_KA_TEAMS.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  showModal('批量编辑业绩记录（共 ' + ids.length + ' 条）', `<form onsubmit="return submitBatchEditSales(event)">
+    <div class="form-group"><label>销售员（留空=不修改）</label><input type="text" class="form-control" id="bSalesperson" placeholder="留空表示不修改"></div>
+    <div class="form-group"><label>销售员所属门店 / 团队（留空=不修改）</label><select class="form-control" id="bTeam"><option value="">— 不修改 —</option>${teamOpts}</select></div>
+    <div class="form-group"><label>单据日期（留空=不修改）</label><input type="date" class="form-control" id="bDocDate"></div>
+    <div class="form-group"><label>折后金额（元，留空=不修改）</label><input type="number" step="0.01" class="form-control" id="bAmount" placeholder="留空表示不修改"></div>
+    <div class="form-group"><label>毛利润（元，留空=不修改）</label><input type="number" step="0.01" class="form-control" id="bGross" placeholder="留空表示不修改"></div>
+    <div class="form-group"><label>单据类别（留空=不修改）</label><input type="text" class="form-control" id="bDocType" placeholder="留空表示不修改"></div>
+    <div class="form-group"><label>状态（留空=不修改）</label><input type="text" class="form-control" id="bStatus" placeholder="留空表示不修改"></div>
+    <div class="form-group"><label>客户（留空=不修改）</label><input type="text" class="form-control" id="bCustomer" placeholder="留空表示不修改"></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="submit" class="btn btn-primary">应用到 ${ids.length} 条</button></div>
+  </form>`);
+}
+async function submitBatchEditSales(e) {
+  e.preventDefault();
+  const ids = [...selectedSalesIds];
+  if (!ids.length) { showToast('请先勾选记录', 'warning'); return false; }
+  const patch = {};
+  const sp = document.getElementById('bSalesperson').value.trim();
+  const tm = document.getElementById('bTeam').value;
+  const dd = document.getElementById('bDocDate').value;
+  const am = document.getElementById('bAmount').value;
+  const gp = document.getElementById('bGross').value;
+  const dt = document.getElementById('bDocType').value.trim();
+  const st = document.getElementById('bStatus').value.trim();
+  const cu = document.getElementById('bCustomer').value.trim();
+  if (sp) patch.salesperson = sp;
+  if (tm) { patch.team = tm; patch.storeRaw = tm; }
+  if (dd) { patch.docDate = dd; patch.docMonth = salesMonthOf(dd); }
+  if (am !== '') patch.amount = toNum(am);
+  if (gp !== '') patch.grossProfit = toNum(gp);
+  if (dt) patch.docType = dt;
+  if (st) patch.status = st;
+  if (cu) patch.customer = cu;
+  if (!Object.keys(patch).length) { showToast('没有填写任何要修改的字段', 'warning'); return false; }
+  showToast('正在批量更新 ' + ids.length + ' 条...', 'info');
+  try {
+    for (const id of ids) {
+      const rec = cloudData.salesRecords.find(r => r.id === id);
+      if (!rec) continue;
+      await apiUpdate('salesRecords', id, patch);
+      Object.assign(rec, patch);
+    }
+    saveReportsCache();
+    closeModal();
+    clearSalesSelection();
+    renderSalesDetail();
+    showToast('已批量更新 ' + ids.length + ' 条', 'success');
+  } catch (err) { showToast('批量更新失败: ' + err.message, 'error'); }
+  return false;
+}
+async function batchDeleteSales() {
+  const ids = [...selectedSalesIds];
+  if (!ids.length) { showToast('请先勾选记录', 'warning'); return; }
+  if (!confirm('确认删除选中的 ' + ids.length + ' 条业绩记录？此操作不可撤销。')) return;
+  try {
+    for (const id of ids) { try { await apiDelete('salesRecords', id); } catch (e) { console.warn('Delete failed:', id, e.message); } }
+    cloudData.salesRecords = cloudData.salesRecords.filter(r => !selectedSalesIds.has(r.id));
+    selectedSalesIds.clear();
+    saveReportsCache();
+    renderSalesDetail();
+    showToast('已删除 ' + ids.length + ' 条', 'success');
+  } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
+}
 
 function monthOpts() { let s = ''; for (let m = 1; m <= 12; m++) { const v = String(m).padStart(2, '0'); s += `<option value="${v}">${v}月</option>`; } return s; }
 function sbSyncTo() { const f = document.getElementById('sbMFrom'), t = document.getElementById('sbMTo'); if (+f.value > +t.value) t.value = f.value; }
