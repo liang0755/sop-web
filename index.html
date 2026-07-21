@@ -6380,9 +6380,9 @@ async function importSalesFile(file) {
         docType: String(get(r, '单据类别') || '').trim(),
         status: String(get(r, '状态') || '').trim(),
         customer: String(get(r, '客户') || '').trim(),
-        customerSource: String(get(r, '客户来源') || '').trim(),
-        category: String(get(r, '品类') || '').trim(),
-        customerProfile: String(get(r, '客户画像') || '').trim(),
+        customerSource: String(get(r, '客户来源') || get(r, '来源端口') || '').trim(),
+        category: String(get(r, '品类') || get(r, '分类') || '').trim(),
+        customerProfile: String(get(r, '客户画像') || get(r, '客户标签') || '').trim(),
         raw: r,
         createdAt: new Date().toISOString()
       };
@@ -7114,8 +7114,12 @@ function renderCustomerSummary() {
     const opts = (cfg[group] || []);
     const encKey = encodeURIComponent(aggKey);
     const styleBase = "width:100%;min-width:90px;padding:4px 8px;height:auto;font-size:13px";
-    const styleColor = csTagColorStyle(curVal, opts);
+    const inCfg = curVal && opts.includes(curVal);
+    const styleColor = inCfg ? csTagColorStyle(curVal, opts) : '';
     let h = `<select class="form-control cs-tag-select" data-group="${group}" style="${styleBase}${styleColor ? ';' + styleColor : ''}" ${canEdit ? '' : 'disabled'} onchange="saveCustomerTag('${group}','${encKey}',encodeURIComponent(this.value));csPaintTag(this)"><option value="">未设置</option>`;
+    if (curVal && !inCfg) {
+      h += `<option value="${esc(curVal)}" selected style="font-style:italic;color:var(--gray-600)">${esc(curVal)}（数据值）</option>`;
+    }
     opts.forEach(o => {
       const selected = (curVal === o) ? 'selected' : '';
       h += `<option value="${esc(o)}" ${selected}>${esc(o)}</option>`;
@@ -7161,16 +7165,20 @@ async function saveCustomerTag(group, encKey, encVal) {
   const parts = key.split('|');
   if (parts.length < 3) return;
   const [dm, sp, cust] = parts;
-  let n = 0;
+  let n = 0, fail = 0;
   for (const r of cloudData.salesRecords) {
     if (r.docMonth === dm && r.salesperson === sp && (r.customer || '') === cust) {
       r[group] = val;
-      try { await apiUpdate('salesRecords', r); n++; } catch(e) {}
+      if (r.id) {
+        try { await apiUpdate('salesRecords', r.id, { [group]: val }); n++; }
+        catch (e) { fail++; console.warn('saveCustomerTag 写入失败:', r.id, e); }
+      } else fail++;
     }
   }
   saveReportsCache();
   if (salesBoardTab === 'source') renderSalesBoardSource();
-  showToast('已保存（' + n + ' 条明细）', 'success', 1500);
+  if (fail) showToast('已保存 ' + n + ' 条，' + fail + ' 条缺少存储键未写入', 'error', 2500);
+  else showToast('已保存（' + n + ' 条明细）', 'success', 1500);
 }
 
 function lyMonth(mm) { const p = String(mm).split('-'); return (parseInt(p[0], 10) - 1) + '-' + p[1]; }
@@ -7236,12 +7244,16 @@ async function applyCsBatchTags() {
       const parts = key.split('|');
       if (parts.length < 3) continue;
       const [dm, sp, cust] = parts;
+      const patch = {};
+      if (source) patch.customerSource = (source === '__clear__' ? '' : source);
+      if (category) patch.category = (category === '__clear__' ? '' : category);
+      if (profile) patch.customerProfile = (profile === '__clear__' ? '' : profile);
       for (const r of cloudData.salesRecords) {
         if (r.docMonth === dm && r.salesperson === sp && (r.customer || '') === cust) {
           if (source) r.customerSource = (source === '__clear__' ? '' : source);
           if (category) r.category = (category === '__clear__' ? '' : category);
           if (profile) r.customerProfile = (profile === '__clear__' ? '' : profile);
-          try { await apiUpdate('salesRecords', r); total++; } catch (e) {}
+          if (r.id) { await apiUpdate('salesRecords', r.id, patch); total++; }
         }
       }
     }
