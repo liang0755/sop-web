@@ -7860,7 +7860,13 @@ function saveGradeByKey(key, patch) {
 let salesGradeYear = '';
 let salesGradeTab = 'matrix';
 let salesGradeMonth = (new Date().getMonth() + 1);
+let salesGradeSpFilter = [];          // 选中的销售名单（空数组=全部在职销售）
+let salesGradeSpFilterLoaded = false; // 是否已从 localStorage 载入默认
 function renderSalesGrade() {
+  if (!salesGradeSpFilterLoaded) {
+    try { const s = localStorage.getItem('sop_sg_sp_filter'); salesGradeSpFilter = s ? JSON.parse(s) : []; } catch (e) { salesGradeSpFilter = []; }
+    salesGradeSpFilterLoaded = true;
+  }
   const records = cloudData.salesRecords || [];
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
@@ -7883,6 +7889,22 @@ function renderSalesGrade() {
         <div class="filter-bar">
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="sgYear" onchange="${salesGradeTab==='single'?'refreshSalesGradeSingle()':'refreshSalesGrade()'}">${yearOpts}</select></div>
           ${salesGradeTab==='single'?`<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="sgMonth" onchange="salesGradeMonth=parseInt(this.value,10);refreshSalesGradeSingle()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===salesGradeMonth?'selected':''}>${m}月</option>`).join('')}</select></div>`:''}
+          <div class="form-group" style="position:relative">
+            <label style="font-size:12px;color:var(--gray-500)">销售（在职）</label>
+            <button type="button" class="form-control" id="sgSpBtn" onclick="toggleSgSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${sgSpLabel()}</button>
+            <div id="sgSpPanel" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
+              <div style="display:flex;gap:6px;margin-bottom:8px">
+                <input type="text" class="form-control form-control-sm" id="sgSpSearch" placeholder="搜索销售姓名" oninput="renderSgSpPanel()" style="flex:1;min-width:0">
+                <button type="button" class="btn btn-sm btn-outline" onclick="sgSpSelectAll()">全选</button>
+                <button type="button" class="btn btn-sm btn-outline" onclick="sgSpClear()">清空</button>
+              </div>
+              <div id="sgSpList"></div>
+              <div style="display:flex;gap:6px;margin-top:10px;border-top:1px solid var(--gray-100);padding-top:10px">
+                <button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="saveSgSpDefault()">💾 保存为默认</button>
+                <button type="button" class="btn btn-sm btn-outline" onclick="toggleSgSpPanel(false)">关闭</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${salesGradeTab==='single'?'说明：单月评级看板为「升降级矩阵」的表格视图，数据与矩阵<b>联动</b>（评级/备注修改即时同步）。纵向仅显示在册<b>在职</b>销售，横向为：评级业绩（滚动3月）/ 评级 / 升降级 / 备注。':'说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为当月职级对比上月职级的变化。'}</div>
         <div class="table-wrap"><table id="sgTable"></table></div>
@@ -7890,6 +7912,58 @@ function renderSalesGrade() {
     </div>`;
   if (document.getElementById('sgYear')) document.getElementById('sgYear').value = year;
   if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+}
+
+function sgSpLabel() {
+  if (!salesGradeSpFilter.length) return '全部在职销售';
+  const lbl = '已选 ' + salesGradeSpFilter.length + ' 名销售';
+  return salesGradeSpFilter.length <= 3 ? lbl + '：' + salesGradeSpFilter.join('、') : lbl;
+}
+function toggleSgSpPanel(force) {
+  const p = document.getElementById('sgSpPanel');
+  if (!p) return;
+  if (typeof force === 'boolean') p.style.display = force ? 'block' : 'none';
+  else p.style.display = p.style.display === 'block' ? 'none' : 'block';
+  if (p.style.display === 'block') { renderSgSpPanel(); const s = document.getElementById('sgSpSearch'); if (s) s.value = ''; }
+}
+function sgSpActiveList() {
+  const sm = buildUserStatusMap();
+  return Object.keys(sm).filter(n => sm[n] === '在职').sort((a, b) => a.localeCompare(b, 'zh'));
+}
+function renderSgSpPanel() {
+  const list = sgSpActiveList();
+  const q = (document.getElementById('sgSpSearch') ? document.getElementById('sgSpSearch').value : '').trim();
+  const box = document.getElementById('sgSpList');
+  if (!box) return;
+  const filtered = q ? list.filter(n => n.indexOf(q) >= 0) : list;
+  if (!filtered.length) { box.innerHTML = '<div style="padding:8px;color:var(--gray-400);font-size:12px">无匹配在职销售</div>'; return; }
+  box.innerHTML = filtered.map(n => {
+    const chk = salesGradeSpFilter.indexOf(n) >= 0 ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:4px;font-size:13px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background='transparent'"><input type="checkbox" ${chk} onchange='sgSpToggle(${JSON.stringify(n)})'> ${esc(n)}</label>`;
+  }).join('');
+}
+function sgSpToggle(name) {
+  const i = salesGradeSpFilter.indexOf(name);
+  if (i >= 0) salesGradeSpFilter.splice(i, 1); else salesGradeSpFilter.push(name);
+  const btn = document.getElementById('sgSpBtn'); if (btn) btn.textContent = sgSpLabel();
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+}
+function sgSpSelectAll() {
+  salesGradeSpFilter = sgSpActiveList().slice();
+  renderSgSpPanel();
+  const btn = document.getElementById('sgSpBtn'); if (btn) btn.textContent = sgSpLabel();
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+}
+function sgSpClear() {
+  salesGradeSpFilter = [];
+  renderSgSpPanel();
+  const btn = document.getElementById('sgSpBtn'); if (btn) btn.textContent = sgSpLabel();
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+}
+function saveSgSpDefault() {
+  try { localStorage.setItem('sop_sg_sp_filter', JSON.stringify(salesGradeSpFilter)); showToast('已保存为默认筛选（' + salesGradeSpFilter.length + ' 名销售）', 'success'); }
+  catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+  toggleSgSpPanel(false);
 }
 
 function refreshSalesGrade() {
@@ -7913,7 +7987,7 @@ function refreshSalesGrade() {
     spSet.add(sp);
   });
   const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  const rows = [...spSet].map(sp => {
+  const rows = [...spSet].filter(sp => !salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0).map(sp => {
     const row = { sp, roll: {}, dec: 0, single: base[sp] || {} };
     months.forEach(m => {
       let s = 0;
@@ -7987,7 +8061,7 @@ function exportSalesGrade() {
     spSet.add(sp);
   });
   const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  const rows = [...spSet].map(sp => {
+  const rows = [...spSet].filter(sp => !salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0).map(sp => {
     const row = { sp, roll: {} };
     months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); row.roll[m] = s; });
     row.dec = row.roll[12];
@@ -8051,7 +8125,7 @@ function refreshSalesGradeSingle() {
     spSet.add(sp);
   });
   const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  const rows = [...spSet].map(sp => {
+  const rows = [...spSet].filter(sp => !salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0).map(sp => {
     const row = { sp, roll: {}, single: base[sp] || {} };
     months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); row.roll[m] = s; });
     return row;
@@ -8113,7 +8187,7 @@ function exportSalesGradeSingle() {
     spSet.add(sp);
   });
   const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  const rows = [...spSet].map(sp => {
+  const rows = [...spSet].filter(sp => !salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0).map(sp => {
     const row = { sp, roll: {}, single: base[sp] || {} };
     months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); row.roll[m] = s; });
     return row;
