@@ -420,6 +420,9 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
 .import-overlay .spin{font-size:42px;animation:spin 1.4s linear infinite;display:inline-block;color:var(--primary)}
 .import-overlay .txt{margin-top:16px;font-size:15px;font-weight:600;color:var(--gray-700)}
 .import-overlay .sub{margin-top:8px;font-size:12px;color:var(--gray-500)}
+.tag-radio {display:flex;flex-wrap:wrap;gap:3px 10px;font-size:12px;align-items:flex-start}
+.tag-radio label {display:inline-flex;align-items:center;gap:3px;white-space:nowrap;cursor:pointer;margin:0}
+.tag-radio input[type=radio] {margin:0;width:14px;height:14px}
 </style>
 </head>
 <body>
@@ -564,6 +567,13 @@ async function loadCoreData() {
     }
     if (!cloudData.formConfig.signinEvents || !cloudData.formConfig.signinEvents.length) {
       cloudData.formConfig.signinEvents = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.signinEvents));
+    }
+    if (!cloudData.formConfig.customerTags || typeof cloudData.formConfig.customerTags !== 'object') {
+      cloudData.formConfig.customerTags = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.customerTags));
+    } else {
+      ['customerSource', 'category', 'customerProfile'].forEach(k => {
+        if (!Array.isArray(cloudData.formConfig.customerTags[k])) cloudData.formConfig.customerTags[k] = [];
+      });
     }
     if (!fcData) {
       try { await fetch(FB_BASE + '/formConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.formConfig)}); } catch(e) {}
@@ -1197,7 +1207,13 @@ const DEFAULT_FORM_CONFIG = {
     { name: '其他', events: ['N面拜访','售后服务'] }
   ],
   // 签到事件固定选项（用于拜访数据导入后手动修改下拉单选框）
-  signinEvents: ['陌拜演示','自拓线下','自拓线上','线索线上','线索线下','N面拜访','售后服务']
+  signinEvents: ['陌拜演示','自拓线下','自拓线上','线索线上','线索线下','N面拜访','售后服务'],
+  // 客户标签可配置选项（用于业绩看板-客户汇总数据的后三列单选框）。选项由用户在「表单配置-客户标签配置」Tab 维护。
+  customerTags: {
+    customerSource: [],   // 客户来源
+    category: [],         // 品类
+    customerProfile: []   // 客户画像
+  }
 };
 
 function getChannels(type) {
@@ -4299,6 +4315,7 @@ function renderFormConfig() {
       <div class="summary-tab ${configTab==='visitResults'?'active':''}" onclick="switchConfigTab('visitResults')">拜访结果配置</div>
       <div class="summary-tab ${configTab==='signinCategories'?'active':''}" onclick="switchConfigTab('signinCategories')">签到归类配置</div>
       <div class="summary-tab ${configTab==='signinEvents'?'active':''}" onclick="switchConfigTab('signinEvents')">签到事件配置</div>
+      <div class="summary-tab ${configTab==='customerTags'?'active':''}" onclick="switchConfigTab('customerTags')">客户标签配置</div>
     </div>
     <div id="configContent"></div>
     <div style="margin-top:12px;font-size:12px;color:var(--gray-500)">
@@ -4403,6 +4420,43 @@ function renderConfigContent() {
       </div>
       <button class="btn btn-outline" style="width:100%;padding:12px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addVisitResultOption()">➕ 添加选项</button>
     `;
+    return;
+  }
+  // ===== 客户标签配置 tab（用于业绩看板-客户汇总数据 的后三列单选框）=====
+  if (configTab === 'customerTags') {
+    if (!cloudData.formConfig.customerTags) cloudData.formConfig.customerTags = { customerSource: [], category: [], customerProfile: [] };
+    const groups = [
+      { key: 'customerSource', label: '客户来源', desc: '用于客户汇总数据「客户来源」列的单选框选项。' },
+      { key: 'category', label: '品类', desc: '用于客户汇总数据「品类」列的单选框选项。' },
+      { key: 'customerProfile', label: '客户画像', desc: '用于客户汇总数据「客户画像」列的单选框选项。' }
+    ];
+    let html2 = '';
+    groups.forEach(g => {
+      const list = cloudData.formConfig.customerTags[g.key] || [];
+      html2 += `
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><h4>${g.label}</h4><span style="font-size:12px;color:var(--gray-500)">${g.desc}</span></div>
+          <div class="card-body">
+            <div id="ct_${g.key}">
+              ${list.map((v, i) => `
+                <div class="channel-card" style="margin-bottom:10px">
+                  <div class="channel-card-header" style="padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                    <span class="badge badge-gray" style="font-size:12px">${i + 1}</span>
+                    <input type="text" class="form-control" value="${v.replace(/"/g,'&quot;')}" onchange="updateCustomerTagOption('${g.key}', ${i}, this.value)" style="flex:1;min-width:160px;max-width:320px" placeholder="${g.label}选项，如：线上">
+                    <button class="btn btn-danger btn-sm" onclick="deleteCustomerTagOption('${g.key}', ${i})">🗑 删除</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            <button class="btn btn-outline" style="width:100%;padding:10px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addCustomerTagOption('${g.key}')">➕ 添加${g.label}选项</button>
+          </div>
+        </div>`;
+    });
+    c.innerHTML = `
+      <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
+        💡 配置「客户来源 / 品类 / 客户画像」的<b>固定选项</b>，用于业绩看板「客户汇总数据」的后三列<b>单选框</b>。新增/删除后点击底部「保存配置」生效。某组选项为空时，对应单选框仅显示「未设置」。
+      </div>
+      ${html2}`;
     return;
   }
   // ===== 日报/周报配置 tab =====
@@ -4523,6 +4577,24 @@ function addSigninEventOption() {
 function deleteSigninEventOption(i) {
   if (!confirm('确定删除此签到事件选项吗？')) return;
   if (cloudData.formConfig.signinEvents) cloudData.formConfig.signinEvents.splice(i, 1);
+  renderConfigContent();
+}
+
+// ===== 客户标签配置 编辑助手 =====
+function updateCustomerTagOption(group, i, value) {
+  if (!cloudData.formConfig.customerTags) cloudData.formConfig.customerTags = { customerSource: [], category: [], customerProfile: [] };
+  if (!cloudData.formConfig.customerTags[group]) cloudData.formConfig.customerTags[group] = [];
+  if (cloudData.formConfig.customerTags[group][i] !== undefined) cloudData.formConfig.customerTags[group][i] = value;
+}
+function addCustomerTagOption(group) {
+  if (!cloudData.formConfig.customerTags) cloudData.formConfig.customerTags = { customerSource: [], category: [], customerProfile: [] };
+  if (!cloudData.formConfig.customerTags[group]) cloudData.formConfig.customerTags[group] = [];
+  cloudData.formConfig.customerTags[group].push('');
+  renderConfigContent();
+}
+function deleteCustomerTagOption(group, i) {
+  if (!confirm('确定删除此选项吗？已有客户汇总数据中的该值不会被自动改动。')) return;
+  if (cloudData.formConfig.customerTags && cloudData.formConfig.customerTags[group]) cloudData.formConfig.customerTags[group].splice(i, 1);
   renderConfigContent();
 }
 
@@ -6223,7 +6295,7 @@ function toNum(x) { if (x == null || x === '') return 0; if (typeof x === 'numbe
 // ===== 业绩 / 用户 模块状态 =====
 let salesDetailPage = 1;
 let salesDetailPageSize = 20;
-let salesDetailFilters = { start:'', end:'', team:'', salesperson:'' };
+let salesDetailFilters = { start:'', end:'', team:'', salesperson:'', customer:'' };
 const selectedSalesIds = new Set();
 let sbSortCol = null;          // 'total' 或 'YYYY-MM'
 let sbSortDir = 'desc';        // 'asc' | 'desc'
@@ -6297,6 +6369,9 @@ async function importSalesFile(file) {
         docType: String(get(r, '单据类别') || '').trim(),
         status: String(get(r, '状态') || '').trim(),
         customer: String(get(r, '客户') || '').trim(),
+        customerSource: String(get(r, '客户来源') || '').trim(),
+        category: String(get(r, '品类') || '').trim(),
+        customerProfile: String(get(r, '客户画像') || '').trim(),
         raw: r,
         createdAt: new Date().toISOString()
       };
@@ -6421,6 +6496,7 @@ async function renderSalesDetail() {
     if (f.end && d && d > f.end) return false;
     if (f.team && (r.team || '') !== f.team) return false;
     if (f.salesperson && (r.salesperson || '') !== f.salesperson) return false;
+    if (f.customer) { const c = (r.customer || '').toLowerCase(); if (!c.includes(f.customer.toLowerCase())) return false; }
     return true;
   });
   const all = base.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
@@ -6489,6 +6565,7 @@ async function renderSalesDetail() {
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="sfEnd" value="${f.end}" onchange="applySalesFilters()"></div>
         <div class="form-group"><label>部门 / 门店</label><select class="form-control" id="sfTeam" onchange="applySalesFilters()"><option value="">全部</option>${teamOpts}</select></div>
         <div class="form-group"><label>人员</label><select class="form-control" id="sfSales" onchange="applySalesFilters()"><option value="">全部</option>${spOpts}</select></div>
+        <div class="form-group"><label>客户（模糊搜索）</label><input type="text" class="form-control" id="sfCustomer" value="${f.customer}" placeholder="输入客户名关键词" onchange="applySalesFilters()" style="min-width:160px"></div>
         <div class="form-group"><button type="button" class="btn btn-outline btn-sm" onclick="resetSalesFilters()">重置</button></div>
       </div>
     </div>
@@ -6530,11 +6607,12 @@ function applySalesFilters() {
   salesDetailFilters.end = (document.getElementById('sfEnd').value || '').trim();
   salesDetailFilters.team = document.getElementById('sfTeam').value || '';
   salesDetailFilters.salesperson = document.getElementById('sfSales').value || '';
+  salesDetailFilters.customer = (document.getElementById('sfCustomer').value || '').trim();
   salesDetailPage = 1;
   renderSalesDetail();
 }
 function resetSalesFilters() {
-  salesDetailFilters = { start:'', end:'', team:'', salesperson:'' };
+  salesDetailFilters = { start:'', end:'', team:'', salesperson:'', customer:'' };
   salesDetailPage = 1;
   renderSalesDetail();
 }
@@ -6633,30 +6711,60 @@ function sbSyncTo() { const f = document.getElementById('sbMFrom'), t = document
 function sbReset() { document.getElementById('sbMFrom').value = '01'; document.getElementById('sbMTo').value = '12'; renderSalesBoards(); }
 function sbMonthList() { const y = document.getElementById('sbYear').value; const mf = document.getElementById('sbMFrom').value, mt = document.getElementById('sbMTo').value; const out = []; for (let m = +mf; m <= +mt; m++) out.push(y + '-' + String(m).padStart(2, '0')); return out; }
 
+let salesBoardTab = 'stats';
+let csSelectedKeys = new Set();
+let csAllRows = [];
+let csPageRows = [];
+let csPage = 1;
+let csPageSize = 20;
+
 async function renderSalesBoard() {
+  const html = `
+    <div class="summary-tabs" style="margin-bottom:20px">
+      <div class="summary-tab ${salesBoardTab==='stats'?'active':''}" onclick="switchSalesBoardTab('stats')">📊 业绩统计</div>
+      <div class="summary-tab ${salesBoardTab==='customer'?'active':''}" onclick="switchSalesBoardTab('customer')">👥 客户汇总数据</div>
+    </div>
+    <div id="sbContent"></div>`;
+  document.getElementById('contentBody').innerHTML = html;
+  renderSalesBoards();
+}
+
+function switchSalesBoardTab(t) {
+  salesBoardTab = t;
+  renderSalesBoards();
+}
+
+function renderSalesBoards() {
+  if (salesBoardTab === 'customer') { renderSalesBoardCustomer(); return; }
+  renderSalesBoardStats();
+}
+
+function renderSalesBoardStats() {
   const records = cloudData.salesRecords;
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
-  const html = `<div class="card">
-    <div class="card-header"><h4>🗓️ 时间筛选（年度为报表范围）</h4></div>
-    <div class="card-body"><div class="filter-bar">
-      <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="sbYear" onchange="renderSalesBoards()">${yearOpts}</select></div>
-      <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="sbMFrom" onchange="sbSyncTo();renderSalesBoards()">${monthOpts()}</select></div>
-      <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="sbMTo" onchange="renderSalesBoards()">${monthOpts()}</select></div>
-      <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="sbReset()">重置为全年</button></div>
-    </div></div>
-  </div>
-  <div class="card"><div class="card-header"><h4>📊 报表看板1 · 销售业绩统计</h4><span style="font-size:12px;color:var(--gray-500)">销售员（纵向）× 月份（横向）</span></div><div class="card-body"><div class="table-wrap"><table id="sbBoard1"></table></div></div></div>
-  <div class="card"><div class="card-header"><h4>📊 报表看板2 · 团队业绩统计</h4><span style="font-size:12px;color:var(--gray-500)">团队/门店（纵向）× 月份（横向）</span></div><div class="card-body"><div class="table-wrap"><table id="sbBoard2"></table></div></div></div>`;
-  document.getElementById('contentBody').innerHTML = html;
+  const cont = document.getElementById('sbContent');
+  cont.innerHTML = `
+    <div class="card">
+      <div class="card-header"><h4>🗓️ 时间筛选（年度为报表范围）</h4></div>
+      <div class="card-body"><div class="filter-bar">
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="sbYear" onchange="refreshSalesBoardStats()">${yearOpts}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="sbMFrom" onchange="sbSyncTo();refreshSalesBoardStats()">${monthOpts()}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="sbMTo" onchange="refreshSalesBoardStats()">${monthOpts()}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="sbReset()">重置为全年</button></div>
+      </div></div>
+    </div>
+    <div class="card"><div class="card-header"><h4>📊 报表看板1 · 销售业绩统计</h4><span style="font-size:12px;color:var(--gray-500)">销售员（纵向）× 月份（横向）</span></div><div class="card-body"><div class="table-wrap"><table id="sbBoard1"></table></div></div></div>
+    <div class="card"><div class="card-header"><h4>📊 报表看板2 · 团队业绩统计</h4><span style="font-size:12px;color:var(--gray-500)">团队/门店（纵向）× 月份（横向）</span></div><div class="card-body"><div class="table-wrap"><table id="sbBoard2"></table></div></div></div>`;
+  const yEl = document.getElementById('sbYear'); if (yEl) yEl.value = year;
   document.getElementById('sbMFrom').value = '01';
   document.getElementById('sbMTo').value = '12';
-  renderSalesBoards();
+  refreshSalesBoardStats();
 }
 
-function renderSalesBoards() {
+function refreshSalesBoardStats() {
   const year = document.getElementById('sbYear') ? document.getElementById('sbYear').value : new Date().getFullYear().toString();
   const ly = String(parseInt(year, 10) - 1);
   sbLastYearTeamMap = {};
@@ -6671,7 +6779,249 @@ function renderSalesBoards() {
   renderSalesBoardTable('sbBoard2', 'team');
 }
 
+function renderSalesBoardCustomer() {
+  const records = cloudData.salesRecords;
+  const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
+  const monthOptsCs = ['<option value="">全部月份</option>'].concat([...Array(12)].map((_, i) => { const v = String(i+1).padStart(2,'0'); return `<option value="${v}">${v}月</option>`; })).join('');
+  const teams = [...new Set(records.map(r => r.team).filter(Boolean))].sort();
+  const teamOptsCs = ['<option value="">全部部门</option>'].concat(teams.map(t => `<option value="${esc(t)}">${esc(t)}</option>`)).join('');
+  const sps = [...new Set(records.map(r => r.salesperson).filter(Boolean))].sort();
+  const spOptsCs = ['<option value="">全部人员</option>'].concat(sps.map(s => `<option value="${esc(s)}">${esc(s)}</option>`)).join('');
+  const cont = document.getElementById('sbContent');
+  cont.innerHTML = `
+    <div class="card">
+      <div class="card-header"><h4>🔍 客户汇总查询</h4></div>
+      <div class="card-body"><div class="filter-bar">
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="csYear" onchange="csRefilter()">${yearOpts}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="csMonth" onchange="csRefilter()">${monthOptsCs}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">部门</label><select class="form-control" id="csTeam" onchange="csRefilter()">${teamOptsCs}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">人员</label><select class="form-control" id="csSales" onchange="csRefilter()">${spOptsCs}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetCustomerSummary()">重置</button></div>
+      </div>
+      <div style="font-size:12px;color:var(--gray-500);margin-top:6px">💡 后三列（客户来源 / 品类 / 客户画像）为单选框，修改后即时保存。${hasPermission('salesDetail') ? '' : '（当前账号仅查看，无编辑权限）'}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h4>👥 客户汇总数据</h4><span style="font-size:12px;color:var(--gray-500)">按 年/月 × 销售员 × 客户 聚合折后金额</span>
+        <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="csExportCustomerSummary()">📤 导出筛选结果</button>
+      </div>
+      <div class="card-body"><div class="table-wrap" id="csTableWrap"></div><div id="csBatchBar" class="sticky-submit-bar" style="display:none"></div></div>
+    </div>`;
+  const yEl = document.getElementById('csYear'); if (yEl) yEl.value = year;
+  renderCustomerSummary();
+}
+
+function resetCustomerSummary() {
+  const records = cloudData.salesRecords;
+  const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  document.getElementById('csYear').value = year;
+  document.getElementById('csMonth').value = '';
+  document.getElementById('csTeam').value = '';
+  document.getElementById('csSales').value = '';
+  csPage = 1;
+  csSelectedKeys.clear();
+  renderCustomerSummary();
+}
+
+function renderCustomerSummary() {
+  const year = document.getElementById('csYear').value;
+  const month = document.getElementById('csMonth').value || '';
+  const dept = document.getElementById('csTeam').value || '';
+  const person = document.getElementById('csSales').value || '';
+  const cfg = (cloudData.formConfig && cloudData.formConfig.customerTags) || { customerSource: [], category: [], customerProfile: [] };
+  const canEdit = hasPermission('salesDetail');
+  const userMap = buildUserStatusMap();
+  const filtered = cloudData.salesRecords.filter(r => {
+    const dm = r.docMonth || '';
+    if (!dm.startsWith(year)) return false;
+    if (month && dm.slice(5) !== month) return false;
+    if (dept && (r.team || '') !== dept) return false;
+    if (person && (r.salesperson || '') !== person) return false;
+    return true;
+  });
+  const groups = {};
+  filtered.forEach(r => {
+    const key = (r.docMonth || '') + '|' + (r.salesperson || '') + '|' + (r.customer || '');
+    if (!groups[key]) groups[key] = { docMonth: r.docMonth || '', salesperson: r.salesperson || '', customer: r.customer || '', team: r.team || '', amount: 0, customerSource: '', category: '', customerProfile: '' };
+    const g = groups[key];
+    g.amount += toNum(r.amount);
+    if (!g.customerSource && r.customerSource) g.customerSource = r.customerSource;
+    if (!g.category && r.category) g.category = r.category;
+    if (!g.customerProfile && r.customerProfile) g.customerProfile = r.customerProfile;
+  });
+  const rows = Object.keys(groups).map(k => groups[k]).sort((a, b) => (a.docMonth + a.salesperson + a.customer).localeCompare(b.docMonth + b.salesperson + b.customer));
+  csAllRows = rows;
+  // 分页
+  const totalRows = rows.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / csPageSize));
+  if (csPage > totalPages) csPage = totalPages;
+  if (csPage < 1) csPage = 1;
+  const startIdx = (csPage - 1) * csPageSize;
+  const pageRows = rows.slice(startIdx, startIdx + csPageSize);
+  csPageRows = pageRows;
+  const allSelOnPage = pageRows.length > 0 && pageRows.every(g => csSelectedKeys.has(g.docMonth + '|' + g.salesperson + '|' + g.customer));
+  const tagRadio = (group, aggKey, curVal) => {
+    const opts = (cfg[group] || []);
+    const safeKey = aggKey.replace(/[^a-zA-Z0-9]/g, '_');
+    const name = 'cs_' + group + '_' + safeKey;
+    const encKey = encodeURIComponent(aggKey);
+    let h = `<div class="tag-radio"><label><input type="radio" name="${name}" value="" ${!curVal?'checked':''} ${canEdit?'':'disabled'} onchange="saveCustomerTag('${group}','${encKey}','')">未设置</label>`;
+    opts.forEach(o => {
+      const checked = (curVal === o) ? 'checked' : '';
+      h += `<label><input type="radio" name="${name}" value="${esc(o)}" ${checked} ${canEdit?'':'disabled'} onchange="saveCustomerTag('${group}','${encKey}','${encodeURIComponent(o)}')">${esc(o)}</label>`;
+    });
+    h += '</div>';
+    return h;
+  };
+  const wrap = document.getElementById('csTableWrap');
+  if (!totalRows) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无匹配数据，请调整查询条件</div>'; updateCsBatchBar(0); return; }
+  const rowsHtml = pageRows.map((g, idx) => {
+    const aggKey = g.docMonth + '|' + g.salesperson + '|' + g.customer;
+    const checked = csSelectedKeys.has(aggKey) ? 'checked' : '';
+    return `<tr>
+      <td style="text-align:center"><input type="checkbox" class="cs-check" data-idx="${idx}" ${checked} onchange="csToggleSelect(${idx}, this.checked)"></td>
+      <td>${esc(g.docMonth)}</td>
+      <td>${esc(g.salesperson)}${userStatusBadge(g.salesperson, userMap)}</td>
+      <td>${esc(g.customer) || '-'}</td>
+      <td class="num">${fmtSalesMoney(g.amount)}</td>
+      <td><span class="badge badge-team">${esc(g.team) || '-'}</span></td>
+      <td>${tagRadio('customerSource', aggKey, g.customerSource)}</td>
+      <td>${tagRadio('category', aggKey, g.category)}</td>
+      <td>${tagRadio('customerProfile', aggKey, g.customerProfile)}</td>
+    </tr>`;
+  }).join('');
+  const pager = `
+    <div class="pager">
+      <button class="btn btn-outline btn-sm" onclick="csGotoPage(${csPage - 1})" ${csPage <= 1 ? 'disabled' : ''}>上一页</button>
+      <span class="pager-info">第 ${csPage} / ${totalPages} 页 · 共 ${totalRows} 条（已选 ${csSelectedKeys.size} 组）</span>
+      <button class="btn btn-outline btn-sm" onclick="csGotoPage(${csPage + 1})" ${csPage >= totalPages ? 'disabled' : ''}>下一页</button>
+      <select class="form-control" style="width:auto;display:inline-block;margin-left:8px" onchange="csSetPageSize(this.value)">
+        ${[20, 50, 100].map(s => `<option value="${s}" ${s === csPageSize ? 'selected' : ''}>${s} 条/页</option>`).join('')}
+      </select>
+    </div>`;
+  const headCheck = `<th style="text-align:center;width:40px"><input type="checkbox" id="csHeadCheck" ${allSelOnPage?'checked':''} onchange="csToggleAll(this.checked)"></th>`;
+  wrap.innerHTML = `<table><thead><tr>${headCheck}<th>年/月</th><th>销售员</th><th>客户</th><th class="num">折后总金额</th><th>销售员所属门店</th><th>客户来源</th><th>品类</th><th>客户画像</th></tr></thead><tbody>${rowsHtml}</tbody></table>${pager}`;
+  updateCsBatchBar(totalRows);
+}
+
+async function saveCustomerTag(group, encKey, encVal) {
+  if (!hasPermission('salesDetail')) { showToast('无编辑权限', 'error'); renderCustomerSummary(); return; }
+  const key = decodeURIComponent(encKey);
+  const val = decodeURIComponent(encVal);
+  const parts = key.split('|');
+  if (parts.length < 3) return;
+  const [dm, sp, cust] = parts;
+  let n = 0;
+  for (const r of cloudData.salesRecords) {
+    if (r.docMonth === dm && r.salesperson === sp && (r.customer || '') === cust) {
+      r[group] = val;
+      try { await apiUpdate('salesRecords', r); n++; } catch(e) {}
+    }
+  }
+  saveReportsCache();
+  showToast('已保存（' + n + ' 条明细）', 'success', 1500);
+}
+
 function lyMonth(mm) { const p = String(mm).split('-'); return (parseInt(p[0], 10) - 1) + '-' + p[1]; }
+
+// ===== 客户汇总：分页 / 勾选 / 批量设置 / 导出 =====
+function csRefilter() { csPage = 1; csSelectedKeys.clear(); renderCustomerSummary(); }
+function csGotoPage(p) { csPage = p; renderCustomerSummary(); }
+function csSetPageSize(v) { csPageSize = parseInt(v, 10) || 20; csPage = 1; renderCustomerSummary(); }
+function csKeyOf(g) { return g.docMonth + '|' + g.salesperson + '|' + (g.customer || ''); }
+
+function csToggleSelect(idx, checked) {
+  const g = csPageRows[idx];
+  if (!g) return;
+  const key = csKeyOf(g);
+  if (checked) csSelectedKeys.add(key); else csSelectedKeys.delete(key);
+  const head = document.getElementById('csHeadCheck');
+  if (head) head.checked = csPageRows.length > 0 && csPageRows.every(x => csSelectedKeys.has(csKeyOf(x)));
+  updateCsBatchBar(csAllRows.length);
+}
+
+function csToggleAll(checked) {
+  csPageRows.forEach(g => { const k = csKeyOf(g); if (checked) csSelectedKeys.add(k); else csSelectedKeys.delete(k); });
+  renderCustomerSummary();
+}
+
+function csClearSelection() { csSelectedKeys.clear(); renderCustomerSummary(); }
+
+function updateCsBatchBar(totalRows) {
+  const bar = document.getElementById('csBatchBar');
+  if (!bar) return;
+  const n = csSelectedKeys.size;
+  if (!n) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <span>已选 <b>${n}</b> 组客户</span>
+    <button class="btn btn-primary btn-sm" onclick="openCsBatchTagModal()">🏷️ 批量设置标签</button>
+    <button class="btn btn-outline btn-sm" onclick="csClearSelection()">取消选择</button>
+  </div>`;
+}
+
+function openCsBatchTagModal() {
+  if (!hasPermission('salesDetail')) { showToast('无编辑权限', 'error'); return; }
+  if (!csSelectedKeys.size) { showToast('请先勾选客户', 'error'); return; }
+  const cfg = (cloudData.formConfig && cloudData.formConfig.customerTags) || { customerSource: [], category: [], customerProfile: [] };
+  const optHtml = (group) => ['<option value="">不修改</option>', '<option value="__clear__">⨉ 清空</option>'].concat((cfg[group] || []).map(o => `<option value="${esc(o)}">${esc(o)}</option>`)).join('');
+  const html = `<div class="import-note" style="margin-bottom:12px">🏷️ 对选中的 <b>${csSelectedKeys.size}</b> 组客户设置标签（留「不修改」保持原值，「清空」置空）。设置将应用到该客户对应的全部明细记录。</div>
+    <div class="form-group"><label>客户来源</label><select class="form-control" id="csbSource">${optHtml('customerSource')}</select></div>
+    <div class="form-group"><label>品类</label><select class="form-control" id="csbCategory">${optHtml('category')}</select></div>
+    <div class="form-group"><label>客户画像</label><select class="form-control" id="csbProfile">${optHtml('customerProfile')}</select></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="button" class="btn btn-primary" onclick="applyCsBatchTags()">确定设置</button></div>`;
+  showModal('批量设置客户标签', html);
+}
+
+async function applyCsBatchTags() {
+  const source = document.getElementById('csbSource').value;
+  const category = document.getElementById('csbCategory').value;
+  const profile = document.getElementById('csbProfile').value;
+  if (!source && !category && !profile) { showToast('请至少选择一个要设置的字段', 'error'); return; }
+  if (!confirm('确定将所选 ' + csSelectedKeys.size + ' 组客户的标签设置应用到全部明细？')) return;
+  let total = 0;
+  try {
+    for (const key of [...csSelectedKeys]) {
+      const parts = key.split('|');
+      if (parts.length < 3) continue;
+      const [dm, sp, cust] = parts;
+      for (const r of cloudData.salesRecords) {
+        if (r.docMonth === dm && r.salesperson === sp && (r.customer || '') === cust) {
+          if (source) r.customerSource = (source === '__clear__' ? '' : source);
+          if (category) r.category = (category === '__clear__' ? '' : category);
+          if (profile) r.customerProfile = (profile === '__clear__' ? '' : profile);
+          try { await apiUpdate('salesRecords', r); total++; } catch (e) {}
+        }
+      }
+    }
+    saveReportsCache();
+    closeModal();
+    csSelectedKeys.clear();
+    renderCustomerSummary();
+    showToast('已批量设置（' + total + ' 条明细）', 'success');
+  } catch (e) { showToast('批量设置失败：' + e.message, 'error', 4000); }
+}
+
+function csExportCustomerSummary() {
+  if (!csAllRows.length) { showToast('当前无数据可导出', 'error'); return; }
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  const headers = ['年/月', '销售员', '客户', '折后总金额', '销售员所属门店', '客户来源', '品类', '客户画像'];
+  const aoa = [headers];
+  csAllRows.forEach(g => { aoa.push([g.docMonth, g.salesperson, g.customer, g.amount, g.team, g.customerSource, g.category, g.customerProfile]); });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '客户汇总');
+  const year = document.getElementById('csYear').value;
+  const month = document.getElementById('csMonth').value || '';
+  const fname = '客户汇总_' + year + (month ? ('_' + month + '月') : '') + '.xlsx';
+  XLSX.writeFile(wb, fname);
+  showToast('已导出 ' + csAllRows.length + ' 条（筛选结果）', 'success');
+}
 
 function sbSortBy(col) {
   if (sbSortCol === col) { sbSortDir = sbSortDir === 'asc' ? 'desc' : 'asc'; }
