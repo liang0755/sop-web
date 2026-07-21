@@ -590,7 +590,7 @@ function needsAllReports() {
 }
 
 // ---------- 报表数据本地缓存：加速普通成员打开系统 / 填写日报周报 ----------
-const REPORTS_CACHE_KEY = 'sop_reports_cache_v2';
+const REPORTS_CACHE_KEY = 'sop_reports_cache_v3';
 const REPORTS_CACHE_TTL = 30 * 60 * 1000; // 30 分钟
 function saveReportsCache() {
   try {
@@ -652,7 +652,7 @@ async function fetchReportsFromCloud() {
     daily: dj != null ? Object.values(dj) : [],
     weekly: wj != null ? Object.values(wj) : []
   };
-  if (needVisit && res[2]) out.visit = Object.values(await okJson(res[2]) || {});
+  if (needVisit && res[2]) out.visit = hydrateVisitRecords(await okJson(res[2]));
   if (needMgr && res[3]) out.mgr = Object.values(await okJson(res[3]) || {});
   return out;
 }
@@ -734,6 +734,13 @@ async function apiDelete(collection, id) {
     method:'DELETE'
   });
   if (!res.ok) throw new Error('API delete failed: ' + res.status);
+}
+
+// 把 Firebase 返回的 { key: record } 字典转换为数组，并确保每条记录带上与存储键一致的 id。
+// 历史数据可能缺失 id 字段，导致删除/修改时用 undefined 作为 key 而失效；此处统一兜底。
+function hydrateVisitRecords(dict) {
+  if (!dict || typeof dict !== 'object') return [];
+  return Object.entries(dict).map(([k, v]) => ({ ...(v && typeof v === 'object' ? v : {}), id: k }));
 }
 
 // ============ Auth ============
@@ -889,7 +896,7 @@ async function silentRefresh(page) {
     const results = await Promise.all(fetches);
     const newDaily = results[0].ok ? Object.values(await results[0].json() || {}) : [];
     const newWeekly = results[1].ok ? Object.values(await results[1].json() || {}) : [];
-    const newVisit = results[2] ? (results[2].ok ? Object.values(await results[2].json() || {}) : []) : cloudData.visitRecords;
+    const newVisit = results[2] && results[2].ok ? hydrateVisitRecords(await results[2].json()) : cloudData.visitRecords;
     // Only update + re-render if data count changed (new records added by others)
     if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length) {
       cloudData.dailyReports = newDaily;
@@ -4282,7 +4289,7 @@ async function ensureVisitDataLoaded() {
   visitDataLoaded = true;
   try {
     const res = await fetch(FB_BASE + '/visitRecords.json');
-    cloudData.visitRecords = res.ok ? Object.values(await res.json() || {}) : [];
+    cloudData.visitRecords = res.ok ? hydrateVisitRecords(await res.json()) : [];
   } catch(e) { cloudData.visitRecords = []; }
 }
 
