@@ -243,6 +243,12 @@ tr:hover td{background:var(--gray-50)}
 
 /* Member dashboard "my submission" row — stacks cleanly on mobile */
 .member-submit-row{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
+/* Submitted manager report card body: visit summary on left, weekly content on right */
+.mgr-report-body{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.mgr-report-col{min-width:280px;flex:1}
+.mgr-report-col.snapshot{flex:0 0 340px;max-width:420px}
+.mgr-report-col.content{flex:2 1 360px;white-space:pre-wrap;font-size:13px;line-height:1.6;color:var(--gray-700)}
+.mgr-report-card{margin-bottom:12px;border:1px solid var(--gray-200);border-radius:8px;padding:14px}
 
 @media(max-width:768px){
   /* Sidebar becomes a slide-out drawer */
@@ -336,6 +342,11 @@ tr:hover td{background:var(--gray-50)}
 
   /* Member "my submission" row stacks vertically on mobile */
   .member-submit-row{flex-direction:column;align-items:flex-start;gap:10px}
+
+  /* Submitted manager report: stack summary above content on mobile */
+  .mgr-report-body{flex-direction:column;gap:12px}
+  .mgr-report-col.snapshot{flex:1 1 auto;max-width:none;width:100%}
+  .mgr-report-col.content{flex:1 1 auto;width:100%}
 
   /* Brand config inputs */
   #settingsBody .form-group label{font-size:13px}
@@ -5202,7 +5213,7 @@ function renderMgrReportList() {
     const snapCard = renderSnapshotCardHTML(snap);
     const canEdit = r.userId === currentUser.id || hasPermission('editOthers');
     const canDelete = r.userId === currentUser.id || hasPermission('deleteOthers');
-    return `<div style="border:1px solid var(--gray-200);border-radius:8px;padding:14px;margin-bottom:12px">
+    return `<div class="mgr-report-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <div>
           <span style="font-weight:600;font-size:14px">${r.weekLabel || r.weekStart + ' ~ ' + r.weekEnd}</span>
@@ -5215,8 +5226,10 @@ function renderMgrReportList() {
           ${canDelete ? `<button class="btn btn-sm btn-outline" style="color:var(--danger)" onclick="deleteMgrReport('${r.id}')">🗑️ 删除</button>` : ''}
         </div>
       </div>
-      ${snapCard}
-      <div style="white-space:pre-wrap;font-size:13px;line-height:1.6;color:var(--gray-700)">${(r.content || '').replace(/</g,'&lt;')}</div>
+      <div class="mgr-report-body">
+        <div class="mgr-report-col snapshot">${snapCard}</div>
+        <div class="mgr-report-col content">${(r.content || '').replace(/</g,'&lt;')}</div>
+      </div>
       <div style="margin-top:8px;font-size:11px;color:var(--gray-400)">${r.createdAt ? '创建：' + r.createdAt.replace('T',' ').slice(0,16) : ''}${r.updatedAt && r.updatedAt !== r.createdAt ? ' · 更新：' + r.updatedAt.replace('T',' ').slice(0,16) : ''}</div>
     </div>`;
   }).join('');
