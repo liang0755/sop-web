@@ -427,6 +427,11 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
 .month-chip { padding: 5px 12px; border: 1px solid var(--gray-300); background: #fff; color: var(--gray-600); border-radius: 16px; font-size: 13px; cursor: pointer; transition: all .15s; }
 .month-chip:hover { border-color: var(--primary); color: var(--primary); }
 .month-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+.source-summary-table th[colspan]{background:var(--gray-100);text-align:center;border-bottom:1px solid var(--gray-200)}
+.source-summary-table th,.source-summary-table td{border:1px solid var(--gray-200)}
+.source-summary-table thead th:first-child{background:var(--gray-50)}
+.source-summary-table tbody tr:hover td{background:var(--gray-50)}
+.source-summary-table tbody td:first-child{background:var(--gray-50);font-weight:600}
 .month-chip-all { border-style: dashed; }
 .month-chip-all.active { background: var(--gray-500); border-color: var(--gray-500); }
 </style>
@@ -6730,6 +6735,7 @@ async function renderSalesBoard() {
     <div class="summary-tabs" style="margin-bottom:20px">
       <div class="summary-tab ${salesBoardTab==='stats'?'active':''}" onclick="switchSalesBoardTab('stats')">📊 业绩统计</div>
       <div class="summary-tab ${salesBoardTab==='customer'?'active':''}" onclick="switchSalesBoardTab('customer')">👥 客户汇总数据</div>
+      <div class="summary-tab ${salesBoardTab==='source'?'active':''}" onclick="switchSalesBoardTab('source')">🏷️ 客户来源汇总</div>
     </div>
     <div id="sbContent"></div>`;
   document.getElementById('contentBody').innerHTML = html;
@@ -6743,6 +6749,7 @@ function switchSalesBoardTab(t) {
 
 function renderSalesBoards() {
   if (salesBoardTab === 'customer') { renderSalesBoardCustomer(); return; }
+  if (salesBoardTab === 'source') { renderSalesBoardSource(); return; }
   renderSalesBoardStats();
 }
 
@@ -6784,6 +6791,170 @@ function refreshSalesBoardStats() {
   });
   renderSalesBoardTable('sbBoard1', 'salesperson');
   renderSalesBoardTable('sbBoard2', 'team');
+}
+
+// ===== 客户来源汇总 =====
+function renderSalesBoardSource() {
+  const records = cloudData.salesRecords;
+  const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
+  const cont = document.getElementById('sbContent');
+  cont.innerHTML = `
+    <div class="card">
+      <div class="card-header"><h4>🏷️ 客户来源汇总</h4><span style="font-size:12px;color:var(--gray-500)">按年显示，横向1-12月，每月统计客户数与业绩</span></div>
+      <div class="card-body"><div class="filter-bar">
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="srcYear" onchange="refreshSalesBoardSource()">${yearOpts}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesBoardSource()">重置为今年</button></div>
+        <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportSourceSummary()">📤 导出</button></div>
+      </div></div>
+    </div>
+    <div class="card"><div class="card-body"><div class="table-wrap" id="srcTableWrap"></div></div></div>`;
+  const yEl = document.getElementById('srcYear'); if (yEl) yEl.value = year;
+  refreshSalesBoardSource();
+}
+
+function resetSalesBoardSource() {
+  const records = cloudData.salesRecords;
+  const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  const yEl = document.getElementById('srcYear'); if (yEl) yEl.value = year;
+  refreshSalesBoardSource();
+}
+
+function refreshSalesBoardSource() {
+  const year = document.getElementById('srcYear') ? document.getElementById('srcYear').value : new Date().getFullYear().toString();
+  renderSourceSummaryTable(year);
+}
+
+function aggregateSourceSummary(year) {
+  const filtered = cloudData.salesRecords.filter(r => (r.docMonth || '').startsWith(year));
+  // 第一步：按客户汇总数据维度聚合（年月 × 销售员 × 客户）
+  const groups = {};
+  filtered.forEach(r => {
+    const key = (r.docMonth || '') + '|' + (r.salesperson || '') + '|' + (r.customer || '');
+    if (!groups[key]) groups[key] = { docMonth: r.docMonth || '', customer: r.customer || '', customerSource: r.customerSource || '', amount: 0 };
+    const g = groups[key];
+    g.amount += toNum(r.amount);
+    if (!g.customerSource && r.customerSource) g.customerSource = r.customerSource;
+  });
+  // 第二步：按客户来源 + 月份聚合（单数=去重客户数）
+  const srcMap = {};
+  Object.values(groups).forEach(g => {
+    const src = g.customerSource || '(未设置)';
+    const mm = g.docMonth.slice(5);
+    if (!srcMap[src]) srcMap[src] = {};
+    if (!srcMap[src][mm]) srcMap[src][mm] = { countSet: new Set(), amount: 0 };
+    srcMap[src][mm].countSet.add(g.customer);
+    srcMap[src][mm].amount += g.amount;
+  });
+  return srcMap;
+}
+
+function renderSourceSummaryTable(year) {
+  const wrap = document.getElementById('srcTableWrap');
+  const srcMap = aggregateSourceSummary(year);
+  const sources = Object.keys(srcMap).sort((a, b) => a === '(未设置)' ? 1 : (b === '(未设置)' ? -1 : a.localeCompare(b)));
+  const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+  if (!sources.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无匹配数据</div>'; return; }
+  let head = '<thead><tr><th rowspan="2" style="min-width:120px">客户来源</th>';
+  months.forEach(m => { head += `<th colspan="2">${parseInt(m, 10)}月</th>`; });
+  head += '<th colspan="2">合计</th></tr><tr>';
+  months.forEach(() => { head += '<th class="num">单数</th><th class="num">业绩</th>'; });
+  head += '<th class="num">单数</th><th class="num">业绩</th></tr></thead>';
+  let body = '<tbody>';
+  const colCount = {}, colAmount = {}, colGrandCount = new Set();
+  sources.forEach(src => {
+    let rowCount = 0, rowAmount = 0;
+    body += `<tr><td><span class="badge badge-info">${esc(src)}</span></td>`;
+    months.forEach(m => {
+      const cell = srcMap[src][m] || { countSet: new Set(), amount: 0 };
+      const c = cell.countSet.size;
+      const a = cell.amount;
+      rowCount += c;
+      rowAmount += a;
+      colCount[m] = (colCount[m] || 0) + c;
+      colAmount[m] = (colAmount[m] || 0) + a;
+      // 合计客户数按所有来源去重累加有难度，这里对单数做简单求和
+      cell.countSet.forEach(cust => colGrandCount.add(m + '|' + cust));
+      body += `<td class="num">${c || '-'}</td><td class="num">${a ? fmtSalesMoney(a) : '-'}</td>`;
+    });
+    body += `<td class="num" style="font-weight:700">${rowCount}</td><td class="num" style="font-weight:700">${fmtSalesMoney(rowAmount)}</td></tr>`;
+  });
+  body += '</tbody>';
+  let foot = '<tfoot><tr class="total-row"><td>合计</td>';
+  let grandCount = 0, grandAmount = 0;
+  months.forEach(m => {
+    const c = colCount[m] || 0;
+    const a = colAmount[m] || 0;
+    grandCount += c;
+    grandAmount += a;
+    foot += `<td class="num">${c}</td><td class="num">${fmtSalesMoney(a)}</td>`;
+  });
+  foot += `<td class="num">${grandCount}</td><td class="num">${fmtSalesMoney(grandAmount)}</td></tr></tfoot>`;
+  wrap.innerHTML = `<table class="source-summary-table">${head}${body}${foot}</table>`;
+}
+
+function exportSourceSummary() {
+  const year = document.getElementById('srcYear') ? document.getElementById('srcYear').value : new Date().getFullYear().toString();
+  const srcMap = aggregateSourceSummary(year);
+  const sources = Object.keys(srcMap).sort((a, b) => a === '(未设置)' ? 1 : (b === '(未设置)' ? -1 : a.localeCompare(b)));
+  const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+  if (!sources.length) { showToast('当前无数据可导出', 'error'); return; }
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  // 表头：客户来源 + 每月（单数、业绩）+ 合计（单数、业绩）
+  const header1 = ['客户来源'];
+  months.forEach(m => { header1.push(parseInt(m, 10) + '月'); header1.push(''); });
+  header1.push('合计'); header1.push('');
+  const header2 = [''];
+  months.forEach(() => { header2.push('单数'); header2.push('业绩'); });
+  header2.push('单数'); header2.push('业绩');
+  const aoa = [header1, header2];
+  const colCount = {}, colAmount = {};
+  sources.forEach(src => {
+    const row = [src];
+    let rowCount = 0, rowAmount = 0;
+    months.forEach(m => {
+      const cell = srcMap[src][m] || { countSet: new Set(), amount: 0 };
+      const c = cell.countSet.size;
+      const a = cell.amount;
+      rowCount += c;
+      rowAmount += a;
+      colCount[m] = (colCount[m] || 0) + c;
+      colAmount[m] = (colAmount[m] || 0) + a;
+      row.push(c || 0);
+      row.push(a);
+    });
+    row.push(rowCount);
+    row.push(rowAmount);
+    aoa.push(row);
+  });
+  const totalRow = ['合计'];
+  let grandCount = 0, grandAmount = 0;
+  months.forEach(m => {
+    const c = colCount[m] || 0;
+    const a = colAmount[m] || 0;
+    grandCount += c;
+    grandAmount += a;
+    totalRow.push(c);
+    totalRow.push(a);
+  });
+  totalRow.push(grandCount);
+  totalRow.push(grandAmount);
+  aoa.push(totalRow);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // 合并月份表头单元格
+  const merges = [];
+  let colIdx = 1;
+  months.forEach(() => { merges.push({ s: { r: 0, c: colIdx }, e: { r: 0, c: colIdx + 1 } }); colIdx += 2; });
+  merges.push({ s: { r: 0, c: colIdx }, e: { r: 0, c: colIdx + 1 } });
+  ws['!merges'] = merges;
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '客户来源汇总');
+  XLSX.writeFile(wb, `客户来源汇总_${year}.xlsx`);
+  showToast('已导出客户来源汇总', 'success');
 }
 
 function csDefaultMonthState() {
@@ -6998,6 +7169,7 @@ async function saveCustomerTag(group, encKey, encVal) {
     }
   }
   saveReportsCache();
+  if (salesBoardTab === 'source') renderSalesBoardSource();
   showToast('已保存（' + n + ' 条明细）', 'success', 1500);
 }
 
@@ -7077,6 +7249,7 @@ async function applyCsBatchTags() {
     closeModal();
     csSelectedKeys.clear();
     renderCustomerSummary();
+    if (salesBoardTab === 'source') renderSalesBoardSource();
     showToast('已批量设置（' + total + ' 条明细）', 'success');
   } catch (e) { showToast('批量设置失败：' + e.message, 'error', 4000); }
 }
