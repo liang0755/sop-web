@@ -505,6 +505,7 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
       <div class="nav-item" data-page="summary" onclick="navTo('summary')"><span class="icon">👥</span> 团队汇总</div>
       <div class="nav-item" data-page="visitStats" onclick="navTo('visitStats')" id="navVisitStats"><span class="icon">📊</span> 拜访统计</div>
       <div class="nav-item" data-page="salesBoard" onclick="navTo('salesBoard')" id="navSalesBoard"><span class="icon">📺</span> 业绩看板</div>
+      <div class="nav-item" data-page="salesGrade" onclick="navTo('salesGrade')" id="navSalesGrade"><span class="icon">🎯</span> 销售升降级看板</div>
       <div class="nav-section-title">管理</div>
       <div class="nav-item" data-page="userManagement" onclick="navTo('userManagement')" id="navUserMgmt"><span class="icon">👤</span> 用户管理</div>
       <div class="nav-item" data-page="roleConfig" onclick="navTo('roleConfig')" id="navRoleConfig"><span class="icon">🛡️</span> 角色权限</div>
@@ -640,6 +641,11 @@ async function loadCoreData() {
         // Ensure mgrReport exists on all roles
         if (role.permissions && role.permissions.mgrReport === undefined) {
           role.permissions.mgrReport = (role.key === 'admin' || role.key === 'manager');
+          roleChanged = true;
+        }
+        // Ensure salesGrade exists (new module) — default to same access as salesBoard
+        if (role.permissions && role.permissions.salesGrade === undefined) {
+          role.permissions.salesGrade = role.permissions.salesBoard === true;
           roleChanged = true;
         }
       });
@@ -964,7 +970,7 @@ function navTo(page) {
   const cb = document.getElementById('contentBody');
   cb.className = 'content-body';
   // Check page permission (dashboard and settings are always allowed)
-  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','visitData','visitStats','mgrReport','salesDetail','salesBoard'];
+  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade'];
   if (restrictedPages.includes(page) && !hasPermission(page)) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面，请联系管理员。</div>';
     closeSidebar();
@@ -972,9 +978,9 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板'};
+  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售升降级看板'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
-  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard}[page]||(()=>{}))();
+  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade}[page]||(()=>{}))();
   closeSidebar();
   // Background refresh: silently fetch latest data (non-blocking, only for read-only pages)
   silentRefresh(page);
@@ -985,7 +991,7 @@ async function silentRefresh(page) {
   if (bgRefreshInFlight) return;
   if (Date.now() - lastRefreshTime < REFRESH_INTERVAL) return;
   // Only background-refresh read-only pages (not forms with user input)
-  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard'].includes(page)) return;
+  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard','salesGrade'].includes(page)) return;
   bgRefreshInFlight = true;
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
@@ -1012,7 +1018,7 @@ async function silentRefresh(page) {
       cloudData.salesRecords = newSales;
       const activePage = document.querySelector('.nav-item.active')?.dataset.page;
       if (activePage === page) {
-        ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard}[page]||(()=>{}))();
+        ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade}[page]||(()=>{}))();
       }
     }
   } catch(e) { /* silent fail */ }
@@ -1073,7 +1079,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: true, deleteOthers: true, exportData: true,
         brandConfig: true, aiConfig: true,
         visitData: true, visitStats: true, mgrReport: true,
-        salesDetail: true, salesBoard: true
+        salesDetail: true, salesBoard: true, salesGrade: true
       }
     },
     {
@@ -1086,7 +1092,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: true, deleteOthers: false, exportData: true,
         brandConfig: false, aiConfig: false,
         visitData: true, visitStats: true, mgrReport: true,
-        salesDetail: true, salesBoard: true
+        salesDetail: true, salesBoard: true, salesGrade: true
       }
     },
     {
@@ -1099,7 +1105,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
         visitData: false, visitStats: false, mgrReport: false,
-        salesDetail: true, salesBoard: true
+        salesDetail: true, salesBoard: true, salesGrade: true
       }
     },
     {
@@ -1112,7 +1118,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
         visitData: false, visitStats: false, mgrReport: false,
-        salesDetail: false, salesBoard: true
+        salesDetail: false, salesBoard: true, salesGrade: true
       }
     }
   ]
@@ -1126,11 +1132,11 @@ const PERMISSION_LABELS = {
   roleConfig: '角色权限配置', settings: '设置',
   editOthers: '编辑他人数据', deleteOthers: '删除他人数据', exportData: '导出数据',
   brandConfig: '品牌配置', aiConfig: 'AI模型配置',
-  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报', salesDetail: '业绩明细', salesBoard: '业绩看板'
+  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报', salesDetail: '业绩明细', salesBoard: '业绩看板', salesGrade: '销售升降级看板'
 };
 
 const PERMISSION_GROUPS = [
-  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats','mgrReport','salesDetail','salesBoard'] },
+  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade'] },
   { title: '管理功能', keys: ['userManagement','formConfig','aiChat','roleConfig','settings','brandConfig','aiConfig'] },
   { title: '数据操作', keys: ['editOthers','deleteOthers','exportData'] }
 ];
@@ -7695,6 +7701,144 @@ function renderSalesBoardTable(tid, key) {
   h += `<td class="num">${fmtSalesMoney(gt)}</td></tr></tfoot>`;
   document.getElementById(tid).innerHTML = h;
 }
+
+
+// ===== 销售升降级看板 =====
+let salesGradeYear = '';
+function renderSalesGrade() {
+  const records = cloudData.salesRecords || [];
+  const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  salesGradeYear = year;
+  const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
+  document.getElementById('contentBody').innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <h4>🎯 销售升降级看板</h4>
+        <button class="btn btn-outline btn-sm" onclick="exportSalesGrade()">⬇️ 导出 Excel</button>
+      </div>
+      <div class="card-body">
+        <div class="filter-bar">
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="sgYear" onchange="refreshSalesGrade()">${yearOpts}</select></div>
+        </div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。<span style="color:#16a34a">绿色▲</span> 表示较上月评级业绩上升，<span style="color:#dc2626">红色▼</span> 表示下降。</div>
+        <div class="table-wrap"><table id="sgTable"></table></div>
+      </div>
+    </div>`;
+  if (document.getElementById('sgYear')) document.getElementById('sgYear').value = year;
+  refreshSalesGrade();
+}
+
+function refreshSalesGrade() {
+  const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
+  salesGradeYear = year;
+  const records = cloudData.salesRecords || [];
+  const statusMap = buildUserStatusMap();
+  const base = {}; // sp -> { month: amount }
+  const spSet = new Set();
+  records.forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    const st = statusMap[sp];
+    if (st === '离职' || st === '禁用') return; // 仅显示在册在职销售
+    const m = parseInt(dm.slice(5, 7), 10);
+    if (!(m >= 1 && m <= 12)) return;
+    if (!base[sp]) base[sp] = {};
+    base[sp][m] = (base[sp][m] || 0) + toNum(r.amount);
+    spSet.add(sp);
+  });
+  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
+  const rows = [...spSet].map(sp => {
+    const row = { sp, roll: {}, dec: 0, single: base[sp] || {} };
+    months.forEach(m => {
+      let s = 0;
+      for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0);
+      row.roll[m] = s;
+    });
+    row.dec = row.roll[12]; // 年末评级业绩(10+11+12 滚动)
+    return row;
+  });
+  rows.sort((a, b) => b.dec - a.dec); // 默认按年末评级业绩降序
+  let h = '<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（在职）</span></th>';
+  months.forEach(m => { h += `<th class="num">${m}月</th>`; });
+  h += '<th class="num">年末评级业绩<br><span style="font-weight:400;font-size:10px;color:var(--gray-400)">10-12月滚动</span></th></tr></thead><tbody>';
+  const colTot = {}; months.forEach(m => colTot[m] = 0);
+  let decTot = 0;
+  rows.forEach(row => {
+    h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
+    months.forEach(m => {
+      const v = row.roll[m];
+      colTot[m] += v;
+      let trend = '';
+      if (m > 1) {
+        const prev = row.roll[m - 1];
+        if (prev > 0) {
+          const g = (v - prev) / prev * 100;
+          const up = g >= 0;
+          trend = `<div style="font-size:10px;color:${up ? '#16a34a' : '#dc2626'}">${up ? '▲' : '▼'} ${up ? '+' : ''}${g.toFixed(0)}%</div>`;
+        } else {
+          trend = `<div style="font-size:10px;color:#16a34a">▲ 新</div>`;
+        }
+      }
+      const bg = (m > 1) ? (row.roll[m] >= row.roll[m - 1] ? ' style="background:rgba(34,197,94,.08)"' : ' style="background:rgba(239,68,68,.08)"') : '';
+      const single = row.single[m] || 0;
+      h += `<td class="num"${bg}>${fmtSalesMoney(v)}<div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div>${trend}</td>`;
+    });
+    decTot += row.dec;
+    h += `<td class="num" style="font-weight:700">${fmtSalesMoney(row.dec)}</td></tr>`;
+  });
+  if (!rows.length) {
+    h += `<tr><td colspan="${months.length + 2}" style="text-align:center;color:var(--gray-400);padding:24px">本年度暂无在职销售的业绩数据</td></tr>`;
+  }
+  h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
+  months.forEach(m => { h += `<td class="num">${fmtSalesMoney(colTot[m])}</td>`; });
+  h += `<td class="num">${fmtSalesMoney(decTot)}</td></tr></tfoot>`;
+  const tbl = document.getElementById('sgTable');
+  if (tbl) tbl.innerHTML = h;
+}
+
+function exportSalesGrade() {
+  const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
+  const statusMap = buildUserStatusMap();
+  const base = {};
+  const spSet = new Set();
+  (cloudData.salesRecords || []).forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    const st = statusMap[sp];
+    if (st === '离职' || st === '禁用') return;
+    const m = parseInt(dm.slice(5, 7), 10);
+    if (!(m >= 1 && m <= 12)) return;
+    if (!base[sp]) base[sp] = {};
+    base[sp][m] = (base[sp][m] || 0) + toNum(r.amount);
+    spSet.add(sp);
+  });
+  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
+  const rows = [...spSet].map(sp => {
+    const row = { sp, roll: {} };
+    months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); row.roll[m] = s; });
+    row.dec = row.roll[12];
+    return row;
+  }).sort((a, b) => b.dec - a.dec);
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  const aoa = [];
+  aoa.push([`销售升降级看板 · ${year}年（滚动3个月评级业绩）`]);
+  aoa.push(['说明：每个单元格 = 该销售员当月及前2个月业绩之和；年末评级业绩 = 10-12月滚动合计']);
+  aoa.push(['销售员'].concat(months.map(m => m + '月')).concat(['年末评级业绩']));
+  rows.forEach(row => {
+    aoa.push([row.sp].concat(months.map(m => Math.round(row.roll[m]))).concat([Math.round(row.dec)]));
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '销售升降级');
+  XLSX.writeFile(wb, `销售升降级看板_${year}.xlsx`);
+}
+
 
 (async function init() {
   // Start loading background image IMMEDIATELY (has nothing to do with Firebase)
