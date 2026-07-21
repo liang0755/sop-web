@@ -3795,6 +3795,50 @@ function buildAIContext() {
     byMonth: visitByMonth
   };
 
+  // Compile sales records (业绩数据) — 排除 raw 原始整行，避免上下文臃肿
+  const salesData = (cloudData.salesRecords || []).map(r => ({
+    salesperson: r.salesperson || '',
+    team: r.team || '',
+    docDate: r.docDate || '',
+    docMonth: r.docMonth || '',
+    amount: toNum(r.amount),
+    grossProfit: toNum(r.grossProfit),
+    productName: r.productName || '',
+    docNo: r.docNo || '',
+    docType: r.docType || '',
+    status: r.status || '',
+    customer: r.customer || ''
+  })).sort((a, b) => (a.docDate || '').localeCompare(b.docDate || ''));
+
+  // Sales aggregations (让 AI 一眼拿到业绩关键指标)
+  const salesBySalesperson = {}, salesByTeam = {}, salesByMonth = {}, salesByDocType = {};
+  let salesTotalAmount = 0, salesTotalGross = 0;
+  salesData.forEach(s => {
+    const amt = toNum(s.amount), gp = toNum(s.grossProfit);
+    salesTotalAmount += amt; salesTotalGross += gp;
+    const sp = s.salesperson || '未知';
+    if (!salesBySalesperson[sp]) salesBySalesperson[sp] = { amount: 0, grossProfit: 0, count: 0 };
+    salesBySalesperson[sp].amount += amt; salesBySalesperson[sp].grossProfit += gp; salesBySalesperson[sp].count += 1;
+    const tm = s.team || '未知团队';
+    if (!salesByTeam[tm]) salesByTeam[tm] = { amount: 0, grossProfit: 0, count: 0 };
+    salesByTeam[tm].amount += amt; salesByTeam[tm].grossProfit += gp; salesByTeam[tm].count += 1;
+    const mo = s.docMonth || '未知月份';
+    if (!salesByMonth[mo]) salesByMonth[mo] = { amount: 0, grossProfit: 0, count: 0 };
+    salesByMonth[mo].amount += amt; salesByMonth[mo].grossProfit += gp; salesByMonth[mo].count += 1;
+    const dt = s.docType || '未知类别';
+    if (!salesByDocType[dt]) salesByDocType[dt] = 0;
+    salesByDocType[dt] += 1;
+  });
+  const salesSummary = {
+    total: salesData.length,
+    totalAmount: Math.round(salesTotalAmount * 100) / 100,
+    totalGrossProfit: Math.round(salesTotalGross * 100) / 100,
+    bySalesperson: salesBySalesperson,
+    byTeam: salesByTeam,
+    byMonth: salesByMonth,
+    byDocType: salesByDocType
+  };
+
   const activeUsers = cloudData.users.filter(u => u.active);
   const context = {
     systemDate: new Date().toLocaleDateString('zh-CN'),
@@ -3806,7 +3850,9 @@ function buildAIContext() {
       dailyDateRange: dailyData.length > 0 ? {earliest: dailyData[0].date, latest: dailyData[dailyData.length-1].date} : null,
       weeklyDateRange: weeklyData.length > 0 ? {earliest: weeklyData[0].weekStart, latest: weeklyData[weeklyData.length-1].weekStart} : null,
       visitRecordCount: visitData.length,
-      visitDateRange: visitData.length > 0 ? {earliest: visitData[0].contactTime, latest: visitData[visitData.length-1].contactTime} : null
+      visitDateRange: visitData.length > 0 ? {earliest: visitData[0].contactTime, latest: visitData[visitData.length-1].contactTime} : null,
+      salesRecordCount: salesData.length,
+      salesDateRange: salesData.length > 0 ? {earliest: salesData[0].docDate, latest: salesData[salesData.length-1].docDate} : null
     },
     users: activeUsers.map(u => ({name: u.name, department: u.department, role: u.role})),
     dailyChannels: (fc.daily || []).map(c => ({name: c.name, reference: c.reference})),
@@ -3816,14 +3862,17 @@ function buildAIContext() {
     visitRecords: visitData,
     visitSummary: visitSummary,
     visitResultOptions: (cloudData.visitConfig && cloudData.visitConfig.visitResults) || [],
-    signinEventOptions: (cloudData.formConfig && cloudData.formConfig.signinEvents) || []
+    signinEventOptions: (cloudData.formConfig && cloudData.formConfig.signinEvents) || [],
+    salesRecords: salesData,
+    salesSummary: salesSummary,
+    salesTeamOptions: SALES_KA_TEAMS
   };
   return JSON.stringify(context, null, 2);
 }
 
 function buildAISystemMessage() {
   const dataContext = buildAIContext();
-  return '你是团队SOP数据管理系统的AI数据分析助手。你可以读取系统的全部数据，包括用户信息、日报数据、周报数据、拜访数据和渠道配置。\n\n'
+  return '你是团队SOP数据管理系统的AI数据分析助手。你可以读取系统的全部数据，包括用户信息、日报数据、周报数据、拜访数据、业绩数据和渠道配置。\n\n'
     + '你的职责：\n'
     + '1. 根据用户的问题，对系统数据进行分析、汇总和对比\n'
     + '2. 提供数据洞察、趋势分析和改进建议\n'
@@ -3832,7 +3881,9 @@ function buildAISystemMessage() {
     + '【数据来源路由规则 - 务必严格遵守】\n'
     + '- 当用户的问题涉及「拜访 / 客户拜访 / 签到 / 卡点 / 拜访结果 / 客户跟进 / 谁去了哪些客户 / 各签到事件分布 / 拜访转化」等拜访类话题时，必须使用 visitRecords 与 visitSummary 进行分析，绝不要用日报/周报数据来回答拜访类问题。\n'
     + '- 日报/周报数据(dailyReports/weeklyReports)只用于业绩指标分析（新增线索、建联、AB意向、成交、金额、完成率等），不要把它当作拜访数据。\n'
-    + '- visitSummary 已按拜访结果、签到事件、员工、部门、月份做了汇总统计，做整体分析时优先引用 visitSummary，需要逐条明细时再查 visitRecords。\n\n'
+    + '- visitSummary 已按拜访结果、签到事件、员工、部门、月份做了汇总统计，做整体分析时优先引用 visitSummary，需要逐条明细时再查 visitRecords。\n'
+    + '- 当用户的问题涉及「业绩 / 销售 / 销售额 / 折后金额 / 团队业绩 / 销售员业绩 / 毛利润 / 各月销售趋势 / KA 各团队业绩对比」等业绩类话题时，必须使用 salesRecords 与 salesSummary 进行分析，绝不要用日报/周报数据（那是建联/线索口径，不是销售成交口径）来回答业绩类问题。\n'
+    + '- salesSummary 已按销售员、团队、月份、单据类别做了汇总统计（含金额合计与笔数），做整体分析时优先引用 salesSummary，需要逐条明细时再查 salesRecords；金额单位为元，退货单通常为负值，净额业绩 = 销售单金额 − 退货单金额。\n\n'
     + '数据字段说明：\n'
     + '- newLeads(新增精准线索数): 数量\n'
     + '- effectiveContacts(有效建联数): 数量\n'
@@ -3852,7 +3903,15 @@ function buildAISystemMessage() {
     + '  - signinAddress(签到地址): 签到地点\n'
     + '  - visitResult(拜访结果): 如 已成交/高意向/待跟进/暂无意向/已流失 等（取值见 visitResultOptions）\n'
     + '  - blockerNote(卡点说明): 拜访中遇到的问题或卡点\n'
-    + '  - remark(备注): 其他备注\n\n'
+    + '  - remark(备注): 其他备注\n'
+    + '- salesRecords(业绩数据)字段:\n'
+    + '  - salesperson(销售员): 销售负责人姓名\n'
+    + '  - team(团队/门店): 校正后的 KA 团队，取值见 salesTeamOptions（如 KA 一部（江浙沪区域）/ KA 二部（广东区域）/ KA 三部（全国区域））\n'
+    + '  - docDate(单据日期): 格式 YYYY-MM-DD 或 YYYY-MM-DD HH:MM\n'
+    + '  - docMonth(单据月份): 格式 YYYY-MM，用于按月汇总\n'
+    + '  - amount(折后金额): 销售成交金额，单位元；退货单通常为负数\n'
+    + '  - grossProfit(毛利润): 毛利金额，单位元\n'
+    + '  - productName(商品名称)/docNo(单据编号)/docType(单据类别, 如 销售单/销售退货单)/status(状态)/customer(客户): 单据明细信息\n\n'
     + '以下是当前系统的完整数据（JSON格式）：\n' + dataContext;
 }
 
