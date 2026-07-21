@@ -575,14 +575,15 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes, m0Res] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
       fetch(FB_BASE + '/aiConfig.json'),
       fetch(FB_BASE + '/roleConfig.json'),
       fetch(FB_BASE + '/visitConfig.json'),
-      fetch(FB_BASE + '/gradeRecords.json')
+      fetch(FB_BASE + '/gradeRecords.json'),
+      fetch(FB_BASE + '/m0Records.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -675,6 +676,13 @@ async function loadCoreData() {
     // Load grade records (manual overrides for sales grade board)
     const grData = grRes.ok ? await grRes.json() : null;
     cloudData.gradeRecords = (grData && typeof grData === 'object') ? grData : {};
+    // Load M0 records (manual overrides for M0 board)
+    const m0Data = m0Res.ok ? await m0Res.json() : null;
+    cloudData.m0Records = (m0Data && typeof m0Data === 'object') ? m0Data : {};
+    // Ensure m0Config exists (team-shared M0 calculation scope)
+    if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
+      cloudData.formConfig.m0Config = { groups: [] };
+    }
     isCloudAvailable = true;
   } catch(e) {
     console.warn('Core config fetch failed:', e.message);
@@ -685,6 +693,10 @@ async function loadCoreData() {
     cloudData.roleConfig = JSON.parse(JSON.stringify(DEFAULT_ROLE_CONFIG));
     cloudData.visitConfig = JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
     cloudData.gradeRecords = {};
+    cloudData.m0Records = {};
+    if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
+      cloudData.formConfig.m0Config = { groups: [] };
+    }
   }
 }
 
@@ -7862,6 +7874,10 @@ let salesGradeTab = 'matrix';
 let salesGradeMonth = (new Date().getMonth() + 1);
 let salesGradeSpFilter = [];          // 选中的销售名单（空数组=全部在职销售）
 let salesGradeSpFilterLoaded = false; // 是否已从 localStorage 载入默认
+// ===== M0 看板状态 =====
+let m0ConfigPanelOpen = false;        // 配置面板是否展开
+let m0ConfigDraft = null;             // 编辑中的配置副本（保存前不落库）
+let m0MemberPanelFor = -1;            // 当前展开成员多选的分组索引（-1=无）
 function renderSalesGrade() {
   if (!salesGradeSpFilterLoaded) {
     try { const s = localStorage.getItem('sop_sg_sp_filter'); salesGradeSpFilter = s ? JSON.parse(s) : []; } catch (e) { salesGradeSpFilter = []; }
@@ -7873,22 +7889,30 @@ function renderSalesGrade() {
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
   salesGradeYear = year;
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
+  const isM0 = salesGradeTab === 'm0matrix' || salesGradeTab === 'm0single';
   document.getElementById('contentBody').innerHTML = `
     <div class="card">
       <div class="card-header">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <h4>🎯 销售评级看板</h4>
-          <div style="display:flex;gap:6px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-sm ${salesGradeTab==='matrix'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='matrix';renderSalesGrade()">升降级矩阵</button>
             <button class="btn btn-sm ${salesGradeTab==='single'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='single';renderSalesGrade()">单月评级看板</button>
+            <button class="btn btn-sm ${salesGradeTab==='m0matrix'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='m0matrix';m0ConfigPanelOpen=false;renderSalesGrade()">M0 升降级看板</button>
+            <button class="btn btn-sm ${salesGradeTab==='m0single'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='m0single';m0ConfigPanelOpen=false;renderSalesGrade()">M0 当月评级看板</button>
           </div>
         </div>
-        <button class="btn btn-outline btn-sm" onclick="${salesGradeTab==='single'?'exportSalesGradeSingle()':'exportSalesGrade()'}">⬇️ 导出 Excel</button>
+        <button class="btn btn-outline btn-sm" onclick="sgExportDispatch()">⬇️ 导出 Excel</button>
       </div>
       <div class="card-body">
         <div class="filter-bar">
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="sgYear" onchange="${salesGradeTab==='single'?'refreshSalesGradeSingle()':'refreshSalesGrade()'}">${yearOpts}</select></div>
-          ${salesGradeTab==='single'?`<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="sgMonth" onchange="salesGradeMonth=parseInt(this.value,10);refreshSalesGradeSingle()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===salesGradeMonth?'selected':''}>${m}月</option>`).join('')}</select></div>`:''}
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="sgYear" onchange="sgYearDispatch()">${yearOpts}</select></div>
+          ${(salesGradeTab==='single'||salesGradeTab==='m0single')?`<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="sgMonth" onchange="salesGradeMonth=parseInt(this.value,10);sgRefreshDispatch()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===salesGradeMonth?'selected':''}>${m}月</option>`).join('')}</select></div>`:''}
+          ${isM0 ? `
+          <div class="form-group" style="position:relative">
+            <label style="font-size:12px;color:var(--gray-500)">M0 计算范围</label>
+            <button type="button" class="form-control" id="m0CfgBtn" onclick="toggleM0ConfigPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">⚙️ ${m0CfgLabel()}</button>
+          </div>` : `
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">销售（在职）</label>
             <button type="button" class="form-control" id="sgSpBtn" onclick="toggleSgSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${sgSpLabel()}</button>
@@ -7904,14 +7928,18 @@ function renderSalesGrade() {
                 <button type="button" class="btn btn-sm btn-outline" onclick="toggleSgSpPanel(false)">关闭</button>
               </div>
             </div>
-          </div>
+          </div>`}
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${salesGradeTab==='single'?'说明：单月评级看板为「升降级矩阵」的表格视图，数据与矩阵<b>联动</b>（评级/备注修改即时同步）。纵向仅显示在册<b>在职</b>销售，横向为：评级业绩（滚动3月）/ 评级 / 升降级 / 备注。':'说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为当月职级对比上月职级的变化。'}</div>
+        ${isM0 ? `<div id="m0ConfigPanel" style="${m0ConfigPanelOpen?'':'display:none'};margin:6px 0 10px;padding:12px;border:1px solid var(--gray-200);border-radius:8px;background:var(--gray-50)">${renderM0ConfigPanel()}</div>` : ''}
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${sgNoteText()}</div>
         <div class="table-wrap"><table id="sgTable"></table></div>
       </div>
     </div>`;
   if (document.getElementById('sgYear')) document.getElementById('sgYear').value = year;
-  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+  if (salesGradeTab === 'single') refreshSalesGradeSingle();
+  else if (salesGradeTab === 'm0matrix') refreshM0Grade();
+  else if (salesGradeTab === 'm0single') refreshM0GradeSingle();
+  else refreshSalesGrade();
 }
 
 function sgSpLabel() {
@@ -7964,6 +7992,323 @@ function saveSgSpDefault() {
   try { localStorage.setItem('sop_sg_sp_filter', JSON.stringify(salesGradeSpFilter)); showToast('已保存为默认筛选（' + salesGradeSpFilter.length + ' 名销售）', 'success'); }
   catch (e) { showToast('保存失败: ' + e.message, 'error'); }
   toggleSgSpPanel(false);
+}
+
+// ===== M0 看板（考核业绩 = M0 本人当月 + 累加人员当月，仅取当月，不滚动） =====
+function m0Key(year, m0, m) { return year + '_' + String(m0).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
+function saveM0ByKey(key, patch) {
+  if (!cloudData.m0Records) cloudData.m0Records = {};
+  cloudData.m0Records[key] = Object.assign({}, cloudData.m0Records[key] || {}, patch);
+  apiUpdate('m0Records', key, cloudData.m0Records[key]).catch(e => showToast('保存失败: ' + e.message, 'error'));
+}
+function m0CfgLabel() {
+  const src = (m0ConfigPanelOpen && m0ConfigDraft) ? m0ConfigDraft : (cloudData.formConfig.m0Config || { groups: [] });
+  const n = (src.groups || []).length;
+  return n ? ('已配 ' + n + ' 组') : '未配置，点击设置';
+}
+function toggleM0ConfigPanel(force) {
+  if (typeof force === 'boolean') m0ConfigPanelOpen = force;
+  else m0ConfigPanelOpen = !m0ConfigPanelOpen;
+  if (m0ConfigPanelOpen) {
+    m0ConfigDraft = JSON.parse(JSON.stringify(cloudData.formConfig.m0Config || { groups: [] }));
+    m0MemberPanelFor = -1;
+  } else { m0ConfigDraft = null; m0MemberPanelFor = -1; }
+  renderSalesGrade();
+}
+function renderM0ConfigPanelInto() {
+  const el = document.getElementById('m0ConfigPanel');
+  if (el) el.innerHTML = renderM0ConfigPanel();
+  const btn = document.getElementById('m0CfgBtn');
+  if (btn) btn.textContent = '⚙️ ' + m0CfgLabel();
+}
+function m0MemberListHtml(idx) {
+  const cfg = m0ConfigDraft || cloudData.formConfig.m0Config || { groups: [] };
+  const g = (cfg.groups || [])[idx] || { members: [] };
+  const members = g.members || [];
+  const active = sgSpActiveList();
+  if (!active.length) return '<div style="padding:8px;color:var(--gray-400);font-size:12px">无在职销售可选</div>';
+  return active.map(n => {
+    const chk = members.indexOf(n) >= 0 ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:4px;font-size:13px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background='transparent'"><input type="checkbox" ${chk} data-m0name="${n.replace(/"/g,'&quot;')}" onchange="m0ToggleMember(${idx}, this)"> ${esc(n)}</label>`;
+  }).join('');
+}
+function renderM0ConfigPanel() {
+  const cfg = m0ConfigDraft || cloudData.formConfig.m0Config || { groups: [] };
+  const groups = cfg.groups || [];
+  const active = sgSpActiveList();
+  let h = `<div style="font-size:12px;color:var(--gray-600);margin-bottom:10px">每个 M0 人员考核业绩 = <b>本人当月业绩</b> + 所选<b>累加人员当月业绩</b>之和（仅取当月，不滚动）。配置团队共享，保存后全员一致。</div>`;
+  if (!groups.length) h += `<div style="color:var(--gray-400);font-size:13px;padding:8px 0">尚未配置任何 M0 分组，点击下方「+ 添加分组」开始。</div>`;
+  groups.forEach((g, idx) => {
+    const m0 = g.m0 || '';
+    const members = g.members || [];
+    const memberLabel = members.length ? ('已选 ' + members.length + ' 名：' + members.join('、')) : '点击选择累加人员';
+    const m0Opts = active.map(n => `<option value="${n.replace(/"/g,'&quot;')}" ${n===m0?'selected':''}>${n}</option>`).join('');
+    h += `<div style="border:1px solid var(--gray-200);border-radius:8px;padding:10px;margin-bottom:10px;background:#fff">
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div class="form-group" style="margin:0"><label style="font-size:12px;color:var(--gray-500)">M0 人员</label>
+          <select class="form-control" style="min-width:120px" onchange="m0SetM0(${idx}, this.value)"><option value="">（未选）</option>${m0Opts}</select></div>
+        <div class="form-group" style="margin:0;position:relative">
+          <label style="font-size:12px;color:var(--gray-500)">累加人员（业绩求和）</label>
+          <button type="button" class="form-control" style="text-align:left;cursor:pointer;min-width:220px;color:var(--gray-700)" onclick="toggleM0MemberPanel(${idx})">${memberLabel}</button>
+          <div id="m0MemPanel_${idx}" style="display:${m0MemberPanelFor===idx?'block':'none'};position:absolute;z-index:80;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:300px;overflow:auto;padding:10px">
+            <div style="display:flex;gap:6px;margin-bottom:8px">
+              <button type="button" class="btn btn-sm btn-outline" onclick="m0SelectAllMembers(${idx})">全选</button>
+              <button type="button" class="btn btn-sm btn-outline" onclick="m0ClearMembers(${idx})">清空</button>
+              <button type="button" class="btn btn-sm btn-outline" onclick="toggleM0MemberPanel(${idx})">关闭</button>
+            </div>
+            <div id="m0MemList_${idx}">${m0MemberListHtml(idx)}</div>
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline" style="color:#dc2626" onclick="m0RemoveGroup(${idx})">删除</button>
+      </div>
+    </div>`;
+  });
+  h += `<div style="display:flex;gap:8px;margin-top:6px">
+    <button type="button" class="btn btn-sm btn-outline" onclick="m0AddGroup()">+ 添加分组</button>
+    <button type="button" class="btn btn-sm btn-primary" onclick="saveM0Config()">💾 保存为默认配置</button>
+    <button type="button" class="btn btn-sm btn-outline" onclick="toggleM0ConfigPanel(false)">收起</button>
+  </div>`;
+  return h;
+}
+function m0AddGroup() {
+  if (!m0ConfigDraft) m0ConfigDraft = JSON.parse(JSON.stringify(cloudData.formConfig.m0Config || { groups: [] }));
+  if (!m0ConfigDraft.groups) m0ConfigDraft.groups = [];
+  m0ConfigDraft.groups.push({ m0: '', members: [] });
+  m0MemberPanelFor = -1;
+  renderM0ConfigPanelInto();
+}
+function m0RemoveGroup(idx) {
+  if (!m0ConfigDraft) m0ConfigDraft = JSON.parse(JSON.stringify(cloudData.formConfig.m0Config || { groups: [] }));
+  m0ConfigDraft.groups.splice(idx, 1);
+  renderM0ConfigPanelInto();
+}
+function m0SetM0(idx, name) {
+  if (!m0ConfigDraft) m0ConfigDraft = JSON.parse(JSON.stringify(cloudData.formConfig.m0Config || { groups: [] }));
+  if (!m0ConfigDraft.groups[idx]) m0ConfigDraft.groups[idx] = { m0: '', members: [] };
+  m0ConfigDraft.groups[idx].m0 = name;
+}
+function m0ToggleMember(idx, el) {
+  const name = el.dataset.m0name;
+  if (!m0ConfigDraft) m0ConfigDraft = JSON.parse(JSON.stringify(cloudData.formConfig.m0Config || { groups: [] }));
+  if (!m0ConfigDraft.groups[idx]) m0ConfigDraft.groups[idx] = { m0: '', members: [] };
+  const arr = m0ConfigDraft.groups[idx].members;
+  const i = arr.indexOf(name);
+  if (el.checked) { if (i < 0) arr.push(name); }
+  else { if (i >= 0) arr.splice(i, 1); }
+  renderM0ConfigPanelInto();
+}
+function m0SelectAllMembers(idx) {
+  if (!m0ConfigDraft) m0ConfigDraft = JSON.parse(JSON.stringify(cloudData.formConfig.m0Config || { groups: [] }));
+  if (!m0ConfigDraft.groups[idx]) m0ConfigDraft.groups[idx] = { m0: '', members: [] };
+  m0ConfigDraft.groups[idx].members = sgSpActiveList().slice();
+  renderM0ConfigPanelInto();
+}
+function m0ClearMembers(idx) {
+  if (!m0ConfigDraft) m0ConfigDraft = JSON.parse(JSON.stringify(cloudData.formConfig.m0Config || { groups: [] }));
+  if (!m0ConfigDraft.groups[idx]) m0ConfigDraft.groups[idx] = { m0: '', members: [] };
+  m0ConfigDraft.groups[idx].members = [];
+  renderM0ConfigPanelInto();
+}
+function toggleM0MemberPanel(idx) {
+  m0MemberPanelFor = (m0MemberPanelFor === idx) ? -1 : idx;
+  renderM0ConfigPanelInto();
+}
+function saveM0Config() {
+  const groups = (m0ConfigDraft && m0ConfigDraft.groups ? m0ConfigDraft.groups : []).filter(g => g && g.m0);
+  cloudData.formConfig.m0Config = { groups: groups };
+  fetch(FB_BASE + '/formConfig.json', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cloudData.formConfig)
+  }).then(() => {
+    showToast('M0 计算范围已保存（' + groups.length + ' 组）', 'success');
+    m0ConfigPanelOpen = false; m0ConfigDraft = null; m0MemberPanelFor = -1;
+    renderSalesGrade();
+  }).catch(err => showToast('保存失败: ' + err.message, 'error'));
+}
+function buildAllSalesBase(year) {
+  const base = {}; const spSet = new Set();
+  (cloudData.salesRecords || []).forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    const m = parseInt(dm.slice(5, 7), 10);
+    if (!(m >= 1 && m <= 12)) return;
+    if (!base[sp]) base[sp] = {};
+    base[sp][m] = (base[sp][m] || 0) + toNum(r.amount);
+    spSet.add(sp);
+  });
+  return { base, spSet };
+}
+function m0GroupAmount(base, g, m) {
+  const names = [g.m0].concat(g.members || []);
+  const seen = {}; let s = 0;
+  names.forEach(n => {
+    if (!n) return;
+    if (seen[n]) return; seen[n] = 1;
+    s += (base[n] && base[n][m]) || 0;
+  });
+  return s;
+}
+function sgYearDispatch() {
+  if (salesGradeTab === 'single') refreshSalesGradeSingle();
+  else if (salesGradeTab === 'm0matrix') refreshM0Grade();
+  else if (salesGradeTab === 'm0single') refreshM0GradeSingle();
+  else refreshSalesGrade();
+}
+function sgRefreshDispatch() {
+  if (salesGradeTab === 'single') refreshSalesGradeSingle();
+  else if (salesGradeTab === 'm0single') refreshM0GradeSingle();
+}
+function sgExportDispatch() {
+  if (salesGradeTab === 'single') exportSalesGradeSingle();
+  else if (salesGradeTab === 'm0matrix') exportM0Grade();
+  else if (salesGradeTab === 'm0single') exportM0GradeSingle();
+  else exportSalesGrade();
+}
+function sgNoteText() {
+  if (salesGradeTab === 'single') return '说明：单月评级看板为「升降级矩阵」的表格视图，数据与矩阵<b>联动</b>（评级/备注修改即时同步）。纵向仅显示在册<b>在职</b>销售，横向为：评级业绩（滚动3月）/ 评级 / 升降级 / 备注。';
+  if (salesGradeTab === 'm0matrix' || salesGradeTab === 'm0single') {
+    const cnt = ((cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || []).length;
+    return '说明：M0 看板考核业绩 = <b>M0 人员当月业绩</b> + 所选<b>累加人员当月业绩</b>之和（仅取当月，不滚动 3 月）。评级 / 升降级均为<b>手动填写</b>（下拉选择），不与上月联动。' + (cnt ? '' : ' <b style="color:#dc2626">当前未配置 M0 计算范围，请在上方「⚙️ M0 计算范围」中设置。</b>');
+  }
+  return '说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为当月职级对比上月职级的变化。';
+}
+function refreshM0Grade() {
+  const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
+  salesGradeYear = year;
+  const groups = (cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || [];
+  const { base } = buildAllSalesBase(year);
+  const statusMap = buildUserStatusMap();
+  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
+  const gradeConfig = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+  const m0GradeOpts = [''].concat(gradeConfig.length ? gradeConfig.map(l => l.name) : ['初级','中级','高级']);
+  const m0ChgOpts = ['', '升级', '降级', '持平'];
+  const rows = groups.map(g => {
+    const amts = {}; let total = 0;
+    months.forEach(m => { const v = m0GroupAmount(base, g, m); amts[m] = v; total += v; });
+    return { g, amts, total };
+  });
+  let h = '<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（M0）</span></th>';
+  months.forEach(m => { h += `<th class="num">${m}月</th>`; });
+  h += '<th class="num">全年合计业绩</th></tr></thead><tbody>';
+  const colTot = {}; months.forEach(m => colTot[m] = 0); let totalAll = 0;
+  if (!rows.length) {
+    h += `<tr><td colspan="${months.length + 2}" style="text-align:center;color:var(--gray-400);padding:24px">尚未配置 M0 计算范围，请点击上方「⚙️ M0 计算范围」设置分组。</td></tr>`;
+  }
+  rows.forEach(row => {
+    const m0 = row.g.m0 || '（未命名）';
+    const members = row.g.members || [];
+    h += `<tr><td>${esc(m0)}${userStatusBadge(m0, statusMap)}<div style="font-size:10px;color:var(--gray-400)">含 ${members.length} 人累加</div></td>`;
+    months.forEach(m => {
+      const v = row.amts[m];
+      colTot[m] += v;
+      const rec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, m)]) || {};
+      const grade = rec.grade || '';
+      const chg = rec.chg || '';
+      const note = rec.note || '';
+      const gradeOpts = m0GradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===grade)?'selected':''}>${o?o:'（未评级）'}</option>`).join('');
+      const chgOpts = m0ChgOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===chg)?'selected':''}>${o?o:'（未填）'}</option>`).join('');
+      const k = m0Key(year, m0, m);
+      h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div>`
+         + `<div style="margin-top:4px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveM0ByKey('${k}', {grade:this.value})">${gradeOpts}</select></div>`
+         + `<div style="margin-top:3px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveM0ByKey('${k}', {chg:this.value})">${chgOpts}</select></div>`
+         + `<input type="text" class="form-control form-control-sm" style="font-size:11px;margin-top:3px;padding:1px 4px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {note:this.value})"></td>`;
+    });
+    totalAll += row.total;
+    h += `<td class="num" style="font-weight:700">${fmtSalesMoney(row.total)}</td></tr>`;
+  });
+  h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
+  months.forEach(m => { h += `<td class="num">${fmtSalesMoney(colTot[m])}</td>`; });
+  h += `<td class="num">${fmtSalesMoney(totalAll)}</td></tr></tfoot>`;
+  const tbl = document.getElementById('sgTable');
+  if (tbl) tbl.innerHTML = h;
+}
+function refreshM0GradeSingle() {
+  const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
+  salesGradeYear = year;
+  const month = document.getElementById('sgMonth') ? parseInt(document.getElementById('sgMonth').value, 10) : salesGradeMonth;
+  salesGradeMonth = month;
+  const groups = (cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || [];
+  const { base } = buildAllSalesBase(year);
+  const statusMap = buildUserStatusMap();
+  const gradeConfig = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+  const m0GradeOpts = [''].concat(gradeConfig.length ? gradeConfig.map(l => l.name) : ['初级','中级','高级']);
+  const m0ChgOpts = ['', '升级', '降级', '持平'];
+  const rows = groups.map(g => ({ g, v: m0GroupAmount(base, g, month) })).sort((a, b) => b.v - a.v);
+  let h = `<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（M0）</span></th><th class="num">${month}月 M0 考核业绩</th><th>评级</th><th style="text-align:center">升降级</th><th>备注</th></tr></thead><tbody>`;
+  if (!rows.length) h += `<tr><td colspan="5" style="text-align:center;color:var(--gray-400);padding:24px">尚未配置 M0 计算范围，请点击上方「⚙️ M0 计算范围」设置分组。</td></tr>`;
+  rows.forEach(row => {
+    const m0 = row.g.m0 || '（未命名）';
+    const members = row.g.members || [];
+    const rec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, month)]) || {};
+    const grade = rec.grade || '';
+    const chg = rec.chg || '';
+    const note = rec.note || '';
+    const gradeOpts = m0GradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===grade)?'selected':''}>${o?o:'（未评级）'}</option>`).join('');
+    const chgOpts = m0ChgOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===chg)?'selected':''}>${o?o:'（未填）'}</option>`).join('');
+    const k = m0Key(year, m0, month);
+    h += `<tr><td>${esc(m0)}${userStatusBadge(m0, statusMap)}<div style="font-size:10px;color:var(--gray-400)">含 ${members.length} 人累加</div></td>`
+       + `<td class="num" style="font-weight:600">${fmtSalesMoney(row.v)}</td>`
+       + `<td><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveM0ByKey('${k}', {grade:this.value})">${gradeOpts}</select></td>`
+       + `<td style="text-align:center"><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveM0ByKey('${k}', {chg:this.value})">${chgOpts}</select></td>`
+       + `<td><input type="text" class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {note:this.value})"></td></tr>`;
+  });
+  h += '</tbody>';
+  const tbl = document.getElementById('sgTable');
+  if (tbl) tbl.innerHTML = h;
+}
+function exportM0Grade() {
+  const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
+  const groups = (cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || [];
+  const { base } = buildAllSalesBase(year);
+  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  if (!groups.length) { showToast('尚未配置 M0 计算范围', 'error'); return; }
+  const aoa = [];
+  aoa.push([`M0 升降级看板 · ${year}年（M0 考核业绩 = 本人当月 + 累加人员当月，仅取当月）`]);
+  const head = ['销售员', '累加人数'];
+  months.forEach(m => { head.push(m + '月业绩'); head.push(m + '月评级'); head.push(m + '月升降级'); head.push(m + '月备注'); });
+  head.push('全年合计');
+  aoa.push(head);
+  groups.forEach(g => {
+    const m0 = g.m0 || '（未命名）';
+    const members = g.members || [];
+    const r = [m0, members.length];
+    months.forEach(m => {
+      const v = Math.round(m0GroupAmount(base, g, m));
+      const rec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, m)]) || {};
+      r.push(v, rec.grade || '', rec.chg || '', rec.note || '');
+    });
+    let tot = 0; months.forEach(m => tot += m0GroupAmount(base, g, m));
+    r.push(Math.round(tot));
+    aoa.push(r);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'M0升降级');
+  XLSX.writeFile(wb, `M0升降级看板_${year}.xlsx`);
+}
+function exportM0GradeSingle() {
+  const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
+  const month = document.getElementById('sgMonth') ? parseInt(document.getElementById('sgMonth').value, 10) : salesGradeMonth;
+  const groups = (cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || [];
+  const { base } = buildAllSalesBase(year);
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  if (!groups.length) { showToast('尚未配置 M0 计算范围', 'error'); return; }
+  const aoa = [];
+  aoa.push([`M0 当月评级看板 · ${year}年${month}月（M0 考核业绩 = 本人当月 + 累加人员当月，仅取当月）`]);
+  aoa.push(['销售员', '累加人数', 'M0考核业绩', '评级', '升降级', '备注']);
+  groups.map(g => ({ g, v: m0GroupAmount(base, g, month) })).sort((a, b) => b.v - a.v).forEach(row => {
+    const m0 = row.g.m0 || '（未命名）';
+    const members = row.g.members || [];
+    const rec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, month)]) || {};
+    aoa.push([m0, members.length, Math.round(row.v), rec.grade || '', rec.chg || '', rec.note || '']);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'M0当月评级');
+  XLSX.writeFile(wb, `M0当月评级看板_${year}_${month}月.xlsx`);
 }
 
 function refreshSalesGrade() {
