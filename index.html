@@ -6865,17 +6865,15 @@ function renderCustomerSummary() {
   const pageRows = rows.slice(startIdx, startIdx + csPageSize);
   csPageRows = pageRows;
   const allSelOnPage = pageRows.length > 0 && pageRows.every(g => csSelectedKeys.has(g.docMonth + '|' + g.salesperson + '|' + g.customer));
-  const tagRadio = (group, aggKey, curVal) => {
+  const tagSelect = (group, aggKey, curVal) => {
     const opts = (cfg[group] || []);
-    const safeKey = aggKey.replace(/[^a-zA-Z0-9]/g, '_');
-    const name = 'cs_' + group + '_' + safeKey;
     const encKey = encodeURIComponent(aggKey);
-    let h = `<div class="tag-radio"><label><input type="radio" name="${name}" value="" ${!curVal?'checked':''} ${canEdit?'':'disabled'} onchange="saveCustomerTag('${group}','${encKey}','')">未设置</label>`;
+    let h = `<select class="form-control" style="width:100%;min-width:90px;padding:4px 8px;height:auto;font-size:13px" ${canEdit?'':'disabled'} onchange="saveCustomerTag('${group}','${encKey}',encodeURIComponent(this.value))"><option value="">未设置</option>`;
     opts.forEach(o => {
-      const checked = (curVal === o) ? 'checked' : '';
-      h += `<label><input type="radio" name="${name}" value="${esc(o)}" ${checked} ${canEdit?'':'disabled'} onchange="saveCustomerTag('${group}','${encKey}','${encodeURIComponent(o)}')">${esc(o)}</label>`;
+      const selected = (curVal === o) ? 'selected' : '';
+      h += `<option value="${esc(o)}" ${selected}>${esc(o)}</option>`;
     });
-    h += '</div>';
+    h += '</select>';
     return h;
   };
   const wrap = document.getElementById('csTableWrap');
@@ -6890,9 +6888,9 @@ function renderCustomerSummary() {
       <td>${esc(g.customer) || '-'}</td>
       <td class="num">${fmtSalesMoney(g.amount)}</td>
       <td><span class="badge badge-team">${esc(g.team) || '-'}</span></td>
-      <td>${tagRadio('customerSource', aggKey, g.customerSource)}</td>
-      <td>${tagRadio('category', aggKey, g.category)}</td>
-      <td>${tagRadio('customerProfile', aggKey, g.customerProfile)}</td>
+      <td>${tagSelect('customerSource', aggKey, g.customerSource)}</td>
+      <td>${tagSelect('category', aggKey, g.category)}</td>
+      <td>${tagSelect('customerProfile', aggKey, g.customerProfile)}</td>
     </tr>`;
   }).join('');
   const pager = `
