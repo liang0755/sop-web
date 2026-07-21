@@ -3664,6 +3664,29 @@ function buildAIContext() {
     remark: r.remark || ''
   })).sort((a, b) => (a.contactTime || '').localeCompare(b.contactTime || ''));
 
+  // Visit data aggregations (让 AI 一眼拿到拜访关键指标，避免被前面的日报/周报数据淹没)
+  const visitByResult = {}, visitByEvent = {}, visitByEmp = {}, visitByDept = {}, visitByMonth = {};
+  visitData.forEach(v => {
+    const res = v.visitResult || '未填写结果';
+    visitByResult[res] = (visitByResult[res] || 0) + 1;
+    const ev = v.signinEvent || '未填写事件';
+    visitByEvent[ev] = (visitByEvent[ev] || 0) + 1;
+    const emp = v.employee || '未知';
+    visitByEmp[emp] = (visitByEmp[emp] || 0) + 1;
+    const dep = v.department || '未知';
+    visitByDept[dep] = (visitByDept[dep] || 0) + 1;
+    const m = (v.contactTime || '').slice(0, 7);
+    if (m) visitByMonth[m] = (visitByMonth[m] || 0) + 1;
+  });
+  const visitSummary = {
+    total: visitData.length,
+    byResult: visitByResult,
+    bySigninEvent: visitByEvent,
+    byEmployee: visitByEmp,
+    byDepartment: visitByDept,
+    byMonth: visitByMonth
+  };
+
   const activeUsers = cloudData.users.filter(u => u.active);
   const context = {
     systemDate: new Date().toLocaleDateString('zh-CN'),
@@ -3683,6 +3706,7 @@ function buildAIContext() {
     dailyReports: dailyData,
     weeklyReports: weeklyData,
     visitRecords: visitData,
+    visitSummary: visitSummary,
     visitResultOptions: (cloudData.visitConfig && cloudData.visitConfig.visitResults) || [],
     signinEventOptions: (cloudData.formConfig && cloudData.formConfig.signinEvents) || []
   };
@@ -3697,6 +3721,10 @@ function buildAISystemMessage() {
     + '2. 提供数据洞察、趋势分析和改进建议\n'
     + '3. 用清晰的Markdown表格和列表呈现分析结果\n'
     + '4. 所有回复使用中文\n\n'
+    + '【数据来源路由规则 - 务必严格遵守】\n'
+    + '- 当用户的问题涉及「拜访 / 客户拜访 / 签到 / 卡点 / 拜访结果 / 客户跟进 / 谁去了哪些客户 / 各签到事件分布 / 拜访转化」等拜访类话题时，必须使用 visitRecords 与 visitSummary 进行分析，绝不要用日报/周报数据来回答拜访类问题。\n'
+    + '- 日报/周报数据(dailyReports/weeklyReports)只用于业绩指标分析（新增线索、建联、AB意向、成交、金额、完成率等），不要把它当作拜访数据。\n'
+    + '- visitSummary 已按拜访结果、签到事件、员工、部门、月份做了汇总统计，做整体分析时优先引用 visitSummary，需要逐条明细时再查 visitRecords。\n\n'
     + '数据字段说明：\n'
     + '- newLeads(新增精准线索数): 数量\n'
     + '- effectiveContacts(有效建联数): 数量\n'
