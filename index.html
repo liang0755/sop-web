@@ -4342,8 +4342,9 @@ async function renderVisitData() {
         <div class="form-group"><label>部门</label><select class="form-control" id="visitFDept" onchange="resetVisitPage()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}">${d}</option>`).join('')}</select></div>
         <div class="form-group"><label>销售</label><select class="form-control" id="visitFPerson" onchange="resetVisitPage()"><option value="">全部人员</option>${persons.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div>
         <div class="form-group"><label>拜访结果</label><select class="form-control" id="visitFResult" onchange="resetVisitPage()"><option value="">全部</option>${batchResultOpts}<option value="empty">⚠️ 未填写结果</option><option value="filled">已填写结果</option></select></div>
-        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}"></div>
-        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}"></div>
+        <div class="form-group"><label>快捷筛选</label><select class="form-control" id="visitFQuickDate" onchange="applyVisitQuickDateFilter(this)"><option value="">选择时间范围</option><option value="today">今天</option><option value="yesterday">昨天</option><option value="thisWeek">本周</option><option value="lastWeek">上周</option><option value="thisMonth">本月</option><option value="lastMonth">上月</option><option value="thisYear">今年</option></select></div>
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}" onchange="document.getElementById('visitFQuickDate').value=''"></div>
+        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}" onchange="document.getElementById('visitFQuickDate').value=''"></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="resetVisitPage()">🔍 查询</button></div>
         <div class="form-group"><label>每页</label><select class="form-control" id="visitPageSize" onchange="onVisitPageSizeChange()"><option value="30"${visitPageSize===30?' selected':''}>30</option><option value="50"${visitPageSize===50?' selected':''}>50</option><option value="100"${visitPageSize===100?' selected':''}>100</option><option value="200"${visitPageSize===200?' selected':''}>200</option></select></div>
       </div>
@@ -5733,6 +5734,35 @@ function showToast(msg, type='success', duration=2500) {
 // ============ Utils ============
 // 本地时区日期 YYYY-MM-DD（修复 GMT+8 凌晨用 toISOString() 得到 UTC 日期差一天的问题）
 function localYMD(d){ d = d || new Date(); const off = d.getTimezoneOffset()*60000; return new Date(d.getTime()-off).toISOString().split('T')[0]; }
+// 快捷日期范围：用于拜访数据筛选栏（今天/昨天/本周/上周/本月/上月/今年），以周一为周起始
+function getQuickDateRange(type){
+  const now = new Date();
+  const today = localYMD(now);
+  const ymd = (d) => localYMD(d);
+  if (type === 'today') return { start: today, end: today };
+  if (type === 'yesterday') { const d = new Date(now.getTime()-86400000); const y = ymd(d); return { start: y, end: y }; }
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  if (type === 'thisMonth') { const start = ymd(new Date(year, month, 1)); const end = ymd(new Date(year, month+1, 0)); return { start, end }; }
+  if (type === 'lastMonth') { const start = ymd(new Date(year, month-1, 1)); const end = ymd(new Date(year, month, 0)); return { start, end }; }
+  if (type === 'thisYear') { const start = ymd(new Date(year, 0, 1)); const end = ymd(new Date(year, 11, 31)); return { start, end }; }
+  const day = now.getDay(); // 0=Sun,1=Mon,...,6=Sat
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const monday = new Date(year, month, now.getDate() + mondayOffset);
+  if (type === 'thisWeek') { const sunday = new Date(monday.getTime()+6*86400000); return { start: ymd(monday), end: ymd(sunday) }; }
+  if (type === 'lastWeek') { const lastMonday = new Date(monday.getTime()-7*86400000); const lastSunday = new Date(monday.getTime()-1*86400000); return { start: ymd(lastMonday), end: ymd(lastSunday) }; }
+  return { start: '', end: '' };
+}
+function applyVisitQuickDateFilter(sel){
+  const type = sel?.value;
+  if (!type) return;
+  const range = getQuickDateRange(type);
+  const startInput = document.getElementById('visitFStart');
+  const endInput = document.getElementById('visitFEnd');
+  if (startInput) startInput.value = range.start;
+  if (endInput) endInput.value = range.end;
+  resetVisitPage();
+}
 // 联系时间规范化：把 CSV 的 `2026/07/10 15:56` / `2026.07.10` / `2026年07月10日` 等统一成 `2026-07-10 15:56`
 // 解决斜杠格式导致日期筛选/排序/统计判断错误的问题（部分 CSV 直接以斜杠导出）
 function normContactTime(s){
