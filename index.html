@@ -6828,6 +6828,35 @@ function resetCustomerSummary() {
   renderCustomerSummary();
 }
 
+function csTagColorStyle(val, opts) {
+  if (!val) return '';
+  const i = opts.indexOf(val);
+  const palette = [
+    ['#E3F2FD', '#0D47A1'], ['#E8F5E9', '#1B5E20'], ['#FFF3E0', '#E65100'],
+    ['#FCE4EC', '#880E4F'], ['#F3E5F5', '#4A148C'], ['#E0F7FA', '#006064'],
+    ['#FFF9C4', '#F57F17'], ['#EDE7F6', '#311B92'], ['#FFEBEE', '#B71C1C'],
+    ['#E8EAF6', '#1A237E'], ['#F1F8E9', '#33691E'], ['#FBE9E7', '#BF360C']
+  ];
+  const c = palette[((i % palette.length) + palette.length) % palette.length];
+  return `background:${c[0]};color:${c[1]};border-color:${c[0]};font-weight:600`;
+}
+function csPaintTag(sel) {
+  const group = sel.dataset.group;
+  const opts = ((cloudData.formConfig && cloudData.formConfig.customerTags) || {})[group] || [];
+  const st = csTagColorStyle(sel.value, opts);
+  if (st) {
+    sel.style.background = st.split(';')[0].split(':')[1];
+    sel.style.color = st.split(';')[1].split(':')[1];
+    sel.style.borderColor = st.split(';')[2].split(':')[1];
+    sel.style.fontWeight = '600';
+  } else {
+    sel.style.background = '';
+    sel.style.color = '';
+    sel.style.borderColor = '';
+    sel.style.fontWeight = '';
+  }
+}
+
 function renderCustomerSummary() {
   const year = document.getElementById('csYear').value;
   const month = document.getElementById('csMonth').value || '';
@@ -6868,7 +6897,9 @@ function renderCustomerSummary() {
   const tagSelect = (group, aggKey, curVal) => {
     const opts = (cfg[group] || []);
     const encKey = encodeURIComponent(aggKey);
-    let h = `<select class="form-control" style="width:100%;min-width:90px;padding:4px 8px;height:auto;font-size:13px" ${canEdit?'':'disabled'} onchange="saveCustomerTag('${group}','${encKey}',encodeURIComponent(this.value))"><option value="">未设置</option>`;
+    const styleBase = "width:100%;min-width:90px;padding:4px 8px;height:auto;font-size:13px";
+    const styleColor = csTagColorStyle(curVal, opts);
+    let h = `<select class="form-control cs-tag-select" data-group="${group}" style="${styleBase}${styleColor ? ';' + styleColor : ''}" ${canEdit ? '' : 'disabled'} onchange="saveCustomerTag('${group}','${encKey}',encodeURIComponent(this.value));csPaintTag(this)"><option value="">未设置</option>`;
     opts.forEach(o => {
       const selected = (curVal === o) ? 'selected' : '';
       h += `<option value="${esc(o)}" ${selected}>${esc(o)}</option>`;
