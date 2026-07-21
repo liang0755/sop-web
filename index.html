@@ -785,8 +785,9 @@ async function doLogin(e) {
     if (btn) { btn.disabled = false; btn.textContent = '登 录'; }
     return false;
   }
+  if (!u) { alertEl.innerHTML = '<div class="alert alert-danger">❌ 请输入用户名</div>'; if (btn) { btn.disabled = false; btn.textContent = '登 录'; } return false; }
   const hp = await hashPassword(p);
-  const user = cloudData.users.find(x => x.username === u && x.password === hp && x.active);
+  const user = cloudData.users.find(x => x.username && !x.isBasic && x.username === u && x.password === hp && x.active);
   if (!user) { alertEl.innerHTML = '<div class="alert alert-danger">❌ 用户名或密码错误</div>'; if (btn) { btn.disabled = false; btn.textContent = '登 录'; } return false; }
   currentUser = {id:user.id, username:user.username, name:user.name, department:user.department, role:user.role};
   localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
@@ -2776,17 +2777,18 @@ function renderUserManagement() {
         <button class="btn btn-primary" onclick="showAddUserModal()">➕ 添加成员</button>
       </div>
     </div>
-    <div class="table-wrap"><table><thead><tr><th>姓名</th><th>用户名</th><th>部门</th><th>角色</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead><tbody>
+    <div class="table-wrap"><table><thead><tr><th>姓名</th><th>用户名</th><th>部门</th><th>角色</th><th>入职时间</th><th>离职时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
       ${users.map(u => `<tr>
         <td><strong>${u.name}</strong></td>
-        <td>${u.username}</td>
+        <td>${u.isBasic ? '<span class="badge" style="background:var(--gray-100);color:var(--gray-500)">基础用户</span>' : u.username}</td>
         <td>${u.department||'-'}</td>
-        <td>${getRoleBadge(u.role)}</td>
-        <td>${u.active?'<span class="badge badge-success">启用</span>':'<span class="badge badge-danger">禁用</span>'}</td>
-        <td style="font-size:12px;color:var(--gray-500)">${u.createdAt?new Date(u.createdAt).toLocaleDateString('zh-CN'):'-'}</td>
+        <td>${u.isBasic ? '<span style="color:var(--gray-400);font-size:12px">—</span>' : getRoleBadge(u.role)}</td>
+        <td style="font-size:12px;color:var(--gray-600)">${u.hireDate||'<span style="color:var(--gray-300)">-</span>'}</td>
+        <td style="font-size:12px;color:${u.leaveDate?'#ef4444':'var(--gray-300)'}">${u.leaveDate||'-'}</td>
+        <td>${u.leaveDate?'<span class="badge badge-danger">已离职</span>':(u.active?'<span class="badge badge-success">在职</span>':'<span class="badge badge-danger">禁用</span>')}</td>
         <td>
           <button class="btn btn-outline btn-sm" onclick="editUser('${u.id}')">编辑</button>
-          ${u.username!=='admin'?(u.active?`<button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',false)">禁用</button>`:`<button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',true)">启用</button>`):''}
+          ${u.username!=='admin'&&!u.isBasic?(u.active?`<button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',false)">禁用</button>`:`<button class="btn btn-outline btn-sm" onclick="toggleUser('${u.id}',true)">启用</button>`):''}
           ${u.username!=='admin'?`<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}')">删除</button>`:''}
         </td>
       </tr>`).join('')}
@@ -2889,28 +2891,59 @@ function showAddUserModal() {
     : '<option value="">请先在上方添加部门</option><option value="__custom__">+ 自定义部门...</option>';
   showModal('添加团队成员', `<form onsubmit="return addUser(event)">
     <div class="form-group"><label>姓名 <span class="req">*</span></label><input type="text" class="form-control" id="newUserName" required></div>
-    <div class="form-group"><label>用户名 <span class="req">*</span></label><input type="text" class="form-control" id="newUserUsername" required></div>
-    <div class="form-group"><label>密码 <span class="req">*</span></label><input type="text" class="form-control" id="newUserPassword" value="123456" required></div>
+    <div class="form-group" style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;margin-bottom:14px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:0">
+        <input type="checkbox" id="newUserIsBasic" onchange="toggleBasicUserFields('add')">
+        <span style="font-weight:600">基础用户</span>
+        <span style="font-size:12px;color:var(--gray-500);font-weight:400">（仅用于数据统计，无需登录账号）</span>
+      </label>
+    </div>
+    <div id="addLoginFields">
+      <div class="form-group"><label>用户名 <span class="req">*</span></label><input type="text" class="form-control" id="newUserUsername"></div>
+      <div class="form-group"><label>密码 <span class="req">*</span></label><input type="text" class="form-control" id="newUserPassword" value="123456"></div>
+      <div class="form-group"><label>角色</label><select class="form-control" id="newUserRole"><option value="member">成员</option><option value="manager">主管</option><option value="viewer">查看者</option><option value="admin">超级管理员</option></select></div>
+    </div>
     <div class="form-group"><label>部门 <span class="req">*</span></label><select class="form-control" id="newUserDept" onchange="onDeptSelectChange(this,'newUserDeptCustom')">${deptOptions}</select><input type="text" class="form-control" id="newUserDeptCustom" style="display:none;margin-top:8px" placeholder="输入自定义部门名称"></div>
-    <div class="form-group"><label>角色</label><select class="form-control" id="newUserRole"><option value="member">成员</option><option value="manager">主管</option><option value="viewer">查看者</option><option value="admin">超级管理员</option></select></div>
+    <div style="display:flex;gap:12px">
+      <div class="form-group" style="flex:1"><label>入职时间</label><input type="date" class="form-control" id="newUserHireDate"></div>
+      <div class="form-group" style="flex:1"><label>离职时间 <span style="font-size:12px;color:var(--gray-400);font-weight:400">（在职留空）</span></label><input type="date" class="form-control" id="newUserLeaveDate"></div>
+    </div>
     <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="submit" class="btn btn-primary">添加</button></div>
   </form>`);
+}
+
+function toggleBasicUserFields(mode) {
+  const isBasic = document.getElementById(mode === 'add' ? 'newUserIsBasic' : 'editUserIsBasic')?.checked;
+  const box = document.getElementById(mode === 'add' ? 'addLoginFields' : 'editLoginFields');
+  if (box) box.style.display = isBasic ? 'none' : '';
 }
 
 async function addUser(e) {
   e.preventDefault();
   const name = document.getElementById('newUserName').value.trim();
-  const username = document.getElementById('newUserUsername').value.trim();
-  const password = document.getElementById('newUserPassword').value;
+  const isBasic = document.getElementById('newUserIsBasic').checked;
+  const hireDate = document.getElementById('newUserHireDate').value || '';
+  const leaveDate = document.getElementById('newUserLeaveDate').value || '';
+  if (!name) { alert('请输入姓名'); return false; }
   let department = document.getElementById('newUserDept').value;
   if (department === '__custom__') {
     department = document.getElementById('newUserDeptCustom').value.trim();
   }
   if (!department) { alert('请选择或输入部门'); return false; }
-  const role = document.getElementById('newUserRole').value;
-  if (cloudData.users.find(u => u.username === username)) { alert('用户名已存在'); return false; }
-  const hp = await hashPassword(password);
-  const user = {id:genId(),username,password:hp,name,department,role,active:true,createdAt:new Date().toISOString()};
+  let user;
+  if (isBasic) {
+    // 基础用户：无登录账号，仅用于数据统计
+    user = {id:genId(),username:'',password:'',name,department,role:'member',active:true,isBasic:true,hireDate,leaveDate,createdAt:new Date().toISOString()};
+  } else {
+    const username = document.getElementById('newUserUsername').value.trim();
+    const password = document.getElementById('newUserPassword').value;
+    if (!username) { alert('请输入用户名'); return false; }
+    if (!password) { alert('请输入密码'); return false; }
+    const role = document.getElementById('newUserRole').value;
+    if (cloudData.users.find(u => u.username === username)) { alert('用户名已存在'); return false; }
+    const hp = await hashPassword(password);
+    user = {id:genId(),username,password:hp,name,department,role,active:true,isBasic:false,hireDate,leaveDate,createdAt:new Date().toISOString()};
+  }
   try { await apiCreate('users', user); cloudData.users.push(user); }
   catch(err) { showToast('创建失败: ' + err.message, 'error', 4000); return false; }
   // Auto-add new department to list if not exists
@@ -3133,12 +3166,26 @@ function editUser(id) {
     depts.map(d => `<option value="${d}" ${d===userDept?'selected':''}>${d}</option>`).join('') +
     (deptInList ? '' : `<option value="${userDept}" selected>${userDept}</option>`) +
     '<option value="__custom__">+ 自定义部门...</option>';
+  const isBasic = !!user.isBasic;
   showModal('编辑用户 - ' + user.name, `<form onsubmit="return updateUser(event,'${id}')">
     <div class="form-group"><label>姓名</label><input type="text" class="form-control" id="editName" value="${user.name}"></div>
-    <div class="form-group"><label>用户名</label><input type="text" class="form-control" id="editUsername" value="${user.username}" ${user.username==='admin'?'disabled':''}></div>
+    ${user.username!=='admin' ? `<div class="form-group" style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;margin-bottom:14px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:0">
+        <input type="checkbox" id="editUserIsBasic" ${isBasic?'checked':''} onchange="toggleBasicUserFields('edit')">
+        <span style="font-weight:600">基础用户</span>
+        <span style="font-size:12px;color:var(--gray-500);font-weight:400">（仅用于数据统计，无需登录账号）</span>
+      </label>
+    </div>` : `<input type="checkbox" id="editUserIsBasic" style="display:none">`}
+    <div id="editLoginFields" style="${isBasic?'display:none':''}">
+      <div class="form-group"><label>用户名</label><input type="text" class="form-control" id="editUsername" value="${user.username||''}" ${user.username==='admin'?'disabled':''}></div>
+      <div class="form-group"><label>重设密码（留空不改）</label><input type="text" class="form-control" id="editPassword" placeholder="输入新密码..."></div>
+      <div class="form-group"><label>角色</label><select class="form-control" id="editRole" ${user.username==='admin'?'disabled':''}><option value="member" ${user.role==='member'?'selected':''}>成员</option><option value="manager" ${user.role==='manager'?'selected':''}>主管</option><option value="viewer" ${user.role==='viewer'?'selected':''}>查看者</option><option value="admin" ${user.role==='admin'?'selected':''}>超级管理员</option></select></div>
+    </div>
     <div class="form-group"><label>部门</label><select class="form-control" id="editDept" onchange="onDeptSelectChange(this,'editDeptCustom')">${deptOptions}</select><input type="text" class="form-control" id="editDeptCustom" style="display:none;margin-top:8px" placeholder="输入自定义部门名称"></div>
-    <div class="form-group"><label>重设密码（留空不改）</label><input type="text" class="form-control" id="editPassword" placeholder="输入新密码..."></div>
-    <div class="form-group"><label>角色</label><select class="form-control" id="editRole" ${user.username==='admin'?'disabled':''}><option value="member" ${user.role==='member'?'selected':''}>成员</option><option value="manager" ${user.role==='manager'?'selected':''}>主管</option><option value="viewer" ${user.role==='viewer'?'selected':''}>查看者</option><option value="admin" ${user.role==='admin'?'selected':''}>超级管理员</option></select></div>
+    <div style="display:flex;gap:12px">
+      <div class="form-group" style="flex:1"><label>入职时间</label><input type="date" class="form-control" id="editHireDate" value="${user.hireDate||''}"></div>
+      <div class="form-group" style="flex:1"><label>离职时间 <span style="font-size:12px;color:var(--gray-400);font-weight:400">（在职留空）</span></label><input type="date" class="form-control" id="editLeaveDate" value="${user.leaveDate||''}"></div>
+    </div>
     <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="submit" class="btn btn-primary">保存</button></div>
   </form>`);
 }
@@ -3148,21 +3195,41 @@ async function updateUser(e, id) {
   const user = cloudData.users.find(u => u.id === id);
   if (!user) return false;
   user.name = document.getElementById('editName').value.trim();
-  if (user.username !== 'admin') { user.username = document.getElementById('editUsername').value.trim(); user.role = document.getElementById('editRole').value; }
+  const isBasic = document.getElementById('editUserIsBasic')?.checked;
   let department = document.getElementById('editDept').value;
   if (department === '__custom__') {
     department = document.getElementById('editDeptCustom').value.trim();
   }
   if (!department) { alert('请选择或输入部门'); return false; }
   user.department = department;
+  user.hireDate = document.getElementById('editHireDate').value || '';
+  user.leaveDate = document.getElementById('editLeaveDate').value || '';
+  if (user.username === 'admin') {
+    // admin 账号不可改为基础用户，仅更新基础信息
+  } else if (isBasic) {
+    // 转为/保持基础用户：清空登录信息
+    user.isBasic = true;
+    user.username = '';
+    user.password = '';
+    user.role = 'member';
+  } else {
+    // 普通登录账号
+    const username = document.getElementById('editUsername').value.trim();
+    if (!username) { alert('请输入用户名（或勾选"基础用户"）'); return false; }
+    if (cloudData.users.find(u => u.id !== id && u.username === username)) { alert('用户名已存在'); return false; }
+    user.isBasic = false;
+    user.username = username;
+    user.role = document.getElementById('editRole').value;
+    const newPwd = document.getElementById('editPassword').value;
+    if (newPwd) { user.password = await hashPassword(newPwd); }
+    else if (!user.password) { user.password = await hashPassword('123456'); }
+  }
   // Auto-add new department to list if not exists
   if (!cloudData.departments.includes(department)) {
     cloudData.departments.push(department);
     cloudData.departments.sort();
     saveDepartments();
   }
-  const newPwd = document.getElementById('editPassword').value;
-  if (newPwd) user.password = await hashPassword(newPwd);
   try { await apiUpdate('users', user.id, user); }
   catch(err) { showToast('保存失败: ' + err.message, 'error', 4000); return false; }
   showToast('用户信息已更新！', 'success');
