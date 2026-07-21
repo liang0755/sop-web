@@ -402,6 +402,24 @@ tr:hover td{background:var(--gray-50)}
 .import-note .ch{color:var(--primary);font-weight:600}
 th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
 table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:var(--primary-dark)}
+.yoy-pos{color:var(--danger);font-size:11px;margin-top:2px;font-weight:600}
+.yoy-neg{color:var(--success);font-size:11px;margin-top:2px;font-weight:600}
+.yoy-none{color:var(--gray-400);font-size:11px;margin-top:2px}
+.sort-th{cursor:pointer;user-select:none;white-space:nowrap}
+.sort-th:hover{background:var(--gray-100)}
+.sort-ind{font-size:10px;color:var(--gray-400);margin-left:3px}
+.sort-ind.active{color:var(--primary)}
+.pager{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 4px 4px;font-size:13px;color:var(--gray-600)}
+.pager-info{font-size:13px;color:var(--gray-600)}
+.pager select{width:auto;display:inline-block}
+.user-chk{width:36px;text-align:center;vertical-align:middle}
+.batch-bar{position:sticky;top:0;z-index:5;display:none;align-items:center;gap:10px;background:var(--primary-light);border:1px solid #93c5fd;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:14px}
+.batch-bar.show{display:flex}
+.import-overlay{position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center}
+.import-overlay .box{background:#fff;border-radius:12px;padding:30px 40px;text-align:center;min-width:300px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.import-overlay .spin{font-size:42px;animation:spin 1.4s linear infinite;display:inline-block;color:var(--primary)}
+.import-overlay .txt{margin-top:16px;font-size:15px;font-weight:600;color:var(--gray-700)}
+.import-overlay .sub{margin-top:8px;font-size:12px;color:var(--gray-500)}
 </style>
 </head>
 <body>
@@ -2785,6 +2803,7 @@ function renderUserManagement() {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
     return;
   }
+  selectedUserIds.clear();
   const body = document.getElementById('contentBody');
   const users = cloudData.users;
   const depts = getDepartments();
@@ -2813,8 +2832,15 @@ function renderUserManagement() {
         <button class="btn btn-primary" onclick="showAddUserModal()">➕ 添加成员</button>
       </div>
     </div>
-    <div class="table-wrap"><table><thead><tr><th>姓名</th><th>用户名</th><th>部门</th><th>角色</th><th>入职时间</th><th>离职时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
+    <div class="batch-bar" id="userBatchBar">
+      <span>已选 <b id="userSelCount">0</b> 人</span>
+      <button class="btn btn-success btn-sm" onclick="batchSetUserStatus(true)">标记为入职</button>
+      <button class="btn btn-danger btn-sm" onclick="batchSetUserStatus(false)">标记为离职</button>
+      <button class="btn btn-outline btn-sm" onclick="clearUserSelection()">取消选择</button>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th class="user-chk"><input type="checkbox" id="userSelectAll" onchange="toggleAllUsers(this)"></th><th>姓名</th><th>用户名</th><th>部门</th><th>角色</th><th>入职时间</th><th>离职时间</th><th>状态</th><th>操作</th></tr></thead><tbody>
       ${users.map(u => `<tr>
+        <td class="user-chk">${u.username !== 'admin' ? `<input type="checkbox" ${selectedUserIds.has(u.id) ? 'checked' : ''} onchange="toggleUserSelect('${u.id}',this.checked)">` : ''}</td>
         <td><strong>${u.name}</strong></td>
         <td>${u.isBasic ? '<span class="badge" style="background:var(--gray-100);color:var(--gray-500)">基础用户</span>' : u.username}</td>
         <td>${u.department||'-'}</td>
@@ -2830,6 +2856,7 @@ function renderUserManagement() {
       </tr>`).join('')}
     </tbody></table></div>
   </div></div>`;
+  updateUserBatchBar();
 }
 
 // ============ Role & Permission Config ============
@@ -3292,6 +3319,44 @@ async function deleteUser(id) {
     showToast(`用户 ${user.name} 已删除`, 'success');
   } catch(err) { showToast('删除失败: ' + err.message, 'error', 4000); }
 }
+
+// ===== 用户批量状态修改 =====
+async function batchSetUserStatus(isOnboard) {
+  if (!selectedUserIds.size) return;
+  if (!confirm(`确定将选中的 ${selectedUserIds.size} 名用户标记为「${isOnboard ? '入职（在职）' : '离职'}」吗？`)) return;
+  const today = new Date().toISOString().slice(0, 10);
+  let done = 0;
+  for (const id of [...selectedUserIds]) {
+    const u = cloudData.users.find(x => x.id === id);
+    if (!u) continue;
+    if (isOnboard) { u.leaveDate = ''; u.active = true; }
+    else { u.leaveDate = today; }
+    try { await apiUpdate('users', u.id, u); done++; }
+    catch (e) { showToast('更新失败: ' + e.message, 'error', 4000); }
+  }
+  selectedUserIds.clear();
+  renderUserManagement();
+  showToast(`已更新 ${done} 名用户为${isOnboard ? '入职（在职）' : '离职'}`, 'success');
+}
+function toggleUserSelect(id, checked) {
+  if (checked) selectedUserIds.add(id); else selectedUserIds.delete(id);
+  updateUserBatchBar();
+}
+function toggleAllUsers(box) {
+  cloudData.users.filter(u => u.username !== 'admin').forEach(u => {
+    if (box.checked) selectedUserIds.add(u.id); else selectedUserIds.delete(u.id);
+  });
+  document.querySelectorAll('#contentBody .user-chk input[type=checkbox]').forEach(cb => { cb.checked = box.checked; });
+  updateUserBatchBar();
+}
+function updateUserBatchBar() {
+  const bar = document.getElementById('userBatchBar');
+  if (!bar) return;
+  bar.classList.toggle('show', selectedUserIds.size > 0);
+  const c = document.getElementById('userSelCount');
+  if (c) c.textContent = selectedUserIds.size;
+}
+function clearUserSelection() { selectedUserIds.clear(); renderUserManagement(); }
 
 // ============ Department Management ============
 function onDeptSelectChange(selectEl, customInputId) {
@@ -5961,6 +6026,23 @@ function renderGroupedVisitStats(records, s, e, mode) {
 // ============ Modal ============
 function showModal(title,content,wide){document.getElementById('modalContainer').innerHTML=`<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal${wide?' modal-wide':''}"><h3>${title}</h3>${content}</div></div>`}
 function closeModal(){document.getElementById('modalContainer').innerHTML=''}
+function showImportOverlay(title) {
+  let el = document.getElementById('importOverlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'importOverlay';
+    el.className = 'import-overlay';
+    el.innerHTML = '<div class="box"><div class="spin">⏳</div><div class="txt" id="importOverlayTxt"></div><div class="sub" id="importOverlaySub"></div></div>';
+    document.body.appendChild(el);
+  }
+  updateImportOverlay(title, '');
+  el.style.display = 'flex';
+}
+function updateImportOverlay(txt, sub) {
+  const t = document.getElementById('importOverlayTxt'); const s = document.getElementById('importOverlaySub');
+  if (t) t.textContent = txt; if (s) s.textContent = sub || '';
+}
+function hideImportOverlay() { const el = document.getElementById('importOverlay'); if (el) el.style.display = 'none'; }
 function showToast(msg, type='success', duration=2500) {
   const container = document.getElementById('toastContainer');
   if (!container) return;
@@ -6137,6 +6219,28 @@ const SALES_STORE_CORRECTION = {
 function fmtSalesMoney(n) { return '¥' + Math.round(n || 0).toLocaleString('zh-CN'); }
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function toNum(x) { if (x == null || x === '') return 0; if (typeof x === 'number') return x; const n = parseFloat(String(x).replace(/[, ¥￥]/g, '')); return isNaN(n) ? 0 : n; }
+
+// ===== 业绩 / 用户 模块状态 =====
+let salesDetailPage = 1;
+let salesDetailPageSize = 20;
+let sbSortCol = null;          // 'total' 或 'YYYY-MM'
+let sbSortDir = 'desc';        // 'asc' | 'desc'
+let sbLastYearTeamMap = {};    // 团队 -> { 'YYYY-MM': 金额 }（上一年，用于同比）
+const selectedUserIds = new Set();
+
+// 用户姓名 -> 状态(在职/离职/禁用) 映射，用于看板销售员标签
+function buildUserStatusMap() {
+  const m = {};
+  (cloudData.users || []).forEach(u => { if (u && u.name) m[u.name] = u.leaveDate ? '离职' : (u.active ? '在职' : '禁用'); });
+  return m;
+}
+function userStatusBadge(name, map) {
+  const st = map[name];
+  if (!st) return '';
+  if (st === '在职') return ' <span class="badge badge-success" style="font-size:10px;padding:1px 6px">在职</span>';
+  if (st === '离职') return ' <span class="badge badge-danger" style="font-size:10px;padding:1px 6px">离职</span>';
+  return ' <span class="badge" style="font-size:10px;padding:1px 6px;background:var(--gray-100);color:var(--gray-500)">禁用</span>';
+}
 function salesMonthOf(d) {
   if (!d) return '';
   const s = (d instanceof Date) ? d.toISOString() : String(d).trim();
@@ -6150,6 +6254,7 @@ function onSalesFilePicked(e) { const f = e.target.files[0]; if (!f) return; imp
 async function importSalesFile(file) {
   if (typeof XLSX === 'undefined') { showToast('表格解析库未加载，请刷新页面后重试', 'error', 4000); return; }
   try {
+    showImportOverlay('正在解析表格…');
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: 'array', cellDates: true });
     const ws = wb.Sheets[wb.SheetNames[0]];
@@ -6197,10 +6302,15 @@ async function importSalesFile(file) {
       kept++;
     }
     if (toAdd.length) {
-      for (const rec of toAdd) { await apiCreate('salesRecords', rec); }
+      for (let i = 0; i < toAdd.length; i++) {
+        await apiCreate('salesRecords', toAdd[i]);
+        updateImportOverlay('正在写入业绩数据…', `第 ${i + 1} / ${toAdd.length} 条`);
+      }
       cloudData.salesRecords = cloudData.salesRecords.concat(toAdd);
       saveReportsCache();
     }
+    hideImportOverlay();
+    salesDetailPage = 1;
     showModal('导入完成', `<div class="import-note">
       <div>📄 文件共 <b>${total}</b> 行</div>
       <div>🔽 过滤非 KA 部门整行：<span class="no">${filtered}</span> 行</div>
@@ -6210,6 +6320,7 @@ async function importSalesFile(file) {
     </div><div class="modal-footer"><button class="btn btn-primary" onclick="closeModal()">确定</button></div>`);
     renderSalesDetail();
   } catch (e) {
+    hideImportOverlay();
     showToast('导入失败：' + e.message, 'error', 5000);
   }
 }
@@ -6300,12 +6411,19 @@ async function deleteSalesRecord(id) {
 
 async function renderSalesDetail() {
   const canEdit = hasPermission('salesDetail');
-  const recs = cloudData.salesRecords.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
-  const totalAmount = recs.reduce((s, r) => s + toNum(r.amount), 0);
-  const totalGp = recs.reduce((s, r) => s + toNum(r.grossProfit), 0);
+  const all = cloudData.salesRecords.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
+  const totalAmount = all.reduce((s, r) => s + toNum(r.amount), 0);
+  const custCount = new Set(all.map(r => r.customer).filter(Boolean)).size;
   const teamMap = {};
-  recs.forEach(r => { teamMap[r.team] = (teamMap[r.team] || 0) + toNum(r.amount); });
+  all.forEach(r => { teamMap[r.team] = (teamMap[r.team] || 0) + toNum(r.amount); });
   const teamPills = Object.keys(teamMap).map(t => `<div class="team-pill"><div class="t">${esc(t)}</div><div class="a">${fmtSalesMoney(teamMap[t])}</div></div>`).join('');
+  // 分页
+  const totalRows = all.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / salesDetailPageSize));
+  if (salesDetailPage > totalPages) salesDetailPage = totalPages;
+  if (salesDetailPage < 1) salesDetailPage = 1;
+  const startIdx = (salesDetailPage - 1) * salesDetailPageSize;
+  const recs = all.slice(startIdx, startIdx + salesDetailPageSize);
   const colCount = canEdit ? 10 : 9;
   const rowsHtml = recs.map(r => `<tr>
     <td>${esc(r.salesperson) || '-'}</td>
@@ -6319,6 +6437,15 @@ async function renderSalesDetail() {
     <td>${esc(r.status)}</td>
     ${canEdit ? `<td><button class="btn btn-outline btn-sm" onclick="editSalesRecord('${r.id}')">编辑</button> <button class="btn btn-danger btn-sm" onclick="deleteSalesRecord('${r.id}')">删除</button></td>` : ''}
   </tr>`).join('');
+  const pager = `
+    <div class="pager">
+      <button class="btn btn-outline btn-sm" onclick="salesDetailGoPage(${salesDetailPage - 1})" ${salesDetailPage <= 1 ? 'disabled' : ''}>上一页</button>
+      <span class="pager-info">第 ${salesDetailPage} / ${totalPages} 页 · 共 ${totalRows} 条</span>
+      <button class="btn btn-outline btn-sm" onclick="salesDetailGoPage(${salesDetailPage + 1})" ${salesDetailPage >= totalPages ? 'disabled' : ''}>下一页</button>
+      <select class="form-control" style="width:auto;display:inline-block;margin-left:8px" onchange="salesDetailSetPageSize(this.value)">
+        ${[20, 50, 100].map(s => `<option value="${s}" ${s === salesDetailPageSize ? 'selected' : ''}>${s} 条/页</option>`).join('')}
+      </select>
+    </div>`;
   const html = `
   <div class="card">
     <div class="card-header"><h4>📥 数据导入 / 手动新增</h4>
@@ -6341,18 +6468,20 @@ async function renderSalesDetail() {
     <div class="card-body">
       <div class="stat-row">
         <div class="stat-box"><div class="v">${fmtSalesMoney(totalAmount)}</div><div class="l">KA 总业绩（折后金额净额）</div></div>
-        <div class="stat-box"><div class="v">${fmtSalesMoney(totalGp)}</div><div class="l">KA 总毛利润</div></div>
-        <div class="stat-box"><div class="v">${recs.length}</div><div class="l">单据笔数</div></div>
+        <div class="stat-box"><div class="v">${custCount}</div><div class="l">客户总数</div></div>
       </div>
       <div class="team-summary">${teamPills || '<span style="color:var(--gray-400);font-size:13px">暂无数据</span>'}</div>
     </div>
   </div>
   <div class="card">
-    <div class="card-header"><h4>📋 业绩明细（共 ${recs.length} 条）</h4></div>
-    <div class="card-body"><div class="table-wrap"><table><thead><tr><th>销售员</th><th>团队/门店</th><th>单据日期</th><th class="num">折后金额</th><th class="num">毛利润</th><th>商品名称</th><th>单据编号</th><th>单据类别</th><th>状态</th>${canEdit ? '<th>操作</th>' : ''}</tr></thead><tbody>${rowsHtml || `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:30px">暂无数据，请导入或新增</td></tr>`}</tbody></table></div></div>
+    <div class="card-header"><h4>📋 业绩明细（共 ${totalRows} 条）</h4></div>
+    <div class="card-body"><div class="table-wrap"><table><thead><tr><th>销售员</th><th>团队/门店</th><th>单据日期</th><th class="num">折后金额</th><th class="num">毛利润</th><th>商品名称</th><th>单据编号</th><th>单据类别</th><th>状态</th>${canEdit ? '<th>操作</th>' : ''}</tr></thead><tbody>${rowsHtml || `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:30px">暂无数据，请导入或新增</td></tr>`}</tbody></table></div>${pager}</div>
   </div>`;
   document.getElementById('contentBody').innerHTML = html;
 }
+
+function salesDetailGoPage(p) { salesDetailPage = p; renderSalesDetail(); }
+function salesDetailSetPageSize(v) { salesDetailPageSize = parseInt(v, 10) || 20; salesDetailPage = 1; renderSalesDetail(); }
 
 function monthOpts() { let s = ''; for (let m = 1; m <= 12; m++) { const v = String(m).padStart(2, '0'); s += `<option value="${v}">${v}月</option>`; } return s; }
 function sbSyncTo() { const f = document.getElementById('sbMFrom'), t = document.getElementById('sbMTo'); if (+f.value > +t.value) t.value = f.value; }
@@ -6382,7 +6511,28 @@ async function renderSalesBoard() {
   renderSalesBoards();
 }
 
-function renderSalesBoards() { renderSalesBoardTable('sbBoard1', 'salesperson'); renderSalesBoardTable('sbBoard2', 'team'); }
+function renderSalesBoards() {
+  const year = document.getElementById('sbYear') ? document.getElementById('sbYear').value : new Date().getFullYear().toString();
+  const ly = String(parseInt(year, 10) - 1);
+  sbLastYearTeamMap = {};
+  cloudData.salesRecords.forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== ly) return;
+    const k = r.team || '(未分类)';
+    if (!sbLastYearTeamMap[k]) sbLastYearTeamMap[k] = {};
+    sbLastYearTeamMap[k][dm] = (sbLastYearTeamMap[k][dm] || 0) + toNum(r.amount);
+  });
+  renderSalesBoardTable('sbBoard1', 'salesperson');
+  renderSalesBoardTable('sbBoard2', 'team');
+}
+
+function lyMonth(mm) { const p = String(mm).split('-'); return (parseInt(p[0], 10) - 1) + '-' + p[1]; }
+
+function sbSortBy(col) {
+  if (sbSortCol === col) { sbSortDir = sbSortDir === 'asc' ? 'desc' : 'asc'; }
+  else { sbSortCol = col; sbSortDir = 'desc'; }
+  renderSalesBoards();
+}
 
 function renderSalesBoardTable(tid, key) {
   const months = sbMonthList();
@@ -6394,14 +6544,52 @@ function renderSalesBoardTable(tid, key) {
     if (!map[k]) map[k] = {};
     map[k][dm] = (map[k][dm] || 0) + toNum(r.amount);
   });
-  const rowsArr = Object.keys(map).map(k => ({ k, t: months.reduce((s, m) => s + (map[k][m] || 0), 0) })).sort((a, b) => b.t - a.t);
+  let rowsArr = Object.keys(map).map(k => {
+    const row = { k };
+    let t = 0;
+    months.forEach(m => { row[m] = map[k][m] || 0; t += row[m]; });
+    row.t = t;
+    return row;
+  });
+  if (sbSortCol) {
+    rowsArr.sort((a, b) => {
+      const va = sbSortCol === 'total' ? a.t : (a[sbSortCol] || 0);
+      const vb = sbSortCol === 'total' ? b.t : (b[sbSortCol] || 0);
+      return sbSortDir === 'asc' ? va - vb : vb - va;
+    });
+  } else {
+    rowsArr.sort((a, b) => b.t - a.t);
+  }
+  const userMap = key === 'salesperson' ? buildUserStatusMap() : null;
   let h = '<thead><tr><th>' + (key === 'salesperson' ? '销售员' : '团队/门店') + '</th>';
-  months.forEach(m => h += `<th class="num">${m.slice(5)}月</th>`);
-  h += '<th class="num">合计</th></tr></thead><tbody>';
+  months.forEach(m => {
+    const ind = sbSortCol === m ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
+    const act = sbSortCol === m ? ' active' : '';
+    h += `<th class="num sort-th${act}" onclick="sbSortBy('${m}')">${m.slice(5)}月<span class="sort-ind${act}">${ind}</span></th>`;
+  });
+  const totInd = sbSortCol === 'total' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
+  const totAct = sbSortCol === 'total' ? ' active' : '';
+  h += `<th class="num sort-th${totAct}" onclick="sbSortBy('total')">合计<span class="sort-ind${totAct}">${totInd}</span></th></tr></thead><tbody>`;
   const colTot = {};
   rowsArr.forEach(row => {
-    h += `<tr><td>${key === 'team' ? `<span class="badge badge-team">${esc(row.k)}</span>` : esc(row.k)}</td>`;
-    months.forEach(m => { const v = map[row.k][m] || 0; colTot[m] = (colTot[m] || 0) + v; h += `<td class="num">${fmtSalesMoney(v)}</td>`; });
+    const label = key === 'team' ? `<span class="badge badge-team">${esc(row.k)}</span>` : (esc(row.k) + userStatusBadge(row.k, userMap));
+    h += `<tr><td>${label}</td>`;
+    months.forEach(m => {
+      const v = map[row.k][m] || 0;
+      colTot[m] = (colTot[m] || 0) + v;
+      let cell = `<td class="num">${fmtSalesMoney(v)}`;
+      if (key === 'team') {
+        const lyv = (sbLastYearTeamMap[row.k] && sbLastYearTeamMap[row.k][lyMonth(m)]) ? sbLastYearTeamMap[row.k][lyMonth(m)] : 0;
+        if (lyv > 0) {
+          const g = (v - lyv) / lyv * 100;
+          cell += `<div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}">${g >= 0 ? '+' : ''}${g.toFixed(1)}% 同比</div>`;
+        } else {
+          cell += `<div class="yoy-none">— 同比</div>`;
+        }
+      }
+      cell += `</td>`;
+      h += cell;
+    });
     h += `<td class="num">${fmtSalesMoney(row.t)}</td></tr>`;
   });
   h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
