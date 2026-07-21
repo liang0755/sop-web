@@ -590,7 +590,7 @@ function needsAllReports() {
 }
 
 // ---------- 报表数据本地缓存：加速普通成员打开系统 / 填写日报周报 ----------
-const REPORTS_CACHE_KEY = 'sop_reports_cache_v1';
+const REPORTS_CACHE_KEY = 'sop_reports_cache_v2';
 const REPORTS_CACHE_TTL = 30 * 60 * 1000; // 30 分钟
 function saveReportsCache() {
   try {
@@ -4362,14 +4362,14 @@ function renderVisitTable() {
   const psSel = document.getElementById('visitPageSize');
   if (psSel) visitPageSize = parseInt(psSel.value, 10) || 30;
   let records = [...cloudData.visitRecords];
-  if (s) records = records.filter(r => (r.contactTime || '').split(' ')[0] >= s);
-  if (e) records = records.filter(r => (r.contactTime || '').split(' ')[0] <= e);
+  if (s) records = records.filter(r => normContactTime(r.contactTime).split(' ')[0] >= s);
+  if (e) records = records.filter(r => normContactTime(r.contactTime).split(' ')[0] <= e);
   if (fDept) records = records.filter(r => normDeptKey(r.department) === normDeptKey(fDept));
   if (fPerson) records = records.filter(r => r.employee === fPerson);
   if (fResult === 'empty') records = records.filter(r => !r.visitResult);
   else if (fResult === 'filled') records = records.filter(r => !!r.visitResult);
   else if (fResult) records = records.filter(r => (r.visitResult || '') === fResult);
-  records.sort((a, b) => (b.contactTime || '').localeCompare(a.contactTime || ''));
+  records.sort((a, b) => normContactTime(b.contactTime).localeCompare(normContactTime(a.contactTime)));
   const total = records.length;
   const pages = Math.max(1, Math.ceil(total / visitPageSize));
   if (visitCurrentPage > pages) visitCurrentPage = pages;
@@ -4754,7 +4754,7 @@ async function handleVisitUpload(input) {
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
       if (!r[colMap.contactTime] && !r[colMap.employee]) continue;
-      const contactTime = r[colMap.contactTime] || '';
+      const contactTime = normContactTime(r[colMap.contactTime] || '');
       const employee = r[colMap.employee] || '';
       const customer = r[colMap.customer] || '';
       const key = contactTime + '|' + employee + '|' + customer;
@@ -4791,6 +4791,7 @@ async function handleVisitUpload(input) {
         saved++;
       } catch(e) { console.warn('Failed to save visit record:', e); }
     }
+    try { saveReportsCache(); } catch(e) {}
     if (alertEl) {
       let msg = '✅ 上传完成！新增 ' + saved + ' 条记录';
       if (dupCount > 0) msg += '，已自动过滤 ' + dupCount + ' 条重复记录';
@@ -4842,7 +4843,7 @@ function getRecentWeeks(count) {
 
 function getVisitSummaryForWeek(weekStart, weekEnd, department) {
   const records = cloudData.visitRecords.filter(r => {
-    const d = (r.contactTime || '').split(' ')[0];
+    const d = normContactTime(r.contactTime).split(' ')[0];
     return d >= weekStart && d <= weekEnd && normDeptKey(r.department || '未分组') === normDeptKey(department);
   });
   const vc = getVisitConfig();
@@ -4930,7 +4931,7 @@ async function renderMgrReport() {
             <label>选择周次</label>
             ${(() => {
               // 默认选中「包含最新拜访记录」的那一周，避免用户选了部门却因默认是当前空周而看不到数据
-              const latest = cloudData.visitRecords.map(r => (r.contactTime || '').split(' ')[0]).filter(Boolean).sort().pop() || '';
+              const latest = cloudData.visitRecords.map(r => normContactTime(r.contactTime).split(' ')[0]).filter(Boolean).sort().pop() || '';
               let dv = weeks.length ? (weeks[0].weekStart + '|' + weeks[0].weekEnd + '|' + weeks[0].label) : '';
               for (const w of weeks) { if (latest >= w.weekStart && latest <= w.weekEnd) { dv = w.weekStart + '|' + w.weekEnd + '|' + w.label; break; } }
               return `<select class="form-control" id="mgrWeekSel" onchange="updateMgrVisitSummary()">` +
@@ -5328,7 +5329,7 @@ function loadVisitStats() {
   const s = document.getElementById('visitStatsStart')?.value || '';
   const e = document.getElementById('visitStatsEnd')?.value || '';
   let records = cloudData.visitRecords.filter(r => {
-    const d = (r.contactTime || '').split(' ')[0];
+    const d = normContactTime(r.contactTime).split(' ')[0];
     return (!s || d >= s) && (!e || d <= e);
   });
   const c = document.getElementById('visitStatsResults');
@@ -5712,6 +5713,16 @@ function showToast(msg, type='success', duration=2500) {
 // ============ Utils ============
 // 本地时区日期 YYYY-MM-DD（修复 GMT+8 凌晨用 toISOString() 得到 UTC 日期差一天的问题）
 function localYMD(d){ d = d || new Date(); const off = d.getTimezoneOffset()*60000; return new Date(d.getTime()-off).toISOString().split('T')[0]; }
+// 联系时间规范化：把 CSV 的 `2026/07/10 15:56` / `2026.07.10` / `2026年07月10日` 等统一成 `2026-07-10 15:56`
+// 解决斜杠格式导致日期筛选/排序/统计判断错误的问题（部分 CSV 直接以斜杠导出）
+function normContactTime(s){
+  if(!s) return '';
+  const parts=String(s).trim().split(/[\sT]/);
+  let datePart=parts[0]||'';
+  const timePart=parts[1]||'';
+  datePart=datePart.replace(/[^\d]/g,'-').replace(/-+/g,'-').replace(/^-+|-+$/g,'');
+  return (datePart+(timePart?' '+timePart:'')).trim();
+}
 function getWeekStart(){const n=new Date(),d=n.getDay()||7;const m=new Date(n);m.setDate(n.getDate()-d+1);return localYMD(m)}
 function getWeekEnd(s){if(!s)return'';const d=new Date(s);d.setDate(d.getDate()+6);return localYMD(d)}
 function getLastWeekStart(){const n=new Date(),d=n.getDay()||7;const m=new Date(n);m.setDate(n.getDate()-d-6);return localYMD(m)}
