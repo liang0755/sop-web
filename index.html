@@ -6548,6 +6548,7 @@ async function renderSalesDetail() {
   // 分页
   const totalRows = all.length;
   const avgAmount = totalRows ? totalAmount / totalRows : 0;
+  const avgCustomerAmount = custCount ? totalAmount / custCount : 0;
   const totalPages = Math.max(1, Math.ceil(totalRows / salesDetailPageSize));
   if (salesDetailPage > totalPages) salesDetailPage = totalPages;
   if (salesDetailPage < 1) salesDetailPage = 1;
@@ -6614,15 +6615,14 @@ async function renderSalesDetail() {
   <div class="card">
     <div class="card-header"><h4>📊 业绩汇总</h4><span style="font-size:12px;color:var(--gray-500)">当前筛选范围内</span></div>
     <div class="card-body">
-      <div class="stat-row">
-        <div class="stat-box primary"><div class="v">${fmtSalesMoney(totalAmount)}</div><div class="l">KA 总业绩（折后金额净额）</div></div>
-        <div class="stat-box"><div class="v">${custCount}</div><div class="l">客户总数</div></div>
-        <div class="stat-box"><div class="v">${totalRows}</div><div class="l">单据笔数</div></div>
-        <div class="stat-box"><div class="v">${fmtSalesMoney(avgAmount)}</div><div class="l">平均单笔金额</div></div>
-      </div>
-      <div class="team-summary">
-        <div class="ts-title">各团队业绩分布</div>
-        <div class="ts-pills">${teamPills || '<span style="color:var(--gray-400);font-size:13px">暂无数据</span>'}</div>
+      <div class="stat-row" style="align-items:stretch">
+        <div class="stat-box primary" style="flex:1 1 180px"><div class="v">${fmtSalesMoney(totalAmount)}</div><div class="l">KA 总金额（折后金额净额）</div></div>
+        <div class="stat-box" style="flex:1 1 140px"><div class="v">${custCount}</div><div class="l">客户总数</div></div>
+        <div class="stat-box" style="flex:1 1 140px"><div class="v">${fmtSalesMoney(avgCustomerAmount)}</div><div class="l">平均客单价</div></div>
+        <div class="team-summary" style="flex:2 1 320px;margin-top:0;display:flex;flex-direction:column;gap:8px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:14px 16px">
+          <div class="ts-title" style="margin:0">各团队业绩分布</div>
+          <div class="ts-pills" style="margin-top:0;flex:1;align-items:center">${teamPills || '<span style="color:var(--gray-400);font-size:13px">暂无数据</span>'}</div>
+        </div>
       </div>
     </div>
   </div>
