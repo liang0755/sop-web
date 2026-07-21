@@ -386,6 +386,22 @@ tr:hover td{background:var(--gray-50)}
   .content-body > div > div[style*="display:flex;gap:12px"] .btn{width:100%;justify-content:center}
 }
 <omitted>
+/* ===== 业绩明细 / 业绩看板 专用样式 ===== */
+.badge-team{background:var(--primary-light);color:var(--primary)}
+.team-summary{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}
+.team-pill{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:10px 14px;min-width:150px}
+.team-pill .t{font-size:12px;color:var(--gray-500)}
+.team-pill .a{font-size:17px;font-weight:700;color:var(--primary)}
+.stat-row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+.stat-box{flex:1;min-width:160px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:14px 16px}
+.stat-box .v{font-size:20px;font-weight:700;color:var(--primary)}
+.stat-box .l{font-size:12px;color:var(--gray-500);margin-top:4px}
+.import-note{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.9}
+.import-note .ok{color:var(--success);font-weight:600}
+.import-note .no{color:var(--danger);font-weight:600}
+.import-note .ch{color:var(--primary);font-weight:600}
+th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
+table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:var(--primary-dark)}
 </style>
 </head>
 <body>
@@ -438,11 +454,13 @@ tr:hover td{background:var(--gray-50)}
       <div class="nav-item" data-page="weeklyForm" onclick="navTo('weeklyForm')"><span class="icon">📋</span> 周报填写</div>
       <div class="nav-item" data-page="visitData" onclick="navTo('visitData')" id="navVisitData"><span class="icon">📍</span> 拜访数据</div>
       <div class="nav-item" data-page="mgrReport" onclick="navTo('mgrReport')" id="navMgrReport"><span class="icon">📎</span> 管理周报</div>
+      <div class="nav-item" data-page="salesDetail" onclick="navTo('salesDetail')" id="navSalesDetail"><span class="icon">💰</span> 业绩明细</div>
       <div class="nav-section-title">数据</div>
       <div class="nav-item" data-page="dailyData" onclick="navTo('dailyData')"><span class="icon">📈</span> 日报数据</div>
       <div class="nav-item" data-page="weeklyData" onclick="navTo('weeklyData')"><span class="icon">📉</span> 周报数据</div>
       <div class="nav-item" data-page="summary" onclick="navTo('summary')"><span class="icon">👥</span> 团队汇总</div>
       <div class="nav-item" data-page="visitStats" onclick="navTo('visitStats')" id="navVisitStats"><span class="icon">📊</span> 拜访统计</div>
+      <div class="nav-item" data-page="salesBoard" onclick="navTo('salesBoard')" id="navSalesBoard"><span class="icon">📺</span> 业绩看板</div>
       <div class="nav-section-title">管理</div>
       <div class="nav-item" data-page="userManagement" onclick="navTo('userManagement')" id="navUserMgmt"><span class="icon">👤</span> 用户管理</div>
       <div class="nav-item" data-page="roleConfig" onclick="navTo('roleConfig')" id="navRoleConfig"><span class="icon">🛡️</span> 角色权限</div>
@@ -466,11 +484,12 @@ tr:hover td{background:var(--gray-50)}
 <div id="modalContainer"></div>
 <div class="toast-container" id="toastContainer"></div>
 
+<script src="xlsx.full.min.js"></script>
 <script>
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[]};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[]};
 let currentUser = null;
 let isCloudAvailable = false;
 let dataLoaded = false;
@@ -616,7 +635,8 @@ function saveReportsCache() {
       daily: cloudData.dailyReports,
       weekly: cloudData.weeklyReports,
       visit: cloudData.visitRecords,
-      mgrR: cloudData.mgrReports
+      mgrR: cloudData.mgrReports,
+      sales: cloudData.salesRecords
     };
     const s = JSON.stringify(payload);
     if (s.length > 4 * 1024 * 1024) return; // 过大不缓存，避免撑爆 localStorage
@@ -635,6 +655,7 @@ function loadReportsCache() {
     cloudData.weeklyReports = Array.isArray(p.weekly) ? p.weekly : [];
     cloudData.visitRecords = Array.isArray(p.visit) ? p.visit : [];
     cloudData.mgrReports = Array.isArray(p.mgrR) ? p.mgrR : [];
+    cloudData.salesRecords = Array.isArray(p.sales) ? p.sales : [];
     return true;
   } catch(e) { return false; }
 }
@@ -643,6 +664,7 @@ function loadReportsCache() {
 async function fetchReportsFromCloud() {
   const needVisit = !currentUser || hasPermission('visitData') || hasPermission('visitStats');
   const needMgr = !currentUser || hasPermission('mgrReport');
+  const needSales = !currentUser || hasPermission('salesDetail') || hasPermission('salesBoard');
   const all = needsAllReports();
   let dailyUrl = FB_BASE + '/dailyReports.json';
   let weeklyUrl = FB_BASE + '/weeklyReports.json';
@@ -652,8 +674,10 @@ async function fetchReportsFromCloud() {
     weeklyUrl += '?' + q;
   }
   const fetches = [fetch(dailyUrl), fetch(weeklyUrl)];
-  if (needVisit) fetches.push(fetch(FB_BASE + '/visitRecords.json'));
-  if (needMgr) fetches.push(fetch(FB_BASE + '/mgrReports.json'));
+  let iVisit = -1, iMgr = -1, iSales = -1;
+  if (needVisit) { iVisit = fetches.length; fetches.push(fetch(FB_BASE + '/visitRecords.json')); }
+  if (needMgr) { iMgr = fetches.length; fetches.push(fetch(FB_BASE + '/mgrReports.json')); }
+  if (needSales) { iSales = fetches.length; fetches.push(fetch(FB_BASE + '/salesRecords.json')); }
   const res = await Promise.all(fetches);
   const okJson = async (r) => { if (!r || !r.ok) return null; const j = await r.json().catch(() => null); return (j && !j.error) ? j : null; };
   let dj = await okJson(res[0]);
@@ -668,8 +692,9 @@ async function fetchReportsFromCloud() {
     daily: dj != null ? Object.values(dj) : [],
     weekly: wj != null ? Object.values(wj) : []
   };
-  if (needVisit && res[2]) out.visit = hydrateVisitRecords(await okJson(res[2]));
-  if (needMgr && res[3]) out.mgr = Object.values(await okJson(res[3]) || {});
+  if (needVisit && iVisit >= 0) out.visit = hydrateVisitRecords(await okJson(res[iVisit]));
+  if (needMgr && iMgr >= 0) out.mgr = Object.values(await okJson(res[iMgr]) || {});
+  if (needSales && iSales >= 0) out.sales = Object.values(await okJson(res[iSales]) || {});
   return out;
 }
 
@@ -690,6 +715,7 @@ async function loadReportData(opts) {
     cloudData.weeklyReports = data.weekly;
     if (data.visit) cloudData.visitRecords = data.visit;
     if (data.mgr !== undefined) cloudData.mgrReports = data.mgr;
+    if (data.sales !== undefined) cloudData.salesRecords = data.sales;
   } catch(e) {
     console.warn('Report data fetch failed:', e.message);
   }
@@ -706,6 +732,7 @@ async function refreshReportsInBackground() {
     cloudData.weeklyReports = data.weekly;
     if (data.visit) cloudData.visitRecords = data.visit;
     if (data.mgr !== undefined) cloudData.mgrReports = data.mgr;
+    if (data.sales !== undefined) cloudData.salesRecords = data.sales;
     saveReportsCache();
     const activePage = document.querySelector('.nav-item.active')?.dataset.page;
     if (activePage === 'dashboard') renderDashboard();
@@ -878,7 +905,7 @@ function navTo(page) {
   const cb = document.getElementById('contentBody');
   cb.className = 'content-body';
   // Check page permission (dashboard and settings are always allowed)
-  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','visitData','visitStats','mgrReport'];
+  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','visitData','visitStats','mgrReport','salesDetail','salesBoard'];
   if (restrictedPages.includes(page) && !hasPermission(page)) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面，请联系管理员。</div>';
     closeSidebar();
@@ -886,9 +913,9 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报'};
+  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
-  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport}[page]||(()=>{}))();
+  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard}[page]||(()=>{}))();
   closeSidebar();
   // Background refresh: silently fetch latest data (non-blocking, only for read-only pages)
   silentRefresh(page);
@@ -899,29 +926,34 @@ async function silentRefresh(page) {
   if (bgRefreshInFlight) return;
   if (Date.now() - lastRefreshTime < REFRESH_INTERVAL) return;
   // Only background-refresh read-only pages (not forms with user input)
-  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats'].includes(page)) return;
+  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard'].includes(page)) return;
   bgRefreshInFlight = true;
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
   try {
     const needVisit = hasPermission('visitData') || hasPermission('visitStats');
+    const needSales = hasPermission('salesDetail') || hasPermission('salesBoard');
     const fetches = [
       fetch(FB_BASE + '/dailyReports.json'),
       fetch(FB_BASE + '/weeklyReports.json')
     ];
-    if (needVisit) fetches.push(fetch(FB_BASE + '/visitRecords.json'));
+    let iVisit = -1, iSales = -1;
+    if (needVisit) { iVisit = fetches.length; fetches.push(fetch(FB_BASE + '/visitRecords.json')); }
+    if (needSales) { iSales = fetches.length; fetches.push(fetch(FB_BASE + '/salesRecords.json')); }
     const results = await Promise.all(fetches);
     const newDaily = results[0].ok ? Object.values(await results[0].json() || {}) : [];
     const newWeekly = results[1].ok ? Object.values(await results[1].json() || {}) : [];
-    const newVisit = results[2] && results[2].ok ? hydrateVisitRecords(await results[2].json()) : cloudData.visitRecords;
+    const newVisit = (iVisit >= 0 && results[iVisit] && results[iVisit].ok) ? hydrateVisitRecords(await results[iVisit].json()) : cloudData.visitRecords;
+    const newSales = (iSales >= 0 && results[iSales] && results[iSales].ok) ? (Object.values(await results[iSales].json() || {}) || []) : cloudData.salesRecords;
     // Only update + re-render if data count changed (new records added by others)
-    if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length) {
+    if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length || newSales.length !== cloudData.salesRecords.length) {
       cloudData.dailyReports = newDaily;
       cloudData.weeklyReports = newWeekly;
       cloudData.visitRecords = newVisit;
+      cloudData.salesRecords = newSales;
       const activePage = document.querySelector('.nav-item.active')?.dataset.page;
       if (activePage === page) {
-        ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats}[page]||(()=>{}))();
+        ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard}[page]||(()=>{}))();
       }
     }
   } catch(e) { /* silent fail */ }
@@ -981,7 +1013,8 @@ const DEFAULT_ROLE_CONFIG = {
         roleConfig: true, settings: true,
         editOthers: true, deleteOthers: true, exportData: true,
         brandConfig: true, aiConfig: true,
-        visitData: true, visitStats: true, mgrReport: true
+        visitData: true, visitStats: true, mgrReport: true,
+        salesDetail: true, salesBoard: true
       }
     },
     {
@@ -993,7 +1026,8 @@ const DEFAULT_ROLE_CONFIG = {
         roleConfig: false, settings: true,
         editOthers: true, deleteOthers: false, exportData: true,
         brandConfig: false, aiConfig: false,
-        visitData: true, visitStats: true, mgrReport: true
+        visitData: true, visitStats: true, mgrReport: true,
+        salesDetail: true, salesBoard: true
       }
     },
     {
@@ -1005,7 +1039,8 @@ const DEFAULT_ROLE_CONFIG = {
         roleConfig: false, settings: true,
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
-        visitData: false, visitStats: false, mgrReport: false
+        visitData: false, visitStats: false, mgrReport: false,
+        salesDetail: true, salesBoard: true
       }
     },
     {
@@ -1017,7 +1052,8 @@ const DEFAULT_ROLE_CONFIG = {
         roleConfig: false, settings: true,
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
-        visitData: false, visitStats: false, mgrReport: false
+        visitData: false, visitStats: false, mgrReport: false,
+        salesDetail: false, salesBoard: true
       }
     }
   ]
@@ -1031,11 +1067,11 @@ const PERMISSION_LABELS = {
   roleConfig: '角色权限配置', settings: '设置',
   editOthers: '编辑他人数据', deleteOthers: '删除他人数据', exportData: '导出数据',
   brandConfig: '品牌配置', aiConfig: 'AI模型配置',
-  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报'
+  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报', salesDetail: '业绩明细', salesBoard: '业绩看板'
 };
 
 const PERMISSION_GROUPS = [
-  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats','mgrReport'] },
+  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats','mgrReport','salesDetail','salesBoard'] },
   { title: '管理功能', keys: ['userManagement','formConfig','aiChat','roleConfig','settings','brandConfig','aiConfig'] },
   { title: '数据操作', keys: ['editOthers','deleteOthers','exportData'] }
 ];
@@ -6032,6 +6068,290 @@ function finishLoadingCountdown() {
 }
 
 // ============ Init ============
+// ============ 业绩明细 / 业绩看板 ============
+const SALES_KA_TEAMS = ['KA 一部（江浙沪区域）', 'KA 二部（广东区域）', 'KA 三部（全国区域）'];
+const SALES_STORE_CORRECTION = {
+  'KA-KA华东大区': 'KA 一部（江浙沪区域）',
+  'KA-KA全国大区': 'KA 三部（全国区域）',
+  'KA-KA华南大区': 'KA 二部（广东区域）'
+};
+function fmtSalesMoney(n) { return '¥' + Math.round(n || 0).toLocaleString('zh-CN'); }
+function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function toNum(x) { if (x == null || x === '') return 0; if (typeof x === 'number') return x; const n = parseFloat(String(x).replace(/[, ¥￥]/g, '')); return isNaN(n) ? 0 : n; }
+function salesMonthOf(d) {
+  if (!d) return '';
+  const s = (d instanceof Date) ? d.toISOString() : String(d).trim();
+  const m = s.match(/^(\d{4})[-/年.](\d{1,2})/);
+  if (m) return m[1] + '-' + String(parseInt(m[2], 10)).padStart(2, '0');
+  return '';
+}
+
+function onSalesFilePicked(e) { const f = e.target.files[0]; if (!f) return; importSalesFile(f); e.target.value = ''; }
+
+async function importSalesFile(file) {
+  if (typeof XLSX === 'undefined') { showToast('表格解析库未加载，请刷新页面后重试', 'error', 4000); return; }
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    if (!rows.length) { showToast('文件无数据', 'error'); return; }
+    const headers = Object.keys(rows[0]);
+    if (!headers.includes('销售员所属门店')) {
+      showToast('表头校验失败：缺少必需列「销售员所属门店」', 'error', 5000);
+      return;
+    }
+    const get = (r, name) => (r[name] == null ? '' : r[name]);
+    const existingKeys = new Set(cloudData.salesRecords.map(e => e.docNo).filter(Boolean));
+    const batchKeys = new Set();
+    let total = rows.length, kept = 0, filtered = 0, dup = 0;
+    const corrected = { 'KA 一部（江浙沪区域）': 0, 'KA 二部（广东区域）': 0, 'KA 三部（全国区域）': 0 };
+    const toAdd = [];
+    for (const r of rows) {
+      const storeRaw = String(get(r, '销售员所属门店') || '').trim();
+      if (!storeRaw.startsWith('KA-')) { filtered++; continue; }
+      const team = SALES_STORE_CORRECTION[storeRaw] || storeRaw;
+      corrected[team] = (corrected[team] || 0) + 1;
+      const docNo = String(get(r, '单据编号') || '').trim();
+      const key = docNo || (String(get(r, '销售员') || '') + '|' + String(get(r, '单据日期') || '') + '|' + String(get(r, '商品名称') || ''));
+      if ((docNo && existingKeys.has(docNo)) || batchKeys.has(key)) { dup++; continue; }
+      batchKeys.add(key);
+      const docDate = String(get(r, '单据日期') || '');
+      const rec = {
+        id: genId(),
+        salesperson: String(get(r, '销售员') || '').trim(),
+        storeRaw: storeRaw,
+        team: team,
+        docDate: docDate,
+        docMonth: salesMonthOf(docDate),
+        amount: toNum(get(r, '折后金额')),
+        grossProfit: toNum(get(r, '毛利润')),
+        productName: String(get(r, '商品名称') || '').trim(),
+        docNo: docNo,
+        docType: String(get(r, '单据类别') || '').trim(),
+        status: String(get(r, '状态') || '').trim(),
+        customer: String(get(r, '客户') || '').trim(),
+        raw: r,
+        createdAt: new Date().toISOString()
+      };
+      toAdd.push(rec);
+      kept++;
+    }
+    if (toAdd.length) {
+      for (const rec of toAdd) { await apiCreate('salesRecords', rec); }
+      cloudData.salesRecords = cloudData.salesRecords.concat(toAdd);
+      saveReportsCache();
+    }
+    showModal('导入完成', `<div class="import-note">
+      <div>📄 文件共 <b>${total}</b> 行</div>
+      <div>🔽 过滤非 KA 部门整行：<span class="no">${filtered}</span> 行</div>
+      <div>✅ 保留 KA 部门：<span class="ok">${kept}</span> 行</div>
+      <div>⚠️ 跳过重复：<span class="no">${dup}</span> 行</div>
+      <div>🔄 门店校正：一部 ×${corrected['KA 一部（江浙沪区域）'] || 0} / 二部 ×${corrected['KA 二部（广东区域）'] || 0} / 三部 ×${corrected['KA 三部（全国区域）'] || 0}</div>
+    </div><div class="modal-footer"><button class="btn btn-primary" onclick="closeModal()">确定</button></div>`);
+    renderSalesDetail();
+  } catch (e) {
+    showToast('导入失败：' + e.message, 'error', 5000);
+  }
+}
+
+function openAddSalesModal() {
+  const teamOpts = SALES_KA_TEAMS.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  showModal('新增业绩记录', `<form onsubmit="return saveSalesRecord(event,null)">
+    <div class="form-group"><label>销售员 <span class="req">*</span></label><input type="text" class="form-control" id="sSalesperson" required></div>
+    <div class="form-group"><label>销售员所属门店（团队） <span class="req">*</span></label><select class="form-control" id="sTeam" required>${teamOpts}</select></div>
+    <div class="form-group"><label>单据日期 <span class="req">*</span></label><input type="date" class="form-control" id="sDocDate" required></div>
+    <div class="form-group"><label>折后金额（元）</label><input type="number" step="0.01" class="form-control" id="sAmount" value="0"></div>
+    <div class="form-group"><label>毛利润（元）</label><input type="number" step="0.01" class="form-control" id="sGross" value="0"></div>
+    <div class="form-group"><label>商品名称</label><input type="text" class="form-control" id="sProduct"></div>
+    <div class="form-group"><label>单据编号</label><input type="text" class="form-control" id="sDocNo"></div>
+    <div class="form-group"><label>单据类别</label><input type="text" class="form-control" id="sDocType" value="销售单"></div>
+    <div class="form-group"><label>状态</label><input type="text" class="form-control" id="sStatus" value="已审核"></div>
+    <div class="form-group"><label>客户</label><input type="text" class="form-control" id="sCustomer"></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="submit" class="btn btn-primary">保存</button></div>
+  </form>`);
+}
+
+function editSalesRecord(id) {
+  const r = cloudData.salesRecords.find(x => x.id === id); if (!r) return;
+  const teamOpts = SALES_KA_TEAMS.map(t => `<option value="${esc(t)}" ${t === r.team ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  showModal('编辑业绩记录', `<form onsubmit="return saveSalesRecord(event,'${id}')">
+    <div class="form-group"><label>销售员 <span class="req">*</span></label><input type="text" class="form-control" id="sSalesperson" value="${esc(r.salesperson)}" required></div>
+    <div class="form-group"><label>销售员所属门店（团队） <span class="req">*</span></label><select class="form-control" id="sTeam" required>${teamOpts}</select></div>
+    <div class="form-group"><label>单据日期 <span class="req">*</span></label><input type="date" class="form-control" id="sDocDate" value="${esc((r.docDate || '').slice(0, 10))}" required></div>
+    <div class="form-group"><label>折后金额（元）</label><input type="number" step="0.01" class="form-control" id="sAmount" value="${toNum(r.amount)}"></div>
+    <div class="form-group"><label>毛利润（元）</label><input type="number" step="0.01" class="form-control" id="sGross" value="${toNum(r.grossProfit)}"></div>
+    <div class="form-group"><label>商品名称</label><input type="text" class="form-control" id="sProduct" value="${esc(r.productName)}"></div>
+    <div class="form-group"><label>单据编号</label><input type="text" class="form-control" id="sDocNo" value="${esc(r.docNo)}"></div>
+    <div class="form-group"><label>单据类别</label><input type="text" class="form-control" id="sDocType" value="${esc(r.docType)}"></div>
+    <div class="form-group"><label>状态</label><input type="text" class="form-control" id="sStatus" value="${esc(r.status)}"></div>
+    <div class="form-group"><label>客户</label><input type="text" class="form-control" id="sCustomer" value="${esc(r.customer)}"></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="submit" class="btn btn-primary">保存</button></div>
+  </form>`);
+}
+
+async function saveSalesRecord(e, id) {
+  e.preventDefault();
+  const docDate = document.getElementById('sDocDate').value;
+  const team = document.getElementById('sTeam').value;
+  const rec = {
+    salesperson: document.getElementById('sSalesperson').value.trim(),
+    storeRaw: team,
+    team: team,
+    docDate: docDate,
+    docMonth: salesMonthOf(docDate),
+    amount: toNum(document.getElementById('sAmount').value),
+    grossProfit: toNum(document.getElementById('sGross').value),
+    productName: document.getElementById('sProduct').value.trim(),
+    docNo: document.getElementById('sDocNo').value.trim(),
+    docType: document.getElementById('sDocType').value.trim(),
+    status: document.getElementById('sStatus').value.trim(),
+    customer: document.getElementById('sCustomer').value.trim()
+  };
+  try {
+    if (id) {
+      rec.id = id;
+      await apiUpdate('salesRecords', id, rec);
+      const i = cloudData.salesRecords.findIndex(x => x.id === id);
+      if (i >= 0) cloudData.salesRecords[i] = { ...cloudData.salesRecords[i], ...rec };
+    } else {
+      rec.id = genId();
+      rec.createdAt = new Date().toISOString();
+      await apiCreate('salesRecords', rec);
+      cloudData.salesRecords.push(rec);
+    }
+    saveReportsCache();
+    closeModal();
+    renderSalesDetail();
+    showToast('保存成功', 'success');
+  } catch (err) { showToast('保存失败: ' + err.message, 'error'); }
+  return false;
+}
+
+async function deleteSalesRecord(id) {
+  if (!confirm('确定删除该业绩记录？')) return;
+  try {
+    await apiDelete('salesRecords', id);
+    cloudData.salesRecords = cloudData.salesRecords.filter(x => x.id !== id);
+    saveReportsCache();
+    renderSalesDetail();
+    showToast('已删除', 'success');
+  } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
+}
+
+async function renderSalesDetail() {
+  const canEdit = hasPermission('salesDetail');
+  const recs = cloudData.salesRecords.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
+  const totalAmount = recs.reduce((s, r) => s + toNum(r.amount), 0);
+  const totalGp = recs.reduce((s, r) => s + toNum(r.grossProfit), 0);
+  const teamMap = {};
+  recs.forEach(r => { teamMap[r.team] = (teamMap[r.team] || 0) + toNum(r.amount); });
+  const teamPills = Object.keys(teamMap).map(t => `<div class="team-pill"><div class="t">${esc(t)}</div><div class="a">${fmtSalesMoney(teamMap[t])}</div></div>`).join('');
+  const colCount = canEdit ? 10 : 9;
+  const rowsHtml = recs.map(r => `<tr>
+    <td>${esc(r.salesperson) || '-'}</td>
+    <td><span class="badge badge-team">${esc(r.team) || '-'}</span></td>
+    <td>${esc(r.docDate) || '-'}</td>
+    <td class="num">${fmtSalesMoney(toNum(r.amount))}</td>
+    <td class="num">${fmtSalesMoney(toNum(r.grossProfit))}</td>
+    <td>${esc(r.productName)}</td>
+    <td>${esc(r.docNo)}</td>
+    <td>${esc(r.docType)}</td>
+    <td>${esc(r.status)}</td>
+    ${canEdit ? `<td><button class="btn btn-outline btn-sm" onclick="editSalesRecord('${r.id}')">编辑</button> <button class="btn btn-danger btn-sm" onclick="deleteSalesRecord('${r.id}')">删除</button></td>` : ''}
+  </tr>`).join('');
+  const html = `
+  <div class="card">
+    <div class="card-header"><h4>📥 数据导入 / 手动新增</h4>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('salesFilePick').click()">📥 导入表格</button>
+        ${canEdit ? `<button class="btn btn-outline btn-sm" onclick="openAddSalesModal()">➕ 手动新增</button>` : ''}
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="import-note">
+        <div>📄 导入说明：系统仅保留 <b>KA 部门</b> 数据。导入时校验表头「销售员所属门店」，自动过滤非 KA 整行，并按规则校正门店名称。</div>
+        <div>🔄 门店校正：KA-KA华东大区→<b>KA 一部（江浙沪区域）</b>；KA-KA全国大区→<b>KA 三部（全国区域）</b>；KA-KA华南大区→<b>KA 二部（广东区域）</b>。</div>
+        <div>⚠️ 已存在相同「单据编号」的记录将被跳过，避免重复导入。</div>
+      </div>
+      <input type="file" id="salesFilePick" accept=".xlsx,.xls,.csv" style="display:none" onchange="onSalesFilePicked(event)">
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h4>📊 业绩汇总</h4></div>
+    <div class="card-body">
+      <div class="stat-row">
+        <div class="stat-box"><div class="v">${fmtSalesMoney(totalAmount)}</div><div class="l">KA 总业绩（折后金额净额）</div></div>
+        <div class="stat-box"><div class="v">${fmtSalesMoney(totalGp)}</div><div class="l">KA 总毛利润</div></div>
+        <div class="stat-box"><div class="v">${recs.length}</div><div class="l">单据笔数</div></div>
+      </div>
+      <div class="team-summary">${teamPills || '<span style="color:var(--gray-400);font-size:13px">暂无数据</span>'}</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h4>📋 业绩明细（共 ${recs.length} 条）</h4></div>
+    <div class="card-body"><div class="table-wrap"><table><thead><tr><th>销售员</th><th>团队/门店</th><th>单据日期</th><th class="num">折后金额</th><th class="num">毛利润</th><th>商品名称</th><th>单据编号</th><th>单据类别</th><th>状态</th>${canEdit ? '<th>操作</th>' : ''}</tr></thead><tbody>${rowsHtml || `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:30px">暂无数据，请导入或新增</td></tr>`}</tbody></table></div></div>
+  </div>`;
+  document.getElementById('contentBody').innerHTML = html;
+}
+
+function monthOpts() { let s = ''; for (let m = 1; m <= 12; m++) { const v = String(m).padStart(2, '0'); s += `<option value="${v}">${v}月</option>`; } return s; }
+function sbSyncTo() { const f = document.getElementById('sbMFrom'), t = document.getElementById('sbMTo'); if (+f.value > +t.value) t.value = f.value; }
+function sbReset() { document.getElementById('sbMFrom').value = '01'; document.getElementById('sbMTo').value = '12'; renderSalesBoards(); }
+function sbMonthList() { const y = document.getElementById('sbYear').value; const mf = document.getElementById('sbMFrom').value, mt = document.getElementById('sbMTo').value; const out = []; for (let m = +mf; m <= +mt; m++) out.push(y + '-' + String(m).padStart(2, '0')); return out; }
+
+async function renderSalesBoard() {
+  const records = cloudData.salesRecords;
+  const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
+  const html = `<div class="card">
+    <div class="card-header"><h4>🗓️ 时间筛选（年度为报表范围）</h4></div>
+    <div class="card-body"><div class="filter-bar">
+      <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="sbYear" onchange="renderSalesBoards()">${yearOpts}</select></div>
+      <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="sbMFrom" onchange="sbSyncTo();renderSalesBoards()">${monthOpts()}</select></div>
+      <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="sbMTo" onchange="renderSalesBoards()">${monthOpts()}</select></div>
+      <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="sbReset()">重置为全年</button></div>
+    </div></div>
+  </div>
+  <div class="card"><div class="card-header"><h4>📊 报表看板1 · 销售业绩统计</h4><span style="font-size:12px;color:var(--gray-500)">销售员（纵向）× 月份（横向）</span></div><div class="card-body"><div class="table-wrap"><table id="sbBoard1"></table></div></div></div>
+  <div class="card"><div class="card-header"><h4>📊 报表看板2 · 团队业绩统计</h4><span style="font-size:12px;color:var(--gray-500)">团队/门店（纵向）× 月份（横向）</span></div><div class="card-body"><div class="table-wrap"><table id="sbBoard2"></table></div></div></div>`;
+  document.getElementById('contentBody').innerHTML = html;
+  document.getElementById('sbMFrom').value = '01';
+  document.getElementById('sbMTo').value = '12';
+  renderSalesBoards();
+}
+
+function renderSalesBoards() { renderSalesBoardTable('sbBoard1', 'salesperson'); renderSalesBoardTable('sbBoard2', 'team'); }
+
+function renderSalesBoardTable(tid, key) {
+  const months = sbMonthList();
+  const map = {};
+  cloudData.salesRecords.forEach(r => {
+    const dm = r.docMonth || '';
+    if (!months.includes(dm)) return;
+    const k = r[key] || '(未分类)';
+    if (!map[k]) map[k] = {};
+    map[k][dm] = (map[k][dm] || 0) + toNum(r.amount);
+  });
+  const rowsArr = Object.keys(map).map(k => ({ k, t: months.reduce((s, m) => s + (map[k][m] || 0), 0) })).sort((a, b) => b.t - a.t);
+  let h = '<thead><tr><th>' + (key === 'salesperson' ? '销售员' : '团队/门店') + '</th>';
+  months.forEach(m => h += `<th class="num">${m.slice(5)}月</th>`);
+  h += '<th class="num">合计</th></tr></thead><tbody>';
+  const colTot = {};
+  rowsArr.forEach(row => {
+    h += `<tr><td>${key === 'team' ? `<span class="badge badge-team">${esc(row.k)}</span>` : esc(row.k)}</td>`;
+    months.forEach(m => { const v = map[row.k][m] || 0; colTot[m] = (colTot[m] || 0) + v; h += `<td class="num">${fmtSalesMoney(v)}</td>`; });
+    h += `<td class="num">${fmtSalesMoney(row.t)}</td></tr>`;
+  });
+  h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
+  let gt = 0;
+  months.forEach(m => { gt += (colTot[m] || 0); h += `<td class="num">${fmtSalesMoney(colTot[m] || 0)}</td>`; });
+  h += `<td class="num">${fmtSalesMoney(gt)}</td></tr></tfoot>`;
+  document.getElementById(tid).innerHTML = h;
+}
+
 (async function init() {
   // Start loading background image IMMEDIATELY (has nothing to do with Firebase)
   const bgImg = new Image();
