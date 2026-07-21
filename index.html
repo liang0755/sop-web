@@ -643,6 +643,13 @@ async function loadCoreData() {
           roleChanged = true;
         }
       });
+      // Ensure super admin (key='admin') ALWAYS has every permission, regardless of stored data
+      const superAdmin = cloudData.roleConfig.roles.find(r => r.key === 'admin');
+      if (superAdmin && superAdmin.permissions) {
+        Object.keys(PERMISSION_LABELS).forEach(p => {
+          if (superAdmin.permissions[p] !== true) { superAdmin.permissions[p] = true; roleChanged = true; }
+        });
+      }
       if (roleChanged) {
         try { await fetch(FB_BASE + '/roleConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.roleConfig)}); } catch(e) {}
       }
@@ -2915,7 +2922,7 @@ function renderRoleConfig() {
   body.innerHTML = `
     <div id="roleConfigAlert"></div>
     <div style="margin-bottom:16px;padding:12px 16px;background:var(--primary-light);border:1px solid #93c5fd;border-radius:8px;font-size:13px;color:var(--primary)">
-      💡 配置每个角色可访问的页面和操作权限。修改后点击保存即生效。超级管理员权限不可修改。
+      💡 配置每个角色可访问的页面和操作权限。修改后点击保存即生效。超级管理员默认开放系统内<b>全部权限</b>，不可修改。
     </div>
     ${cfg.roles.map((role, idx) => {
       const isLocked = role.key === 'admin';
@@ -2930,18 +2937,19 @@ function renderRoleConfig() {
           </div>
           <div style="display:flex;align-items:center;gap:10px">
             <span style="font-size:12px;color:var(--gray-500)">${count} 个用户</span>
-            ${isLocked ? '<span style="font-size:11px;color:var(--gray-400)">🔒 锁定</span>' : ''}
+            ${isLocked ? '<span style="font-size:11px;color:var(--success)">🔓 开放全部权限</span>' : ''}
           </div>
         </div>
         <div class="card-body">
+          ${isLocked ? `<div style="margin-bottom:12px;padding:8px 12px;background:var(--success-light);border:1px solid var(--success);border-radius:6px;font-size:12px;color:var(--success)">✅ 超级管理员拥有系统内的<b>全部权限</b>，此角色不可被编辑或取消任何权限。</div>` : ''}
           ${PERMISSION_GROUPS.map(group => `
             <div style="margin-bottom:12px">
               <div style="font-size:12px;font-weight:600;color:var(--gray-600);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">${group.title}</div>
               <div style="display:flex;flex-wrap:wrap;gap:10px">
                 ${group.keys.map(perm => {
-                  const checked = role.permissions[perm] === true;
+                  const checked = isLocked ? true : (role.permissions[perm] === true);
                   const label = PERMISSION_LABELS[perm] || perm;
-                  return `<label style="display:flex;align-items:center;gap:6px;cursor:${isLocked?'default':'pointer'};padding:6px 12px;border-radius:6px;background:${checked?'var(--success-light)':'var(--gray-50)'};border:1px solid ${checked?'var(--success)':'var(--gray-200)'};font-size:13px;${isLocked?'opacity:0.7':''}">
+                  return `<label style="display:flex;align-items:center;gap:6px;cursor:${isLocked?'default':'pointer'};padding:6px 12px;border-radius:6px;background:${checked?'var(--success-light)':'var(--gray-50)'};border:1px solid ${checked?'var(--success)':'var(--gray-200)'};font-size:13px">
                     <input type="checkbox" ${checked?'checked':''} ${isLocked?'disabled':''} onchange="updateRolePermission(${idx},'${perm}',this.checked)" style="cursor:${isLocked?'default':'pointer'}">
                     <span style="font-weight:${checked?'600':'400'};color:${checked?'var(--success)':'var(--gray-600)'}">${label}</span>
                   </label>`;
