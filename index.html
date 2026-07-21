@@ -4836,17 +4836,29 @@ async function handleVisitUpload(input) {
     });
     const newRecords = [];
     let dupCount = 0;
-    // Keys already in DB (contactTime|employee|customer) — duplicates to be filtered out
-    const existingKeys = new Set(cloudData.visitRecords.map(e => (e.contactTime||'') + '|' + (e.employee||'') + '|' + (e.customer||'')));
+    // 查重 key = 联系时间|客户|联系人|手机号|签到事件|员工|部门|签到地址|备注（不含拜访结果、卡点说明）
+    const buildDupKey = (o) => [normContactTime(o.contactTime||''), o.customer||'', o.contactPerson||'', o.phone||'', o.signinEvent||'', o.employee||'', canonDept(o.department||''), o.signinAddress||'', o.remark||''].map(v => (v||'').trim()).join('|');
+    // Keys already in DB — duplicates to be filtered out
+    const existingKeys = new Set(cloudData.visitRecords.map(e => buildDupKey(e)));
     // Keys already added in this batch — avoid within-file duplicates too
     const batchKeys = new Set();
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
       if (!r[colMap.contactTime] && !r[colMap.employee]) continue;
       const contactTime = normContactTime(r[colMap.contactTime] || '');
-      const employee = r[colMap.employee] || '';
       const customer = r[colMap.customer] || '';
-      const key = contactTime + '|' + employee + '|' + customer;
+      const employee = r[colMap.employee] || '';
+      const key = buildDupKey({
+        contactTime: contactTime,
+        customer: customer,
+        contactPerson: r[colMap.contactPerson] || '',
+        phone: r[colMap.phone] || '',
+        signinEvent: r[colMap.signinEvent] || '',
+        employee: employee,
+        department: r[colMap.department] || '',
+        signinAddress: r[colMap.signinAddress] || '',
+        remark: r[colMap.remark] || ''
+      });
       // Skip duplicates: already in DB or already in this batch → auto filter out
       if (existingKeys.has(key) || batchKeys.has(key)) {
         dupCount++;
