@@ -6578,8 +6578,6 @@ async function renderSalesDetail() {
   }).join('');
   // 分页
   const totalRows = all.length;
-  const avgAmount = totalRows ? totalAmount / totalRows : 0;
-  const avgCustomerAmount = custCount ? totalAmount / custCount : 0;
   const totalPages = Math.max(1, Math.ceil(totalRows / salesDetailPageSize));
   if (salesDetailPage > totalPages) salesDetailPage = totalPages;
   if (salesDetailPage < 1) salesDetailPage = 1;
