@@ -6380,9 +6380,10 @@ async function importSalesFile(file) {
         docType: String(get(r, '单据类别') || '').trim(),
         status: String(get(r, '状态') || '').trim(),
         customer: String(get(r, '客户') || '').trim(),
-        customerSource: String(get(r, '客户来源') || get(r, '来源端口') || '').trim(),
-        category: String(get(r, '品类') || get(r, '分类') || '').trim(),
-        customerProfile: String(get(r, '客户画像') || get(r, '客户标签') || '').trim(),
+        // 客户来源/品类/客户画像：不允许自动填充，留空由用户在「客户汇总数据」手动选择配置项
+        customerSource: '',
+        category: '',
+        customerProfile: '',
         raw: r,
         createdAt: new Date().toISOString()
       };
@@ -6841,9 +6842,12 @@ function aggregateSourceSummary(year) {
     if (!g.customerSource && r.customerSource) g.customerSource = r.customerSource;
   });
   // 第二步：按客户来源 + 月份聚合（单数=去重客户数）
+  // 只认可表单配置中的来源选项；非配置值（如导入残留的"生意通/销货宝"）归入「(未设置)」
+  const cfgSrc = (cloudData.formConfig && cloudData.formConfig.customerTags && cloudData.formConfig.customerTags.customerSource) || [];
   const srcMap = {};
   Object.values(groups).forEach(g => {
-    const src = g.customerSource || '(未设置)';
+    let src = g.customerSource || '(未设置)';
+    if (src !== '(未设置)' && !cfgSrc.includes(src)) src = '(未设置)';
     const mm = g.docMonth.slice(5);
     if (!srcMap[src]) srcMap[src] = {};
     if (!srcMap[src][mm]) srcMap[src][mm] = { countSet: new Set(), amount: 0 };
