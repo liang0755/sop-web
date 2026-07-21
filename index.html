@@ -6542,12 +6542,12 @@ async function renderSalesDetail() {
   const all = base.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
   const totalAmount = all.reduce((s, r) => s + toNum(r.amount), 0);
   const custCount = new Set(all.map(r => r.customer).filter(Boolean)).size;
-  const avgAmount = totalRows ? totalAmount / totalRows : 0;
   const teamMap = {};
   all.forEach(r => { teamMap[r.team] = (teamMap[r.team] || 0) + toNum(r.amount); });
   const teamPills = Object.keys(teamMap).map(t => `<div class="team-pill"><div class="t">${esc(t)}</div><div class="a">${fmtSalesMoney(teamMap[t])}</div></div>`).join('');
   // 分页
   const totalRows = all.length;
+  const avgAmount = totalRows ? totalAmount / totalRows : 0;
   const totalPages = Math.max(1, Math.ceil(totalRows / salesDetailPageSize));
   if (salesDetailPage > totalPages) salesDetailPage = totalPages;
   if (salesDetailPage < 1) salesDetailPage = 1;
