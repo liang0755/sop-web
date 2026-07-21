@@ -5767,75 +5767,85 @@ function loadVisitStats() {
   const unmarked = totalVisits - totalResulted;
   summaryCards += `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:var(--gray-400)">${unmarked}</div><div style="font-size:12px;color:var(--gray-500)">未标记</div></div>`;
   let summaryHtml = `<div class="card" style="margin-bottom:16px"><div class="card-header"><h4>📋 全部汇总（${s || '全部'} 至 ${e || '全部'}）</h4></div><div class="card-body"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px">${summaryCards}</div></div></div>`;
-  // ===== 按部门→拜访结果分组 =====
+  // ===== 按部门→拜访结果分组（矩阵表：行=拜访结果，列=部门，最后一列=汇总） =====
   const deptGroups = {};
   records.forEach(r => {
     const dept = canonDept(r.department || '未分组');
     if (!deptGroups[dept]) deptGroups[dept] = [];
     deptGroups[dept].push(r);
   });
-  const dColors = ['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
-  let groupHtml = '';
-  let ci = 0;
-  Object.keys(deptGroups).sort().forEach(dept => {
-    const deptRecords = deptGroups[dept];
-    const color = dColors[ci % dColors.length]; ci++;
-    const resultCounts = {};
-    allResults.forEach(r => { resultCounts[r] = 0; });
-    resultCounts['未标记'] = 0;
-    deptRecords.forEach(r => {
-      const vr = r.visitResult || '未标记';
-      if (resultCounts[vr] === undefined) resultCounts[vr] = 0;
-      resultCounts[vr]++;
-    });
-    // Stat bar
-    const statBar = Object.keys(resultCounts).filter(k => resultCounts[k] > 0).map(k => {
-      const kColor = k === '未标记' ? 'var(--gray-400)' : (colors[allResults.indexOf(k) % colors.length] || 'var(--primary)');
-      return `<div style="text-align:center;padding:8px 6px;background:var(--gray-50);border-radius:6px"><div style="font-size:16px;font-weight:700;color:${kColor}">${resultCounts[k]}</div><div style="font-size:10px;color:var(--gray-500)">${k}</div></div>`;
-    }).join('');
-    // Detail table
-    const detailRows = Object.keys(resultCounts).filter(k => resultCounts[k] > 0).map(k => {
-      const kColor = k === '未标记' ? 'var(--gray-400)' : (colors[allResults.indexOf(k) % colors.length] || 'var(--primary)');
-      const empSet = [...new Set(deptRecords.filter(r => (r.visitResult || '未标记') === k).map(r => r.employee))];
-      const sampleEmployees = empSet.slice(0, 5).join(', ');
-      return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${kColor};margin-right:6px"></span><strong>${k}</strong></td><td style="text-align:center">${resultCounts[k]}</td><td style="color:var(--gray-500);font-size:12px">${sampleEmployees}${empSet.length > 5 ? '...' : ''}</td></tr>`;
-    }).join('');
-    groupHtml += `<div class="card" style="margin-bottom:16px;overflow:hidden">
-      <div class="card-header" style="border-left:4px solid ${color};padding:12px 16px;background:var(--gray-50)">
-        <h4 style="display:flex;align-items:center;gap:8px;font-size:15px;margin:0">
-          📍 ${dept}
-          <span style="font-size:12px;font-weight:400;color:var(--gray-500);background:var(--gray-100);padding:2px 10px;border-radius:10px">${deptRecords.length}次拜访</span>
-        </h4>
-      </div>
-      <div class="card-body" style="padding:16px">
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;margin-bottom:16px">${statBar}</div>
-        <div class="table-wrap"><table style="font-size:13px"><thead><tr><th>拜访结果</th><th style="width:80px;text-align:center">次数</th><th>销售人员</th></tr></thead><tbody>
-          ${detailRows}
-          <tr style="font-weight:700;background:var(--gray-50);border-top:2px solid ${color}"><td>小计</td><td style="text-align:center">${deptRecords.length}</td><td></td></tr>
-        </tbody></table></div>
-      </div>
-    </div>`;
+  const depts = Object.keys(deptGroups).sort();
+  const resultLabels = [...allResults, '未标记'];
+  const countMap = {};
+  resultLabels.forEach(res => { countMap[res] = {}; depts.forEach(dept => { countMap[res][dept] = 0; }); });
+  records.forEach(r => {
+    const dept = canonDept(r.department || '未分组');
+    const res = r.visitResult || '未标记';
+    if (countMap[res] && countMap[res][dept] !== undefined) countMap[res][dept]++;
   });
+  const deptTotals = {};
+  depts.forEach(dept => { deptTotals[dept] = deptGroups[dept].length; });
+  const resultTotals = {};
+  resultLabels.forEach(res => {
+    resultTotals[res] = depts.reduce((sum, dept) => sum + countMap[res][dept], 0);
+  });
+  const grandTotal = records.length;
+  const dColors = ['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
+  // 矩阵表主体
+  const matrixRows = resultLabels.filter(res => resultTotals[res] > 0).map(res => {
+    const kColor = res === '未标记' ? 'var(--gray-400)' : (colors[allResults.indexOf(res) % colors.length] || 'var(--primary)');
+    const deptCells = depts.map((dept, idx) => {
+      const val = countMap[res][dept];
+      const color = dColors[idx % dColors.length];
+      return `<td style="text-align:center;${val ? 'font-weight:600;color:' + color : 'color:var(--gray-300)'}">${val || '-'}</td>`;
+    }).join('');
+    return `<tr>
+      <td style="min-width:140px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${kColor};margin-right:6px"></span><strong>${res}</strong></td>
+      ${deptCells}
+      <td style="text-align:center;font-weight:700;background:var(--gray-50)">${resultTotals[res]}</td>
+    </tr>`;
+  }).join('');
+  const totalRow = `<tr style="font-weight:700;background:var(--gray-100);border-top:2px solid var(--gray-300)">
+    <td>汇总</td>
+    ${depts.map(dept => `<td style="text-align:center">${deptTotals[dept]}</td>`).join('')}
+    <td style="text-align:center;background:var(--primary-light);color:var(--primary)">${grandTotal}</td>
+  </tr>`;
+  const groupHtml = `<div class="card" style="margin-bottom:16px;overflow:hidden">
+    <div class="card-header" style="background:var(--gray-50)">
+      <h4 style="font-size:15px;margin:0">🏢 各团队拜访卡点汇总</h4>
+    </div>
+    <div class="card-body" style="padding:16px">
+      <div class="table-wrap">
+        <table style="font-size:13px;min-width:${220 + depts.length * 110}px">
+          <thead>
+            <tr>
+              <th style="min-width:140px">拜访结果</th>
+              ${depts.map(dept => `<th style="text-align:center;min-width:110px">${dept}</th>`).join('')}
+              <th style="text-align:center;min-width:80px">汇总</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${matrixRows}
+            ${totalRow}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>`;
   if (visitStatsTab === 'person') {
     c.innerHTML = renderPersonVisitStats(records, s, e);
   } else if (visitStatsTab === 'teamType') {
     c.innerHTML = renderTeamTypeVisitStats(records, s, e);
   } else {
-    // 捕获导出数据（部门 × 拜访结果）
-    const tcHeaders = ['部门', '拜访结果', '次数', '销售人员'];
+    // 捕获导出数据（拜访结果 × 部门矩阵）
+    const tcHeaders = ['拜访结果', ...depts, '汇总'];
     const tcRows = [];
-    Object.keys(deptGroups).sort().forEach(dept => {
-      const deptRecords = deptGroups[dept];
-      const rc = {};
-      allResults.forEach(r => rc[r] = 0); rc['未标记'] = 0;
-      deptRecords.forEach(r => { const vr = r.visitResult || '未标记'; if (rc[vr] === undefined) rc[vr] = 0; rc[vr]++; });
-      Object.keys(rc).filter(k => rc[k] > 0).forEach(k => {
-        const empSet = [...new Set(deptRecords.filter(r => (r.visitResult || '未标记') === k).map(r => r.employee))];
-        tcRows.push([dept, k, rc[k], empSet.join('、')]);
-      });
+    resultLabels.filter(res => resultTotals[res] > 0).forEach(res => {
+      tcRows.push([res, ...depts.map(dept => countMap[res][dept]), resultTotals[res]]);
     });
+    tcRows.push(['汇总', ...depts.map(dept => deptTotals[dept]), grandTotal]);
     window.__teamCardExport = { s, e, headers: tcHeaders, rows: tcRows };
-    const exportBar = `<div style="text-align:right;margin-bottom:12px"><button class="btn btn-sm btn-outline" onclick="exportTeamCardCsv()">⬇️ 导出筛选结果（部门×拜访结果）</button></div>`;
+    const exportBar = `<div style="text-align:right;margin-bottom:12px"><button class="btn btn-sm btn-outline" onclick="exportTeamCardCsv()">⬇️ 导出筛选结果</button></div>`;
     c.innerHTML = exportBar + summaryHtml + groupHtml;
   }
 }
