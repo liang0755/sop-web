@@ -7114,14 +7114,12 @@ function renderCustomerSummary() {
     const opts = (cfg[group] || []);
     const encKey = encodeURIComponent(aggKey);
     const styleBase = "width:100%;min-width:90px;padding:4px 8px;height:auto;font-size:13px";
-    const inCfg = curVal && opts.includes(curVal);
-    const styleColor = inCfg ? csTagColorStyle(curVal, opts) : '';
+    // 只认可表单配置内的值；真实数据值不再自动回填，也不在选项列表里出现
+    const effectiveVal = curVal && opts.includes(curVal) ? curVal : '';
+    const styleColor = effectiveVal ? csTagColorStyle(effectiveVal, opts) : '';
     let h = `<select class="form-control cs-tag-select" data-group="${group}" style="${styleBase}${styleColor ? ';' + styleColor : ''}" ${canEdit ? '' : 'disabled'} onchange="saveCustomerTag('${group}','${encKey}',encodeURIComponent(this.value));csPaintTag(this)"><option value="">未设置</option>`;
-    if (curVal && !inCfg) {
-      h += `<option value="${esc(curVal)}" selected style="font-style:italic;color:var(--gray-600)">${esc(curVal)}（数据值）</option>`;
-    }
     opts.forEach(o => {
-      const selected = (curVal === o) ? 'selected' : '';
+      const selected = (effectiveVal === o) ? 'selected' : '';
       h += `<option value="${esc(o)}" ${selected}>${esc(o)}</option>`;
     });
     h += '</select>';
