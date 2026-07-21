@@ -3415,7 +3415,7 @@ function renderSettings() {
     </div>
     <div class="card-body collapsible-body${aiConfigCollapsed?' collapsed':''}">
       <div id="aiConfigAlert"></div>
-      <div style="margin-bottom:16px;font-size:12px;color:var(--gray-500)">配置大模型API后，可在左侧导航栏"🤖 AI助手"页面与AI对话。AI将读取系统全部数据（用户、日报、周报、渠道配置）进行分析。支持OpenAI兼容的API格式。</div>
+      <div style="margin-bottom:16px;font-size:12px;color:var(--gray-500)">配置大模型API后，可在左侧导航栏"🤖 AI助手"页面与AI对话。AI将读取系统全部数据（用户、日报、周报、拜访数据、渠道配置）进行分析。支持OpenAI兼容的API格式。</div>
       <div class="ai-config-grid">
         <div class="form-group">
           <label>API提供商</label>
@@ -3649,6 +3649,21 @@ function buildAIContext() {
     return { user: u.name || r.name || '未知', department: u.department || r.department || '', weekStart: r.weekStart, weekEnd: r.weekEnd, channels };
   }).sort((a, b) => (a.weekStart || '').localeCompare(b.weekStart || ''));
 
+  // Compile visit records (拜访数据)
+  const visitData = (cloudData.visitRecords || []).map(r => ({
+    contactTime: r.contactTime || '',
+    employee: r.employee || '',
+    department: r.department || '',
+    customer: r.customer || '',
+    contactPerson: r.contactPerson || '',
+    phone: r.phone || '',
+    signinEvent: r.signinEvent || '',
+    signinAddress: r.signinAddress || '',
+    visitResult: r.visitResult || '',
+    blockerNote: r.blockerNote || '',
+    remark: r.remark || ''
+  })).sort((a, b) => (a.contactTime || '').localeCompare(b.contactTime || ''));
+
   const activeUsers = cloudData.users.filter(u => u.active);
   const context = {
     systemDate: new Date().toLocaleDateString('zh-CN'),
@@ -3658,20 +3673,25 @@ function buildAIContext() {
       dailyReportCount: cloudData.dailyReports.length,
       weeklyReportCount: cloudData.weeklyReports.length,
       dailyDateRange: dailyData.length > 0 ? {earliest: dailyData[0].date, latest: dailyData[dailyData.length-1].date} : null,
-      weeklyDateRange: weeklyData.length > 0 ? {earliest: weeklyData[0].weekStart, latest: weeklyData[weeklyData.length-1].weekStart} : null
+      weeklyDateRange: weeklyData.length > 0 ? {earliest: weeklyData[0].weekStart, latest: weeklyData[weeklyData.length-1].weekStart} : null,
+      visitRecordCount: visitData.length,
+      visitDateRange: visitData.length > 0 ? {earliest: visitData[0].contactTime, latest: visitData[visitData.length-1].contactTime} : null
     },
     users: activeUsers.map(u => ({name: u.name, department: u.department, role: u.role})),
     dailyChannels: (fc.daily || []).map(c => ({name: c.name, reference: c.reference})),
     weeklyChannels: (fc.weekly || []).map(c => ({name: c.name, reference: c.reference})),
     dailyReports: dailyData,
-    weeklyReports: weeklyData
+    weeklyReports: weeklyData,
+    visitRecords: visitData,
+    visitResultOptions: (cloudData.visitConfig && cloudData.visitConfig.visitResults) || [],
+    signinEventOptions: (cloudData.formConfig && cloudData.formConfig.signinEvents) || []
   };
   return JSON.stringify(context, null, 2);
 }
 
 function buildAISystemMessage() {
   const dataContext = buildAIContext();
-  return '你是团队SOP数据管理系统的AI数据分析助手。你可以读取系统的全部数据，包括用户信息、日报数据、周报数据和渠道配置。\n\n'
+  return '你是团队SOP数据管理系统的AI数据分析助手。你可以读取系统的全部数据，包括用户信息、日报数据、周报数据、拜访数据和渠道配置。\n\n'
     + '你的职责：\n'
     + '1. 根据用户的问题，对系统数据进行分析、汇总和对比\n'
     + '2. 提供数据洞察、趋势分析和改进建议\n'
@@ -3686,7 +3706,17 @@ function buildAISystemMessage() {
     + '- contactToAbRate(建联转AB率): 百分比\n'
     + '- targetAmount(目标金额): 元\n'
     + '- completionRate(完成率): 百分比\n'
-    + '- issues(问题/提升动作): 文本\n\n'
+    + '- issues(问题/提升动作): 文本\n'
+    + '- visitRecords(拜访数据)字段:\n'
+    + '  - contactTime(联系时间): 日期时间，格式 YYYY-MM-DD HH:MM\n'
+    + '  - employee(员工)/department(部门): 拜访人及其所属部门\n'
+    + '  - customer(客户): 拜访的客户名称\n'
+    + '  - contactPerson(联系人)/phone(手机号): 客户联系人与电话\n'
+    + '  - signinEvent(签到事件): 如 陌拜演示/自拓线下/自拓线上/线索线上/线索线下/N面拜访/售后服务 等（取值见 signinEventOptions）\n'
+    + '  - signinAddress(签到地址): 签到地点\n'
+    + '  - visitResult(拜访结果): 如 已成交/高意向/待跟进/暂无意向/已流失 等（取值见 visitResultOptions）\n'
+    + '  - blockerNote(卡点说明): 拜访中遇到的问题或卡点\n'
+    + '  - remark(备注): 其他备注\n\n'
     + '以下是当前系统的完整数据（JSON格式）：\n' + dataContext;
 }
 
