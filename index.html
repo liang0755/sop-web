@@ -535,7 +535,7 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[]};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}};
 let currentUser = null;
 let isCloudAvailable = false;
 let dataLoaded = false;
@@ -576,7 +576,7 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes, m0Res, prRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes, m0Res, prRes, psRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
@@ -585,7 +585,8 @@ async function loadCoreData() {
       fetch(FB_BASE + '/visitConfig.json'),
       fetch(FB_BASE + '/gradeRecords.json'),
       fetch(FB_BASE + '/m0Records.json'),
-      fetch(FB_BASE + '/performanceRecords.json')
+      fetch(FB_BASE + '/performanceRecords.json'),
+      fetch(FB_BASE + '/performanceSnapshots.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -695,6 +696,9 @@ async function loadCoreData() {
     // Load performance records (sales performance scoring data)
     const prData = prRes.ok ? await prRes.json() : null;
     cloudData.performanceRecords = (prData && typeof prData === 'object') ? prData : {};
+    // Load performance snapshots (final-saved frozen data, independent of config changes)
+    const psData = psRes.ok ? await psRes.json() : null;
+    cloudData.performanceSnapshots = (psData && typeof psData === 'object') ? psData : {};
     // Ensure m0Config exists (team-shared M0 calculation scope)
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
@@ -711,6 +715,7 @@ async function loadCoreData() {
     cloudData.gradeRecords = {};
     cloudData.m0Records = {};
     cloudData.performanceRecords = {};
+    cloudData.performanceSnapshots = {};
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
     }
@@ -1052,7 +1057,8 @@ async function silentRefresh(page) {
     const needSales = hasPermission('salesDetail') || hasPermission('salesBoard');
     const fetches = [
       fetch(FB_BASE + '/dailyReports.json'),
-      fetch(FB_BASE + '/weeklyReports.json')
+      fetch(FB_BASE + '/weeklyReports.json'),
+      fetch(FB_BASE + '/performanceSnapshots.json')
     ];
     let iVisit = -1, iSales = -1;
     if (needVisit) { iVisit = fetches.length; fetches.push(fetch(FB_BASE + '/visitRecords.json')); }
@@ -1062,6 +1068,9 @@ async function silentRefresh(page) {
     const newWeekly = results[1].ok ? Object.values(await results[1].json() || {}) : [];
     const newVisit = (iVisit >= 0 && results[iVisit] && results[iVisit].ok) ? hydrateVisitRecords(await results[iVisit].json()) : cloudData.visitRecords;
     const newSales = (iSales >= 0 && results[iSales] && results[iSales].ok) ? hydrateSalesRecords(await results[iSales].json()) : cloudData.salesRecords;
+    // Refresh performance snapshots in background (does not force re-render)
+    const newSnap = results[2].ok ? await results[2].json() : null;
+    if (newSnap && typeof newSnap === 'object') cloudData.performanceSnapshots = newSnap;
     // Only update + re-render if data count changed (new records added by others)
     if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length || newSales.length !== cloudData.salesRecords.length) {
       cloudData.dailyReports = newDaily;
@@ -9136,6 +9145,7 @@ let perfYear = '';
 let perfMonthFrom = 1;
 let perfMonthTo = 12;
 let perfSingleMonth = (new Date().getMonth() + 1);
+let perfViewSnapshot = false;   // 是否查看「最终保存」冻结快照
 
 function perfKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
 
@@ -9204,19 +9214,25 @@ function getSalesTeam(sp) {
 }
 
 function countSelfDemo(year, month, sp) {
-  const cats = (cloudData.formConfig.signinCategories || []).filter(c => c.name && (c.name.indexOf('自拓') >= 0 || c.name.indexOf('演示') >= 0));
+  // 取值来源：拜访统计-个人拜访类型统计-签到事件归类汇总（自拓演示归类）
+  // 匹配归类名「同时」包含「自拓」与「演示」的归类（即「自拓演示」，排除「线索演示」等）
+  const cats = (cloudData.formConfig.signinCategories || []).filter(c => c.name && c.name.indexOf('自拓') >= 0 && c.name.indexOf('演示') >= 0);
   const events = new Set();
   cats.forEach(c => (c.events || []).forEach(e => events.add(e)));
+  // 兜底：若未配置归类，则取签到事件中名称含「自拓」或「演示」的项
   if (!events.size) {
     (cloudData.formConfig.signinEvents || []).forEach(e => {
       if (e && (e.indexOf('自拓') >= 0 || e.indexOf('演示') >= 0)) events.add(e);
     });
   }
+  if (!events.size) return 0;
   let count = 0;
+  const ym = String(year) + String(month).padStart(2, '0');
   (cloudData.visitRecords || []).forEach(r => {
-    if ((r.salesperson || '').trim() !== sp) return;
-    const vd = r.visitDate || '';
-    if (!vd || vd.slice(0, 4) !== String(year) || parseInt(vd.slice(5, 7), 10) !== month) return;
+    const emp = (r.employee || r.salesperson || '').trim();   // 拜访记录员工字段为 employee
+    if (emp !== (sp || '').trim()) return;
+    const vd = (r.contactTime || '').replace(/\D/g, '').slice(0, 6);  // 拜访记录用 contactTime（兼容 - 与 / 分隔）
+    if (vd !== ym) return;
     if (events.has(r.signinEvent)) count++;
   });
   return count;
@@ -9226,7 +9242,7 @@ function getPerfRecord(year, sp, m) {
   const cfg = getPerfConfig();
   const k = perfKey(year, sp, m);
   const stored = (cloudData.performanceRecords && cloudData.performanceRecords[k]) || {};
-  const defaults = { workingDays: 30, comment: '' };
+  const defaults = { workingDays: 30, comment: '', finalScore: null };
   (cfg.items || []).forEach(it => {
     defaults['standard_' + it.key] = it.standard || 0;
     defaults['actual_' + it.key] = 0;
@@ -9244,6 +9260,21 @@ function getPerfItemActual(item, rec, year, sp, month) {
     return countSelfDemo(year, month, sp);
   }
   return parseFloat(rec['actual_' + item.key]) || 0;
+}
+
+// 绩效评分颜色：<60 红；60-90 黄；>=90 绿
+function scoreColor(v) {
+  if (v < 60) return '#dc2626';
+  if (v < 90) return '#d97706';
+  return '#16a34a';
+}
+
+// 最终评分：若手动设置了 finalScore 则用其值，否则用公式计算
+function getFinalScore(rec, cfg, year, sp, month) {
+  if (rec.finalScore !== undefined && rec.finalScore !== null && rec.finalScore !== '' && !isNaN(parseFloat(rec.finalScore))) {
+    return parseFloat(rec.finalScore);
+  }
+  return computePerfScore(rec, cfg, year, sp, month).score;
 }
 
 function computePerfScore(rec, cfg, year, sp, month) {
@@ -9281,6 +9312,94 @@ function savePerfByKey(key, patch) {
   apiUpdate('performanceRecords', key, cloudData.performanceRecords[key]).catch(e => showToast('保存绩效数据失败: ' + e.message, 'error'));
 }
 
+// ===== 最终保存快照（冻结，独立于表单配置修改）=====
+function getPerfSnapshot(year, sp, month) {
+  if (!cloudData.performanceSnapshots) return null;
+  return cloudData.performanceSnapshots[perfKey(year, sp, month)] || null;
+}
+
+// 构建单行「显示数据」：实时计算 或 冻结快照
+function perfRowDisplay(year, sp, month, cfg, baseMap, snap) {
+  if (snap) {
+    const items = (cfg.items || []).filter(it => it.enabled).map(it => {
+      const si = snap.items[it.key] || {};
+      return { it, actual: si.actual || 0, standard: (si.standard !== undefined ? si.standard : (it.standard || 0)), score: si.score || 0, text: si.text || '', frozen: true, isAuto: it.type === 'auto-demo' };
+    });
+    const bonus = (cfg.bonus || []).filter(b => b.enabled).map(b => ({ b, cnt: (snap.bonus[b.key] || {}).cnt || 0, frozen: true }));
+    return { level: snap.level || '', base: snap.base || 0, workingDays: snap.workingDays || 30, comment: snap.comment || '', finalScore: snap.finalScore, computedScore: snap.computedScore, items, bonus, frozen: true };
+  }
+  const rec = getPerfRecord(year, sp, month);
+  const scores = computePerfScore(rec, cfg, year, sp, month);
+  const level = getSalesLevel(year, sp, month, baseMap);
+  const base = getPerfBase(level) * (rec.workingDays || 30) / 30;
+  const items = (cfg.items || []).filter(it => it.enabled).map(it => {
+    const ik = it.key;
+    const isAuto = it.type === 'auto-demo';
+    const manual = rec['manual_' + ik];
+    const actual = isAuto ? (manual ? (parseFloat(rec['actual_' + ik]) || 0) : countSelfDemo(year, month, sp)) : (parseFloat(rec['actual_' + ik]) || 0);
+    const std = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '') ? rec['standard_' + ik] : (it.standard || 0);
+    const txt = (rec['text_' + ik] !== undefined && rec['text_' + ik] !== '') ? rec['text_' + ik] : (it.text || '');
+    return { it, actual, standard: std, score: (scores.itemScores[ik] || {}).raw || 0, text: txt, frozen: false, isAuto, manual };
+  });
+  const bonus = (cfg.bonus || []).filter(b => b.enabled).map(b => ({ b, cnt: parseFloat(rec['bonus_' + b.key]) || 0, frozen: false }));
+  return { level, base, workingDays: rec.workingDays || 30, comment: rec.comment || '', finalScore: getFinalScore(rec, cfg, year, sp, month), computedScore: scores.score, items, bonus, frozen: false };
+}
+
+function savePerfSnapshot() {
+  const year = document.getElementById('perfYear') ? document.getElementById('perfYear').value : perfYear;
+  const month = document.getElementById('perfMonth') ? parseInt(document.getElementById('perfMonth').value, 10) : perfSingleMonth;
+  if (!confirm('确定将「' + year + ' 年 ' + month + ' 月」所有在职销售的绩效数据【最终保存】？\n保存后将生成本月快照（冻结），不受后续表单配置修改影响，可再次保存覆盖。')) return;
+  const statusMap = buildUserStatusMap();
+  const records = cloudData.salesRecords || [];
+  const cfg = getPerfConfig();
+  const baseMap = buildSalesBaseForYear(year);
+  const spSet = new Set();
+  records.forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    if (statusMap[sp] !== '在职') return;
+    spSet.add(sp);
+  });
+  if (!cloudData.performanceSnapshots) cloudData.performanceSnapshots = {};
+  let n = 0;
+  [...spSet].sort((a, b) => a.localeCompare(b, 'zh')).forEach(sp => {
+    const rec = getPerfRecord(year, sp, month);
+    const scores = computePerfScore(rec, cfg, year, sp, month);
+    const level = getSalesLevel(year, sp, month, baseMap);
+    const base = getPerfBase(level) * (rec.workingDays || 30) / 30;
+    const snap = {
+      year: String(year), sp, month,
+      level: level || '',
+      finalScore: getFinalScore(rec, cfg, year, sp, month),
+      computedScore: scores.score,
+      workingDays: rec.workingDays || 30,
+      comment: rec.comment || '',
+      base: base,
+      items: {}, bonus: {},
+      snapshotAt: new Date().toISOString(),
+      snapshotBy: (currentUser && currentUser.name) || ''
+    };
+    (cfg.items || []).filter(it => it.enabled).forEach(it => {
+      const ik = it.key;
+      const actual = getPerfItemActual(it, rec, year, sp, month);
+      const std = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '') ? rec['standard_' + ik] : (it.standard || 0);
+      const raw = (scores.itemScores[ik] || {}).raw || 0;
+      snap.items[ik] = { name: it.name, actual, standard: std, score: raw, text: (rec['text_' + ik] || it.text || '') };
+    });
+    (cfg.bonus || []).filter(b => b.enabled).forEach(b => {
+      snap.bonus[b.key] = { name: b.name, cnt: parseFloat(rec['bonus_' + b.key]) || 0 };
+    });
+    const k = perfKey(year, sp, month);
+    cloudData.performanceSnapshots[k] = snap;
+    apiUpdate('performanceSnapshots', k, snap).catch(e => showToast('保存快照失败: ' + e.message, 'error'));
+    n++;
+  });
+  showToast('已最终保存 ' + n + ' 名销售的绩效快照（' + year + ' 年 ' + month + ' 月）', 'success');
+  if (perfViewSnapshot) refreshPerfSingle();
+}
+
 function renderSalesPerf() {
   const records = cloudData.salesRecords || [];
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
@@ -9288,6 +9407,17 @@ function renderSalesPerf() {
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
   if (!perfYear) perfYear = year;
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === perfYear ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${perfYear}">${perfYear}</option>`;
+  // 最终保存快照信息
+  let snapInfo = '', snapExists = false;
+  if (!isMatrix && perfViewSnapshot) {
+    const y = perfYear, mo = perfSingleMonth;
+    const found = Object.values(cloudData.performanceSnapshots || {}).find(s => s && String(s.year) === String(y) && Number(s.month) === Number(mo));
+    snapExists = !!found;
+    if (found && found.snapshotAt) {
+      const d = new Date(found.snapshotAt);
+      snapInfo = '（保存于 ' + d.toLocaleString('zh-CN') + (found.snapshotBy ? '，操作人：' + found.snapshotBy : '') + '）';
+    }
+  }
   const isMatrix = perfTab === 'matrix';
   document.getElementById('contentBody').innerHTML = `
     <div class="card">
@@ -9309,9 +9439,12 @@ function renderSalesPerf() {
           ` : `
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="perfMonth" onchange="perfSingleMonth=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
           <button class="btn btn-outline btn-sm" onclick="refreshPerfSingle()">刷新计算</button>
+          <button class="btn btn-primary btn-sm" onclick="savePerfSnapshot()">💾 最终保存</button>
+          <button class="btn ${perfViewSnapshot?'btn-primary':'btn-outline'} btn-sm" onclick="perfViewSnapshot=!perfViewSnapshot;renderSalesPerf()">${perfViewSnapshot?'📌 返回实时':'📷 查看最终保存版本'}</button>
           `}
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：矩阵展示每位在职销售每月的销售职级（联动销售评级看板）与绩效评分。' : '说明：单月绩效看板中，演示考核项的「完成情况」默认自动取自拜访数据「自拓演示」归类汇总（显示「自动」，手动修改后点 ↺ 可重置回自动值）；每行描述文字、考核要求、完成情况、加分次数、在职天数、总评均可单独编辑保存；绩效评分（含各项封顶/总分封顶规则）与绩效基数由公式实时计算（点击「刷新计算」更新）。'}</div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：矩阵展示每位在职销售每月的销售职级（联动销售评级看板）与绩效评分，评分按区间着色（<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>）。' : '说明：单月绩效看板中，演示考核项的「完成情况」默认自动取自拜访数据「自拓演示」归类汇总（显示「自动」，手动修改后点 ↺ 可重置回自动值）；每行描述文字、考核要求、完成情况、加分次数、在职天数、总评均可单独编辑保存；【绩效评分】可手动修改（点 ↺ 重置为公式自动值）；绩效评分（含各项封顶/总分封顶规则）与绩效基数由公式实时计算。「最终保存」可生成冻结快照，不受后续表单配置修改影响。'}</div>
+        ${!isMatrix && perfViewSnapshot ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">📌 当前查看「最终保存」冻结快照${snapInfo}${snapExists ? '，不受表单配置修改影响；编辑已停用。' : '，但本月暂无快照数据，已回退为实时计算。'}点击「📷 返回实时」回到实时计算。</div>` : ''}
         <div class="table-wrap"><table id="perfTable"></table></div>
       </div>
     </div>`;
@@ -9353,8 +9486,8 @@ function refreshPerfMatrix() {
     months.forEach(m => {
       const level = getSalesLevel(year, row.sp, m, baseMap);
       const rec = getPerfRecord(year, row.sp, m);
-      const score = computePerfScore(rec, cfg, year, row.sp, m).score;
-      h += `<td class="num" style="text-align:center"><div>${level || '—'}</div><div style="color:var(--primary);font-weight:600">${score.toFixed(2)}</div></td>`;
+      const score = getFinalScore(rec, cfg, year, row.sp, m);
+      h += `<td class="num" style="text-align:center"><div>${level || '—'}</div><div style="color:${scoreColor(score)};font-weight:700">${score.toFixed(2)}</div></td>`;
     });
     h += '</tr>';
   });
@@ -9413,41 +9546,67 @@ function refreshPerfSingle() {
   h += '</tr></thead><tbody>';
 
   rows.forEach(row => {
-    const rec = getPerfRecord(year, row.sp, month);
-    const scores = computePerfScore(rec, cfg, year, row.sp, month);
-    const level = getSalesLevel(year, row.sp, month, baseMap);
-    const base = getPerfBase(level) * (rec.workingDays || 30) / 30;
+    const d = perfRowDisplay(year, row.sp, month, cfg, baseMap, perfViewSnapshot ? getPerfSnapshot(year, row.sp, month) : null);
     const k = perfKey(year, row.sp, month);
+    const rec0 = cloudData.performanceRecords[k] || {};
+    const isManualScore = (rec0.finalScore !== undefined && rec0.finalScore !== null && rec0.finalScore !== '');
     h += `<tr>`;
     h += `<td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
     h += `<td>${esc(row.team)}</td>`;
-    items.forEach(it => {
-      const ik = it.key;
-      const isAuto = it.type === 'auto-demo';
-      const manual = rec['manual_' + ik];
-      const actualVal = isAuto ? (manual ? (parseFloat(rec['actual_' + ik]) || 0) : countSelfDemo(year, month, row.sp)) : (parseFloat(rec['actual_' + ik]) || 0);
-      const stdVal = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '') ? rec['standard_' + ik] : (it.standard || 0);
-      const txtVal = (rec['text_' + ik] !== undefined && rec['text_' + ik] !== '') ? rec['text_' + ik] : (it.text || '');
-      const itemScore = (scores.itemScores[ik] || {}).raw || 0;
-      const descInput = `<input type="text" class="form-control form-control-sm" value="${esc(txtVal)}" onchange="savePerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px;margin-bottom:2px" placeholder="描述">`;
-      if (isAuto) {
-        h += `<td style="background:#FFF8EE">${descInput}<input type="number" class="form-control form-control-sm" value="${stdVal}" onchange="savePerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px"></td>`;
-        const resetBtn = manual ? `<button class="btn btn-xs btn-outline" title="重置为自动(自拓演示)" onclick="savePerfByKey('${k}', {'manual_${ik}':false})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
-        h += `<td style="background:#FFF8EE">${resetBtn}<input type="number" class="form-control form-control-sm" value="${actualVal}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:70px;margin-top:2px"></td>`;
+    d.items.forEach(x => {
+      const it = x.it, ik = it.key;
+      if (x.isAuto) {
+        const stdCell = d.frozen
+          ? `<div style="font-size:11px;margin-bottom:2px">${esc(x.text || '')}</div><div style="font-size:11px">要求 ${x.standard}</div>`
+          : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="savePerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="savePerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+        let actCell;
+        if (d.frozen) {
+          actCell = `<div style="font-size:11px">${x.actual}</div>`;
+        } else {
+          const resetBtn = x.manual ? `<button class="btn btn-xs btn-outline" title="重置为自动(自拓演示)" onclick="savePerfByKey('${k}', {'manual_${ik}':false})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
+          actCell = `${resetBtn}<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:70px;margin-top:2px">`;
+        }
+        h += `<td style="background:#FFF8EE">${stdCell}</td>`;
+        h += `<td style="background:#FFF8EE">${actCell}</td>`;
       } else {
-        h += `<td style="background:#FFF8EE">${descInput}<input type="number" class="form-control form-control-sm" value="${actualVal}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px"></td>`;
+        const actCell = d.frozen
+          ? `<div style="font-size:11px">${x.actual}</div>`
+          : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="savePerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+        h += `<td style="background:#FFF8EE">${actCell}</td>`;
       }
-      h += `<td style="text-align:center;font-weight:600">${itemScore.toFixed(1)}</td>`;
+      h += `<td style="text-align:center;font-weight:600">${Number(x.score).toFixed(1)}</td>`;
     });
-    bonusList.forEach(b => {
-      const bk = 'bonus_' + b.key;
-      h += `<td><input type="number" class="form-control form-control-sm" value="${rec[bk] || 0}" onchange="savePerfByKey('${k}', {'${bk}':parseFloat(this.value)||0})" style="width:60px"></td>`;
+    d.bonus.forEach(x => {
+      if (d.frozen) {
+        h += `<td style="text-align:center">${x.cnt}</td>`;
+      } else {
+        const bk = 'bonus_' + x.b.key;
+        h += `<td><input type="number" class="form-control form-control-sm" value="${x.cnt}" onchange="savePerfByKey('${k}', {'${bk}':parseFloat(this.value)||0})" style="width:60px"></td>`;
+      }
     });
-    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.workingDays}" onchange="savePerfByKey('${k}', {workingDays:parseInt(this.value,10)||30})" style="width:70px"></td>`;
-    h += `<td style="text-align:center">${level || '—'}</td>`;
-    h += `<td style="text-align:center;color:var(--primary);font-weight:600">${scores.score.toFixed(2)}</td>`;
-    h += `<td><input type="text" class="form-control form-control-sm" value="${(rec.comment || '').replace(/"/g,'&quot;')}" onchange="savePerfByKey('${k}', {comment:this.value})" placeholder="评语"></td>`;
-    h += `<td style="text-align:center">${fmtSalesMoney(base)}</td>`;
+    // 在职天数
+    if (d.frozen) {
+      h += `<td style="text-align:center">${d.workingDays}</td>`;
+    } else {
+      h += `<td><input type="number" class="form-control form-control-sm" value="${d.workingDays}" onchange="savePerfByKey('${k}', {workingDays:parseInt(this.value,10)||30})" style="width:70px"></td>`;
+    }
+    // 当月销售职级
+    h += `<td style="text-align:center">${d.level || '—'}</td>`;
+    // 绩效评分（可手动修改，↺ 重置为公式自动值）
+    if (d.frozen) {
+      h += `<td style="text-align:center;color:${scoreColor(d.finalScore)};font-weight:700">${Number(d.finalScore).toFixed(2)}</td>`;
+    } else {
+      const resetBtn = isManualScore ? `<button class="btn btn-xs btn-outline" title="重置为公式自动值" onclick="savePerfByKey('${k}', {finalScore:null})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
+      h += `<td style="text-align:center">${resetBtn}<input type="number" class="form-control form-control-sm" value="${Number(d.finalScore).toFixed(2)}" onchange="savePerfByKey('${k}', {finalScore:this.value===''||this.value===null?null:parseFloat(this.value)})" style="width:70px;margin-top:2px;color:${scoreColor(d.finalScore)};font-weight:700"></td>`;
+    }
+    // 总评
+    if (d.frozen) {
+      h += `<td>${esc(d.comment || '')}</td>`;
+    } else {
+      h += `<td><input type="text" class="form-control form-control-sm" value="${(d.comment || '').replace(/"/g,'&quot;')}" onchange="savePerfByKey('${k}', {comment:this.value})" placeholder="评语"></td>`;
+    }
+    // 绩效基数
+    h += `<td style="text-align:center">${fmtSalesMoney(d.base)}</td>`;
     h += `</tr>`;
   });
   const colCount = 6 + items.reduce((s, it) => s + (it.type === 'auto-demo' ? 3 : 2), 0) + bonusList.length;
