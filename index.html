@@ -9408,6 +9408,7 @@ function renderSalesPerf() {
   if (!perfYear) perfYear = year;
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === perfYear ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${perfYear}">${perfYear}</option>`;
   // 最终保存快照信息
+  const isMatrix = perfTab === 'matrix';
   let snapInfo = '', snapExists = false;
   if (!isMatrix && perfViewSnapshot) {
     const y = perfYear, mo = perfSingleMonth;
@@ -9418,7 +9419,6 @@ function renderSalesPerf() {
       snapInfo = '（保存于 ' + d.toLocaleString('zh-CN') + (found.snapshotBy ? '，操作人：' + found.snapshotBy : '') + '）';
     }
   }
-  const isMatrix = perfTab === 'matrix';
   document.getElementById('contentBody').innerHTML = `
     <div class="card">
       <div class="card-header">
