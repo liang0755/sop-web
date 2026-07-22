@@ -9277,13 +9277,23 @@ function getFinalScore(rec, cfg, year, sp, month) {
   return computePerfScore(rec, cfg, year, sp, month).score;
 }
 
+// 在职天数折算比：仅当月在岗不足 30 天才折算（目标与评分同向折算，避免月中入职被整月目标惩罚）
+function perfProrationRatio(rec) {
+  const wd = parseInt(rec && rec.workingDays, 10);
+  if (isNaN(wd) || wd >= 30) return 1;
+  return wd / 30;
+}
+
 function computePerfScore(rec, cfg, year, sp, month) {
   const cfgN = normalizePerfConfig(cfg);
   const itemScores = {};
   let total = 0;
   (cfgN.items || []).filter(it => it.enabled).forEach(it => {
     const standard = parseFloat(rec['standard_' + it.key]);
-    const std = (isNaN(standard) || standard === 0) ? (it.standard || 0) : standard;
+    const manualSet = !isNaN(standard) && standard !== 0;
+    const stdFull = manualSet ? standard : (it.standard || 0);
+    // 目标按在职天数折算（仅不足 30 天且未手动设定目标时），避免月中入职被整月目标惩罚
+    const std = manualSet ? stdFull : stdFull * perfProrationRatio(rec);
     const actual = getPerfItemActual(it, rec, year, sp, month);
     let raw = std ? (actual / std) * 100 : 0;
     if (it.capAt100) raw = Math.min(100, raw);
@@ -9337,7 +9347,9 @@ function perfRowDisplay(year, sp, month, cfg, baseMap, snap) {
     const isAuto = it.type === 'auto-demo';
     const manual = rec['manual_' + ik];
     const actual = isAuto ? (manual ? (parseFloat(rec['actual_' + ik]) || 0) : countSelfDemo(year, month, sp)) : (parseFloat(rec['actual_' + ik]) || 0);
-    const std = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '') ? rec['standard_' + ik] : (it.standard || 0);
+    const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
+    const stdRaw = manualStd ? rec['standard_' + ik] : (it.standard || 0);
+    const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
     const txt = (rec['text_' + ik] !== undefined && rec['text_' + ik] !== '') ? rec['text_' + ik] : (it.text || '');
     return { it, actual, standard: std, score: (scores.itemScores[ik] || {}).raw || 0, text: txt, frozen: false, isAuto, manual };
   });
@@ -9384,7 +9396,9 @@ function savePerfSnapshot() {
     (cfg.items || []).filter(it => it.enabled).forEach(it => {
       const ik = it.key;
       const actual = getPerfItemActual(it, rec, year, sp, month);
-      const std = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '') ? rec['standard_' + ik] : (it.standard || 0);
+      const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
+      const stdRaw = manualStd ? rec['standard_' + ik] : (it.standard || 0);
+      const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
       const raw = (scores.itemScores[ik] || {}).raw || 0;
       snap.items[ik] = { name: it.name, actual, standard: std, score: raw, text: (rec['text_' + ik] || it.text || '') };
     });
