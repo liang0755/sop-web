@@ -8754,8 +8754,7 @@ function refreshM0Grade() {
       const k = m0Key(year, m0, m);
       h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div>`
          + `<div style="margin-top:4px"><input type="text" class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" placeholder="评级" value="${grade.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {grade:this.value})"></div>`
-         + `<div style="margin-top:3px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveM0ByKey('${k}', {chg:this.value})">${chgOpts}</select></div>`
-         + `<input type="text" class="form-control form-control-sm" style="font-size:11px;margin-top:3px;padding:1px 4px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {note:this.value})"></td>`;
+         + `<div style="margin-top:3px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveM0ByKey('${k}', {chg:this.value})">${chgOpts}</select></div></td>`;
     });
     totalAll += row.total;
     h += `<td class="num" style="font-weight:700">${fmtSalesMoney(row.total)}</td></tr>`;
@@ -8800,7 +8799,7 @@ function refreshM0GradeSingle() {
        + `<td class="num" style="font-weight:600">${fmtSalesMoney(row.v)}</td>`
        + `<td><input type="text" class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" placeholder="评级" value="${grade.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {grade:this.value})"></td>`
        + `<td style="text-align:center"><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveM0ByKey('${k}', {chg:this.value})">${chgOpts}</select></td>`
-       + `<td><input type="text" class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {note:this.value})"></td></tr>`;
+       + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:12px;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="saveM0ByKey('${k}', {note:this.value})">${esc(note)}</textarea></td></tr>`;
   });
   h += '</tbody>';
   const tbl = document.getElementById('sgTable');
@@ -8926,8 +8925,7 @@ function refreshSalesGrade() {
       const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
       const k = gradeKey(year, row.sp, m);
       h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div>`
-         + `<div style="margin-top:4px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveGradeRefresh('${k}', {grade:this.value})">${opts}</select>${upFlag}</div>`
-         + `<input type="text" class="form-control form-control-sm" style="font-size:11px;margin-top:3px;padding:1px 4px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveGradeByKey('${k}', {note:this.value})"></td>`;
+         + `<div style="margin-top:4px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveGradeRefresh('${k}', {grade:this.value})">${opts}</select>${upFlag}</div></td>`;
     });
     h += `</tr>`;
   });
@@ -9071,7 +9069,7 @@ function refreshSalesGradeSingle() {
        + `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div></td>`
        + `<td><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveGradeRefresh('${k}', {grade:this.value})">${opts}</select></td>`
        + `<td style="text-align:center">${upFlag}</td>`
-       + `<td><input type="text" class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveGradeByKey('${k}', {note:this.value})"></td>`
+       + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:12px;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="saveGradeByKey('${k}', {note:this.value})">${esc(note)}</textarea></td>`
        + `</tr>`;
   });
   h += '</tbody>';
@@ -9146,6 +9144,10 @@ let perfMonthFrom = 1;
 let perfMonthTo = 12;
 let perfSingleMonth = (new Date().getMonth() + 1);
 let perfViewSnapshot = false;   // 是否查看「最终保存」冻结快照
+let perfSpFilter = [];          // 绩效看板：选中的销售名单（空数组=全部在职销售）
+let perfSpFilterLoaded = false; // 是否已从 localStorage 载入默认
+let perfTeamFilter = '';        // 绩效看板：按团队筛选（空=全部）
+let perfSortBy = 'name';        // 绩效看板排序：'name' 按姓名 / 'team' 按团队+姓名 / 'score' 按绩效评分降序
 
 function perfKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
 
@@ -9414,7 +9416,82 @@ function savePerfSnapshot() {
   if (perfViewSnapshot) refreshPerfSingle();
 }
 
+// ===== 绩效看板：销售多选 / 保存默认 / 团队筛选 / 排序 =====
+function perfSpLabel() {
+  if (!perfSpFilter.length) return '全部在职销售';
+  const lbl = '已选 ' + perfSpFilter.length + ' 名销售';
+  return perfSpFilter.length <= 3 ? lbl + '：' + perfSpFilter.join('、') : lbl;
+}
+function togglePerfSpPanel(force) {
+  const p = document.getElementById('perfSpPanel');
+  if (!p) return;
+  if (typeof force === 'boolean') p.style.display = force ? 'block' : 'none';
+  else p.style.display = p.style.display === 'block' ? 'none' : 'block';
+  if (p.style.display === 'block') { renderPerfSpPanel(); const s = document.getElementById('perfSpSearch'); if (s) s.value = ''; }
+}
+function renderPerfSpPanel() {
+  const list = sgSpActiveList();
+  const q = (document.getElementById('perfSpSearch') ? document.getElementById('perfSpSearch').value : '').trim();
+  const box = document.getElementById('perfSpList');
+  if (!box) return;
+  const filtered = q ? list.filter(n => n.indexOf(q) >= 0) : list;
+  if (!filtered.length) { box.innerHTML = '<div style="padding:8px;color:var(--gray-400);font-size:12px">无匹配在职销售</div>'; return; }
+  box.innerHTML = filtered.map(n => {
+    const chk = perfSpFilter.indexOf(n) >= 0 ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:4px;font-size:13px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background='transparent'"><input type="checkbox" ${chk} onchange='perfSpToggle(${JSON.stringify(n)})'> ${esc(n)}</label>`;
+  }).join('');
+}
+function perfSpToggle(name) {
+  const i = perfSpFilter.indexOf(name);
+  if (i >= 0) perfSpFilter.splice(i, 1); else perfSpFilter.push(name);
+  const btn = document.getElementById('perfSpBtn'); if (btn) btn.textContent = perfSpLabel();
+  perfRefresh();
+}
+function perfSpSelectAll() {
+  perfSpFilter = sgSpActiveList().slice();
+  renderPerfSpPanel();
+  const btn = document.getElementById('perfSpBtn'); if (btn) btn.textContent = perfSpLabel();
+  perfRefresh();
+}
+function perfSpClear() {
+  perfSpFilter = [];
+  renderPerfSpPanel();
+  const btn = document.getElementById('perfSpBtn'); if (btn) btn.textContent = perfSpLabel();
+  perfRefresh();
+}
+function savePerfSpDefault() {
+  try { localStorage.setItem('sop_perf_sp_filter', JSON.stringify(perfSpFilter)); showToast('已保存为默认视图（' + perfSpFilter.length + ' 名销售）', 'success'); }
+  catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+  togglePerfSpPanel(false);
+}
+function perfTeamOptions(year) {
+  const teams = new Set();
+  (cloudData.salesRecords || []).forEach(r => {
+    if ((r.docMonth || '').slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    const t = r.team || getSalesTeam(sp);
+    if (t) teams.add(t);
+  });
+  (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
+  return [...teams].sort((a, b) => a.localeCompare(b, 'zh')).map(t => `<option value="${esc(t)}" ${t === perfTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
+}
+function perfTeamFilterChange(val) { perfTeamFilter = val; perfRefresh(); }
+function perfSortChange(val) { perfSortBy = val; perfRefresh(); }
+function perfPassTeamFilter(sp) {
+  if (!perfTeamFilter) return true;
+  return (getSalesTeam(sp) || '') === perfTeamFilter;
+}
+// 依据筛选条件过滤在职销售名单
+function perfFilterSp(sp) {
+  return (!perfSpFilter.length || perfSpFilter.indexOf(sp) >= 0) && perfPassTeamFilter(sp);
+}
+
 function renderSalesPerf() {
+  if (!perfSpFilterLoaded) {
+    try { const s = localStorage.getItem('sop_perf_sp_filter'); perfSpFilter = s ? JSON.parse(s) : []; } catch (e) { perfSpFilter = []; }
+    perfSpFilterLoaded = true;
+  }
   const records = cloudData.salesRecords || [];
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
@@ -9446,13 +9523,45 @@ function renderSalesPerf() {
       </div>
       <div class="card-body">
         <div class="filter-bar">
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="perfYear" onchange="perfYear=this.value;perfRefresh()">${yearOpts}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="perfYear" onchange="perfYear=this.value;renderSalesPerf()">${yearOpts}</select></div>
+          <div class="form-group" style="position:relative">
+            <label style="font-size:12px;color:var(--gray-500)">销售（在职）</label>
+            <button type="button" class="form-control" id="perfSpBtn" onclick="togglePerfSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${perfSpLabel()}</button>
+            <div id="perfSpPanel" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
+              <div style="display:flex;gap:6px;margin-bottom:8px">
+                <input type="text" class="form-control form-control-sm" id="perfSpSearch" placeholder="搜索销售姓名" oninput="renderPerfSpPanel()" style="flex:1;min-width:0">
+                <button type="button" class="btn btn-sm btn-outline" onclick="perfSpSelectAll()">全选</button>
+                <button type="button" class="btn btn-sm btn-outline" onclick="perfSpClear()">清空</button>
+              </div>
+              <div id="perfSpList"></div>
+              <div style="display:flex;gap:6px;margin-top:10px;border-top:1px solid var(--gray-100);padding-top:10px">
+                <button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="savePerfSpDefault()">💾 保存为默认视图</button>
+                <button type="button" class="btn btn-sm btn-outline" onclick="togglePerfSpPanel(false)">关闭</button>
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label style="font-size:12px;color:var(--gray-500)">团队</label>
+            <select class="form-control" id="perfTeamFilter" onchange="perfTeamFilterChange(this.value)">
+              <option value="">全部团队</option>
+              ${perfTeamOptions(perfYear)}
+            </select>
+          </div>
+          <div class="form-group">
+            <label style="font-size:12px;color:var(--gray-500)">排序</label>
+            <select class="form-control" id="perfSortBy" onchange="perfSortChange(this.value)">
+              <option value="name" ${perfSortBy==='name'?'selected':''}>按姓名</option>
+              <option value="team" ${perfSortBy==='team'?'selected':''}>按团队+姓名</option>
+              <option value="score" ${perfSortBy==='score'?'selected':''}>按绩效评分降序</option>
+            </select>
+          </div>
           ${isMatrix ? `
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="perfMFrom" onchange="perfMonthFrom=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select></div>
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="perfMTo" onchange="perfMonthTo=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfMonthTo?'selected':''}>${m}月</option>`).join('')}</select></div>
           ` : `
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="perfMonth" onchange="perfSingleMonth=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
           <button class="btn btn-outline btn-sm" onclick="refreshPerfSingle()">刷新计算</button>
+          <button class="btn btn-outline btn-sm" onclick="openPerfBatchStandard()">📝 批量设置要求</button>
           <button class="btn btn-primary btn-sm" onclick="savePerfSnapshot()">💾 最终保存</button>
           <button class="btn ${perfViewSnapshot?'btn-primary':'btn-outline'} btn-sm" onclick="perfViewSnapshot=!perfViewSnapshot;renderSalesPerf()">${perfViewSnapshot?'📌 返回实时':'📷 查看最终保存版本'}</button>
           <button class="btn btn-success btn-sm" onclick="exportPerfSingleXlsx()">📥 导出Excel</button>
@@ -9489,15 +9598,22 @@ function refreshPerfMatrix() {
   });
   const months = [];
   for (let m = perfMonthFrom; m <= perfMonthTo; m++) months.push(m);
-  const rows = [...spSet].sort((a, b) => a.localeCompare(b, 'zh')).map(sp => ({ sp }));
   const cfg = getPerfConfig();
   const baseMap = buildSalesBaseForYear(year);
+  const lastM = months.length ? months[months.length - 1] : perfMonthTo;
+  const rows = [...spSet].filter(perfFilterSp).map(sp => {
+    const rec = getPerfRecord(year, sp, lastM);
+    return { sp, team: getSalesTeam(sp) || '', lastScore: getFinalScore(rec, cfg, year, sp, lastM) };
+  });
+  if (perfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  else if (perfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.sp.localeCompare(b.sp, 'zh'));
+  else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
 
-  let h = '<thead><tr><th>销售</th>';
+  let h = '<thead><tr><th>销售</th><th>团队</th>';
   months.forEach(m => { h += `<th class="num">${m}月</th>`; });
   h += '</tr></thead><tbody>';
   rows.forEach(row => {
-    h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
+    h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td><td>${esc(row.team) || '-'}</td>`;
     months.forEach(m => {
       const level = getSalesLevel(year, row.sp, m, baseMap);
       const rec = getPerfRecord(year, row.sp, m);
@@ -9506,7 +9622,7 @@ function refreshPerfMatrix() {
     });
     h += '</tr>';
   });
-  if (!rows.length) h += `<tr><td colspan="${months.length + 1}" style="text-align:center;color:var(--gray-400);padding:24px">本年度暂无在职销售的绩效数据</td></tr>`;
+  if (!rows.length) h += `<tr><td colspan="${months.length + 2}" style="text-align:center;color:var(--gray-400);padding:24px">本年度暂无在职销售的绩效数据</td></tr>`;
   h += '</tbody>';
   const tbl = document.getElementById('perfTable');
   if (tbl) tbl.innerHTML = h;
@@ -9528,18 +9644,23 @@ function refreshPerfSingle() {
     if (statusMap[sp] !== '在职') return;
     spSet.add(sp);
   });
-  const rows = [...spSet].sort((a, b) => a.localeCompare(b, 'zh')).map(sp => ({ sp, team: getSalesTeam(sp) }));
   const cfg = getPerfConfig();
   const items = (cfg.items || []).filter(it => it.enabled);
   const bonusList = (cfg.bonus || []).filter(b => b.enabled);
   const baseMap = buildSalesBaseForYear(year);
+  const rows = [...spSet].filter(perfFilterSp).map(sp => {
+    const rec = getPerfRecord(year, sp, month);
+    return { sp, team: getSalesTeam(sp) || '', score: getFinalScore(rec, cfg, year, sp, month) };
+  });
+  if (perfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  else if (perfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.sp.localeCompare(b.sp, 'zh'));
+  else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
 
   let h = '<thead><tr>';
   h += '<th rowspan="2" style="text-align:left;width:100px">销售</th>';
   h += '<th rowspan="2" style="text-align:left;width:120px">团队</th>';
   items.forEach(it => {
-    const sub = it.type === 'auto-demo' ? 3 : 2;
-    h += `<th colspan="${sub}" style="text-align:center;background:#FAEEDA">${esc(it.name)}（${it.weight || 0}%）</th>`;
+    h += `<th colspan="3" style="text-align:center;background:#FAEEDA">${esc(it.name)}（${it.weight || 0}%）</th>`;
   });
   if (bonusList.length) h += `<th colspan="${bonusList.length}" style="text-align:center;background:#EAF3DE">加分项</th>`;
   h += '<th rowspan="2" style="text-align:center;width:70px">当月在职天数</th>';
@@ -9550,12 +9671,8 @@ function refreshPerfSingle() {
   h += '<th rowspan="2" style="text-align:center;width:90px">绩效奖金</th>';
   h += '</tr><tr>';
   items.forEach(it => {
-    if (it.type === 'auto-demo') {
-      h += '<th style="background:#FAEEDA">要求</th>';
-      h += '<th style="background:#FAEEDA">完成(自动)</th>';
-    } else {
-      h += '<th style="background:#FAEEDA">完成</th>';
-    }
+    h += '<th style="background:#FAEEDA">要求</th>';
+    h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' ? '完成(自动)' : '完成'}</th>`;
     h += '<th style="background:#FAEEDA">得分</th>';
   });
   bonusList.forEach(b => { h += `<th style="background:#EAF3DE;white-space:pre-wrap">${esc(b.name)}</th>`; });
@@ -9571,25 +9688,26 @@ function refreshPerfSingle() {
     h += `<td>${esc(row.team)}</td>`;
     d.items.forEach(x => {
       const it = x.it, ik = it.key;
+      // 要求列（所有考核项统一：描述 + 要求数值），演示考核与手动录入样式一致
+      const stdCell = d.frozen
+        ? `<div style="font-size:11px;margin-bottom:2px">${esc(x.text || '')}</div><div style="font-size:11px">要求 ${x.standard}</div>`
+        : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="savePerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="savePerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+      // 完成列
+      let actCell;
       if (x.isAuto) {
-        const stdCell = d.frozen
-          ? `<div style="font-size:11px;margin-bottom:2px">${esc(x.text || '')}</div><div style="font-size:11px">要求 ${x.standard}</div>`
-          : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="savePerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="savePerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
-        let actCell;
         if (d.frozen) {
           actCell = `<div style="font-size:11px">${x.actual}</div>`;
         } else {
           const resetBtn = x.manual ? `<button class="btn btn-xs btn-outline" title="重置为自动(自拓演示)" onclick="savePerfByKey('${k}', {'manual_${ik}':false})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
           actCell = `${resetBtn}<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:70px;margin-top:2px">`;
         }
-        h += `<td style="background:#FFF8EE">${stdCell}</td>`;
-        h += `<td style="background:#FFF8EE">${actCell}</td>`;
       } else {
-        const actCell = d.frozen
+        actCell = d.frozen
           ? `<div style="font-size:11px">${x.actual}</div>`
-          : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="savePerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
-        h += `<td style="background:#FFF8EE">${actCell}</td>`;
+          : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
       }
+      h += `<td style="background:#FFF8EE">${stdCell}</td>`;
+      h += `<td style="background:#FFF8EE">${actCell}</td>`;
       h += `<td style="text-align:center;font-weight:600">${Number(x.score).toFixed(1)}</td>`;
     });
     d.bonus.forEach(x => {
@@ -9628,7 +9746,7 @@ function refreshPerfSingle() {
     h += `<td style="text-align:center;font-weight:700">${fmtSalesMoney(bonusMoney)}</td>`;
     h += `</tr>`;
   });
-  const colCount = 8 + items.reduce((s, it) => s + (it.type === 'auto-demo' ? 3 : 2), 0) + bonusList.length;
+  const colCount = 8 + items.length * 3 + bonusList.length;
   if (!rows.length) h += `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售</td></tr>`;
   h += '</tbody>';
   const tbl = document.getElementById('perfTable');
@@ -9651,15 +9769,20 @@ function exportPerfSingleXlsx() {
     if (statusMap[sp] !== '在职') return;
     spSet.add(sp);
   });
-  const rows = [...spSet].sort((a, b) => a.localeCompare(b, 'zh')).map(sp => ({ sp, team: getSalesTeam(sp) }));
   const cfg = getPerfConfig();
   const items = (cfg.items || []).filter(it => it.enabled);
   const bonusList = (cfg.bonus || []).filter(b => b.enabled);
   const baseMap = buildSalesBaseForYear(year);
+  const rows = [...spSet].filter(perfFilterSp).map(sp => {
+    const rec = getPerfRecord(year, sp, month);
+    return { sp, team: getSalesTeam(sp) || '', score: getFinalScore(rec, cfg, year, sp, month) };
+  });
+  if (perfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  else if (perfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.sp.localeCompare(b.sp, 'zh'));
+  else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
   const header = ['销售', '团队'];
   items.forEach(it => {
-    if (it.type === 'auto-demo') header.push(it.name + '(要求)', it.name + '(完成)', it.name + '(得分)');
-    else header.push(it.name + '(完成)', it.name + '(得分)');
+    header.push(it.name + '(要求)', it.name + '(完成)', it.name + '(得分)');
   });
   bonusList.forEach(b => header.push(b.name));
   // 末尾列顺序：当月在职天数-当月销售职级-总评-绩效评分-绩效基数-绩效奖金
@@ -9669,8 +9792,7 @@ function exportPerfSingleXlsx() {
     const d = perfRowDisplay(year, row.sp, month, cfg, baseMap, perfViewSnapshot ? getPerfSnapshot(year, row.sp, month) : null);
     const line = [row.sp, row.team];
     d.items.forEach(x => {
-      if (x.isAuto) line.push(x.standard, x.actual, Number(x.score).toFixed(1));
-      else line.push(x.actual, Number(x.score).toFixed(1));
+      line.push(x.standard, x.actual, Number(x.score).toFixed(1));
     });
     d.bonus.forEach(x => line.push(x.cnt));
     const bonusMoney = (d.base || 0) * (d.finalScore || 0) / 100;
@@ -9683,6 +9805,60 @@ function exportPerfSingleXlsx() {
   XLSX.utils.book_append_sheet(wb, ws, '单月绩效');
   XLSX.writeFile(wb, `销售单月绩效看板_${year}年${month}月.xlsx`);
   showToast('已导出 Excel（' + (aoa.length - 1) + ' 行）', 'success');
+}
+
+// 批量设置考核要求：为当前筛选范围内所有在职销售统一写入某月各考核项的「要求」值
+function openPerfBatchStandard() {
+  if (perfViewSnapshot) { showToast('快照查看模式下不可批量编辑，请先点「返回实时」', 'warning'); return; }
+  const cfg = getPerfConfig();
+  const items = (cfg.items || []).filter(it => it.enabled);
+  if (!items.length) { showToast('当前无启用的考核项', 'warning'); return; }
+  const year = perfYear, month = perfSingleMonth;
+  const rowsHtml = items.map(it => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div style="flex:1;font-size:13px">${esc(it.name)}<span style="color:var(--gray-400);font-size:11px">（配置默认 ${it.standard || 0}）</span></div>
+      <input type="number" class="form-control form-control-sm" id="pbStd_${it.key}" placeholder="留空=不修改" style="width:130px">
+    </div>`).join('');
+  showModal('批量设置考核要求（' + year + '年' + month + '月）', `
+    <div style="font-size:12px;color:var(--gray-500);margin-bottom:14px">为下方各考核项填写「要求」值，点击应用后写入<b>当前筛选范围内所有在职销售</b>该月的要求（留空的项不改动）。</div>
+    ${rowsHtml}
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="applyPerfBatchStandard()">应用到全部</button>
+    </div>`, false);
+}
+function applyPerfBatchStandard() {
+  const cfg = getPerfConfig();
+  const items = (cfg.items || []).filter(it => it.enabled);
+  const year = perfYear, month = perfSingleMonth;
+  const patch = {};
+  items.forEach(it => {
+    const el = document.getElementById('pbStd_' + it.key);
+    if (!el) return;
+    const v = el.value;
+    if (v === '' || v === null) return;
+    patch['standard_' + it.key] = parseFloat(v) || 0;
+  });
+  if (!Object.keys(patch).length) { showToast('未填写任何要求值', 'warning'); closeModal(); return; }
+  const statusMap = buildUserStatusMap();
+  const spSet = new Set();
+  (cloudData.salesRecords || []).forEach(r => {
+    if ((r.docMonth || '').slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp || statusMap[sp] !== '在职') return;
+    spSet.add(sp);
+  });
+  const targets = [...spSet].filter(perfFilterSp);
+  if (!targets.length) { showToast('当前筛选范围内无在职销售', 'warning'); closeModal(); return; }
+  if (!cloudData.performanceRecords) cloudData.performanceRecords = {};
+  targets.forEach(sp => {
+    const k = perfKey(year, sp, month);
+    cloudData.performanceRecords[k] = Object.assign({}, cloudData.performanceRecords[k] || {}, patch);
+    apiUpdate('performanceRecords', k, cloudData.performanceRecords[k]).catch(e => showToast('保存失败: ' + e.message, 'error'));
+  });
+  closeModal();
+  refreshPerfSingle();
+  showToast('已批量设置 ' + targets.length + ' 名销售的考核要求', 'success');
 }
 
 
