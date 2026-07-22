@@ -537,7 +537,7 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}};
 let currentUser = null;
 let isCloudAvailable = false;
 let dataLoaded = false;
@@ -578,7 +578,7 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes, m0Res, prRes, psRes, m0pRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes, m0Res, prRes, psRes, m0pRes, m0psRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
@@ -589,6 +589,7 @@ async function loadCoreData() {
       fetch(FB_BASE + '/m0Records.json'),
       fetch(FB_BASE + '/performanceRecords.json'),
       fetch(FB_BASE + '/performanceSnapshots.json'),
+      fetch(FB_BASE + '/m0PerformanceSnapshots.json'),
       fetch(FB_BASE + '/m0PerformanceRecords.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
@@ -712,6 +713,9 @@ async function loadCoreData() {
     // Load M0 performance records (M0 perf scoring data, separate node from sales performanceRecords)
     const m0pData = m0pRes.ok ? await m0pRes.json() : null;
     cloudData.m0PerformanceRecords = (m0pData && typeof m0pData === 'object') ? m0pData : {};
+    // Load M0 performance snapshots (M0 final-saved frozen data, independent of config changes)
+    const m0psData = m0psRes.ok ? await m0psRes.json() : null;
+    cloudData.m0PerformanceSnapshots = (m0psData && typeof m0psData === 'object') ? m0psData : {};
     // Ensure m0Config exists (team-shared M0 calculation scope)
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
@@ -730,6 +734,7 @@ async function loadCoreData() {
     cloudData.performanceRecords = {};
     cloudData.performanceSnapshots = {};
     cloudData.m0PerformanceRecords = {};
+    cloudData.m0PerformanceSnapshots = {};
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
     }
@@ -1079,7 +1084,8 @@ async function silentRefresh(page) {
     const fetches = [
       fetch(FB_BASE + '/dailyReports.json'),
       fetch(FB_BASE + '/weeklyReports.json'),
-      fetch(FB_BASE + '/performanceSnapshots.json')
+      fetch(FB_BASE + '/performanceSnapshots.json'),
+      fetch(FB_BASE + '/m0PerformanceSnapshots.json')
     ];
     let iVisit = -1, iSales = -1;
     if (needVisit) { iVisit = fetches.length; fetches.push(fetch(FB_BASE + '/visitRecords.json')); }
@@ -1092,6 +1098,8 @@ async function silentRefresh(page) {
     // Refresh performance snapshots in background (does not force re-render)
     const newSnap = results[2].ok ? await results[2].json() : null;
     if (newSnap && typeof newSnap === 'object') cloudData.performanceSnapshots = newSnap;
+    const newM0Snap = results[3].ok ? await results[3].json() : null;
+    if (newM0Snap && typeof newM0Snap === 'object') cloudData.m0PerformanceSnapshots = newM0Snap;
     // Only update + re-render if data count changed (new records added by others)
     if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length || newSales.length !== cloudData.salesRecords.length) {
       cloudData.dailyReports = newDaily;
@@ -9399,6 +9407,7 @@ let perfMonthFrom = 1;
 let perfMonthTo = 12;
 let perfSingleMonth = (new Date().getMonth() + 1);
 let perfViewSnapshot = false;   // 是否查看「最终保存」冻结快照
+let m0PerfViewSnapshot = false;   // 是否查看 M0「最终保存」冻结快照
 let perfSpFilter = [];          // 绩效看板：选中的销售名单（空数组=全部在职销售）
 let perfSpFilterLoaded = false; // 是否已从 localStorage 载入默认
 let perfTeamFilter = '';        // 绩效看板：按团队筛选（空=全部）
@@ -10110,7 +10119,19 @@ function getM0PerfRecord(year, m0, m) {
   (cfg.bonus || []).forEach(b => { defaults['bonus_' + b.key] = 0; });
   return Object.assign({}, defaults, stored);
 }
-function m0PerfRowDisplay(year, m0, month, cfg) {
+function getM0PerfSnapshot(year, m0, month) {
+  if (!cloudData.m0PerformanceSnapshots) return null;
+  return cloudData.m0PerformanceSnapshots[m0Key(year, m0, month)] || null;
+}
+function m0PerfRowDisplay(year, m0, month, cfg, snap) {
+  if (snap) {
+    const items = (cfg.items || []).filter(it => it.enabled).map(it => {
+      const si = snap.items[it.key] || {};
+      return { it, actual: si.actual || 0, standard: (si.standard !== undefined ? si.standard : (it.standard || 0)), score: si.score || 0, text: si.text || '', frozen: true, isAuto: false };
+    });
+    const bonus = (cfg.bonus || []).filter(b => b.enabled).map(b => ({ b, cnt: (snap.bonus[b.key] || {}).cnt || 0, frozen: true }));
+    return { level: snap.level || '', base: snap.base || 0, workingDays: snap.workingDays || 30, comment: snap.comment || '', finalScore: snap.finalScore, computedScore: snap.computedScore, items, bonus, frozen: true };
+  }
   const rec = getM0PerfRecord(year, m0, month);
   const scores = computePerfScore(rec, cfg, year, m0, month);
   const gradeRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, month)]) || {};
@@ -10135,6 +10156,51 @@ function saveM0PerfByKey(key, patch) {
   if (m0PerfTab === 'single') refreshM0PerfSingle();
   apiUpdate('m0PerformanceRecords', key, cloudData.m0PerformanceRecords[key]).catch(e => showToast('保存 M0 绩效数据失败: ' + e.message, 'error'));
 }
+function saveM0PerfSnapshot() {
+  const year = document.getElementById('m0PerfYear') ? document.getElementById('m0PerfYear').value : m0PerfYear;
+  const month = document.getElementById('m0PerfMonth') ? parseInt(document.getElementById('m0PerfMonth').value, 10) : m0PerfSingleMonth;
+  if (!confirm('确定将「' + year + ' 年 ' + month + ' 月」所有 M0 人员的绩效数据【最终保存】？\n保存后将生成本月快照（冻结），不受后续表单配置修改影响，可再次保存覆盖。')) return;
+  const cfg = getM0PerfConfig();
+  if (!cloudData.m0PerformanceSnapshots) cloudData.m0PerformanceSnapshots = {};
+  let n = 0;
+  m0SpActiveList().sort((a, b) => a.localeCompare(b, 'zh')).forEach(m0 => {
+    const rec = getM0PerfRecord(year, m0, month);
+    const scores = computePerfScore(rec, cfg, year, m0, month);
+    const gradeRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, month)]) || {};
+    const level = gradeRec.grade || '';
+    const base = getPerfBase(level) * (rec.workingDays || 30) / 30;
+    const snap = {
+      year: String(year), m0, month,
+      level: level || '',
+      finalScore: getFinalScore(rec, cfg, year, m0, month),
+      computedScore: scores.score,
+      workingDays: rec.workingDays || 30,
+      comment: rec.comment || '',
+      base: base,
+      items: {}, bonus: {},
+      snapshotAt: new Date().toISOString(),
+      snapshotBy: (currentUser && currentUser.name) || ''
+    };
+    (cfg.items || []).filter(it => it.enabled).forEach(it => {
+      const ik = it.key;
+      const actual = parseFloat(rec['actual_' + ik]) || 0;
+      const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
+      const stdRaw = manualStd ? rec['standard_' + ik] : (it.standard || 0);
+      const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
+      const raw = (scores.itemScores[ik] || {}).raw || 0;
+      snap.items[ik] = { name: it.name, actual, standard: std, score: raw, text: (rec['text_' + ik] || it.text || '') };
+    });
+    (cfg.bonus || []).filter(b => b.enabled).forEach(b => {
+      snap.bonus[b.key] = { name: b.name, cnt: parseFloat(rec['bonus_' + b.key]) || 0 };
+    });
+    const k = m0Key(year, m0, month);
+    cloudData.m0PerformanceSnapshots[k] = snap;
+    apiUpdate('m0PerformanceSnapshots', k, snap).catch(e => showToast('保存 M0 快照失败: ' + e.message, 'error'));
+    n++;
+  });
+  showToast('已最终保存 ' + n + ' 名 M0 人员的绩效快照（' + year + ' 年 ' + month + ' 月）', 'success');
+  if (m0PerfViewSnapshot) refreshM0PerfSingle();
+}
 function m0PerfYearOptions() {
   const years = new Set();
   Object.keys(cloudData.m0PerformanceRecords || {}).forEach(k => { const y = k.split('_')[0]; if (y) years.add(y); });
@@ -10154,6 +10220,16 @@ function renderM0Perf(mount) {
   const curYear = new Date().getFullYear().toString();
   if (!m0PerfYear || m0PerfYearOptions().indexOf('value="' + m0PerfYear + '"') < 0) m0PerfYear = curYear;
   const isMatrix = m0PerfTab === 'matrix';
+  let m0SnapInfo = '', m0SnapExists = false;
+  if (!isMatrix && m0PerfViewSnapshot) {
+    const y = m0PerfYear, mo = m0PerfSingleMonth;
+    const found = Object.values(cloudData.m0PerformanceSnapshots || {}).find(s => s && String(s.year) === String(y) && Number(s.month) === Number(mo));
+    m0SnapExists = !!found;
+    if (found && found.snapshotAt) {
+      const d = new Date(found.snapshotAt);
+      m0SnapInfo = '（保存于 ' + d.toLocaleString('zh-CN') + (found.snapshotBy ? '，操作人：' + found.snapshotBy : '') + '）';
+    }
+  }
   target.innerHTML = `
         <div class="filter-bar">
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="m0PerfYear" onchange="m0PerfYear=this.value;renderM0Perf()">${m0PerfYearOptions()}</select></div>
@@ -10195,10 +10271,13 @@ function renderM0Perf(mount) {
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="m0PerfMonth" onchange="m0PerfSingleMonth=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
           <button class="btn btn-outline btn-sm" onclick="refreshM0PerfSingle()">刷新计算</button>
           <button class="btn btn-outline btn-sm" onclick="openM0PerfBatchStandard()">📝 批量设置要求</button>
+          <button class="btn btn-primary btn-sm" onclick="saveM0PerfSnapshot()">💾 最终保存</button>
+          <button class="btn ${m0PerfViewSnapshot?'btn-primary':'btn-outline'} btn-sm" onclick="m0PerfViewSnapshot=!m0PerfViewSnapshot;renderM0Perf()">${m0PerfViewSnapshot?'📌 返回实时':'📷 查看最终保存版本'}</button>
           <button class="btn btn-success btn-sm" onclick="exportM0PerfSingleXlsx()">📥 导出Excel</button>
           `}
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：M0 绩效看板矩阵展示每位 M0 人员每月的 M0 职级（联动 M0 评级看板）与绩效评分，评分按区间着色（<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>）。' : '说明：M0 单月绩效看板参考「销售单月绩效看板」，考核项均为<b>手动录入</b>（不自动带入自拓演示）。每行描述文字、考核要求、完成情况、加分次数、在职天数、总评均可单独编辑保存；【绩效评分】可手动修改（点 ↺ 重置为公式自动值）；绩效基数、奖金由公式实时计算。'}</div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：M0 绩效看板矩阵展示每位 M0 人员每月的 M0 职级（联动 M0 评级看板）与绩效评分，评分按区间着色（<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>）。' : '说明：M0 单月绩效看板参考「销售单月绩效看板」，考核项均为<b>手动录入</b>（不自动带入自拓演示）。每行描述文字、考核要求、完成情况、加分次数、在职天数、总评均可单独编辑保存；【绩效评分】可手动修改（点 ↺ 重置为公式自动值）；绩效基数、奖金由公式实时计算。「最终保存」可生成冻结快照，不受后续表单配置修改影响。'}</div>
+        ${!isMatrix && m0PerfViewSnapshot ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">📌 当前查看「最终保存」冻结快照${m0SnapInfo}${m0SnapExists ? '，不受表单配置修改影响；编辑已停用。' : '，但本月暂无快照数据，已回退为实时计算。'}点击「📷 返回实时」回到实时计算。</div>` : ''}
         ${!m0SpActiveList().length ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">⚠️ 尚未在「销售评级看板 → M0 计算范围」中配置任何 M0 分组，M0 绩效看板无数据可显示。</div>` : ''}
         <div class="table-wrap"><table id="m0PerfTable"></table></div>`;
   if (document.getElementById('m0PerfYear')) document.getElementById('m0PerfYear').value = m0PerfYear;
@@ -10287,7 +10366,7 @@ function refreshM0PerfSingle() {
   h += '</tr></thead><tbody>';
 
   rows.forEach(row => {
-    const d = m0PerfRowDisplay(year, row.m0, month, cfg);
+    const d = m0PerfRowDisplay(year, row.m0, month, cfg, m0PerfViewSnapshot ? getM0PerfSnapshot(year, row.m0, month) : null);
     const k = m0Key(year, row.m0, month);
     const rec0 = cloudData.m0PerformanceRecords[k] || {};
     const isManualScore = (rec0.finalScore !== undefined && rec0.finalScore !== null && rec0.finalScore !== '');
@@ -10296,21 +10375,41 @@ function refreshM0PerfSingle() {
     h += `<td class="perf-freeze" style="position:sticky;left:120px;z-index:2;background:#fff;white-space:nowrap;width:140px;box-shadow:2px 0 0 0 var(--gray-200)">${esc(row.team)}</td>`;
     d.items.forEach(x => {
       const it = x.it, ik = it.key;
-      const stdCell = `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="saveM0PerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="saveM0PerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
-      const actCell = `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveM0PerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+      const stdCell = d.frozen
+        ? `<div style="font-size:11px;margin-bottom:2px">${esc(x.text || '')}</div><div style="font-size:11px">要求 ${x.standard}</div>`
+        : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="saveM0PerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="saveM0PerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+      const actCell = d.frozen
+        ? `<div style="font-size:11px">${x.actual}</div>`
+        : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveM0PerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
       h += `<td style="background:#FFF8EE">${stdCell}</td>`;
       h += `<td style="background:#FFF8EE">${actCell}</td>`;
       h += `<td style="text-align:center;font-weight:600">${Number(x.score).toFixed(2)}</td>`;
     });
     d.bonus.forEach(x => {
-      const bk = 'bonus_' + x.b.key;
-      h += `<td><input type="number" class="form-control form-control-sm" value="${x.cnt}" onchange="saveM0PerfByKey('${k}', {'${bk}':parseFloat(this.value)||0})" style="width:60px"></td>`;
+      if (d.frozen) {
+        h += `<td style="text-align:center">${x.cnt}</td>`;
+      } else {
+        const bk = 'bonus_' + x.b.key;
+        h += `<td><input type="number" class="form-control form-control-sm" value="${x.cnt}" onchange="saveM0PerfByKey('${k}', {'${bk}':parseFloat(this.value)||0})" style="width:60px"></td>`;
+      }
     });
-    h += `<td><input type="number" class="form-control form-control-sm" value="${d.workingDays}" onchange="saveM0PerfByKey('${k}', {workingDays:parseInt(this.value,10)||30})" style="width:70px"></td>`;
+    if (d.frozen) {
+      h += `<td style="text-align:center">${d.workingDays}</td>`;
+    } else {
+      h += `<td><input type="number" class="form-control form-control-sm" value="${d.workingDays}" onchange="saveM0PerfByKey('${k}', {workingDays:parseInt(this.value,10)||30})" style="width:70px"></td>`;
+    }
     h += `<td style="text-align:center">${d.level || '—'}</td>`;
-    h += `<td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;min-height:40px;font-size:12px;width:100%" onchange="saveM0PerfByKey('${k}', {comment:this.value})" placeholder="评语">${esc(d.comment || '')}</textarea></td>`;
-    const resetBtn = isManualScore ? `<button class="btn btn-xs btn-outline" title="重置为公式自动值" onclick="saveM0PerfByKey('${k}', {finalScore:null})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
-    h += `<td style="text-align:center">${resetBtn}<input type="number" class="form-control form-control-sm" value="${Number(d.finalScore).toFixed(2)}" onchange="saveM0PerfByKey('${k}', {finalScore:this.value===''||this.value===null?null:parseFloat(this.value)})" style="width:90px;margin-top:2px;color:${scoreColor(d.finalScore)};font-weight:700"></td>`;
+    if (d.frozen) {
+      h += `<td style="white-space:pre-wrap">${esc(d.comment || '')}</td>`;
+    } else {
+      h += `<td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;min-height:40px;font-size:12px;width:100%" onchange="saveM0PerfByKey('${k}', {comment:this.value})" placeholder="评语">${esc(d.comment || '')}</textarea></td>`;
+    }
+    if (d.frozen) {
+      h += `<td style="text-align:center;color:${scoreColor(d.finalScore)};font-weight:700">${Number(d.finalScore).toFixed(2)}</td>`;
+    } else {
+      const resetBtn = isManualScore ? `<button class="btn btn-xs btn-outline" title="重置为公式自动值" onclick="saveM0PerfByKey('${k}', {finalScore:null})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
+      h += `<td style="text-align:center">${resetBtn}<input type="number" class="form-control form-control-sm" value="${Number(d.finalScore).toFixed(2)}" onchange="saveM0PerfByKey('${k}', {finalScore:this.value===''||this.value===null?null:parseFloat(this.value)})" style="width:90px;margin-top:2px;color:${scoreColor(d.finalScore)};font-weight:700"></td>`;
+    }
     h += `<td style="text-align:center">${fmtSalesMoney(d.base)}</td>`;
     const bonusMoney = (d.base || 0) * (d.finalScore || 0) / 100;
     h += `<td style="text-align:center;font-weight:700">${fmtSalesMoney(bonusMoney)}</td>`;
@@ -10343,7 +10442,7 @@ function exportM0PerfSingleXlsx() {
   header.push('当月在职天数', '当月M0职级', '总评', '绩效评分', '绩效基数', '绩效奖金');
   const aoa = [header];
   rows.forEach(row => {
-    const d = m0PerfRowDisplay(year, row.m0, month, cfg);
+    const d = m0PerfRowDisplay(year, row.m0, month, cfg, m0PerfViewSnapshot ? getM0PerfSnapshot(year, row.m0, month) : null);
     const line = [row.m0, row.team];
     d.items.forEach(x => { line.push(x.standard, x.actual, Number(x.score).toFixed(2)); });
     d.bonus.forEach(x => line.push(x.cnt));
@@ -10421,6 +10520,7 @@ function m0PerfFilterSp(m0) {
   return (!m0PerfSpFilter.length || m0PerfSpFilter.indexOf(m0) >= 0) && m0PerfPassTeamFilter(m0);
 }
 function openM0PerfBatchStandard() {
+  if (m0PerfViewSnapshot) { showToast('快照查看模式下不可批量编辑，请先点「返回实时」', 'warning'); return; }
   const cfg = getM0PerfConfig();
   const items = (cfg.items || []).filter(it => it.enabled);
   if (!items.length) { showToast('当前无启用的考核项', 'warning'); return; }
