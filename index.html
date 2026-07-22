@@ -9659,15 +9659,15 @@ function refreshPerfSingle() {
   else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
 
   let h = '<thead><tr>';
-  h += '<th rowspan="2" style="text-align:left;width:100px">销售</th>';
-  h += '<th rowspan="2" style="text-align:left;width:120px">团队</th>';
+  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:150px;white-space:nowrap">销售</th>';
+  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:150px;z-index:3;background:#fff;text-align:left;width:160px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">团队</th>';
   items.forEach(it => {
     h += `<th colspan="3" style="text-align:center;background:#FAEEDA">${esc(it.name)}（${it.weight || 0}%）</th>`;
   });
   if (bonusList.length) h += `<th colspan="${bonusList.length}" style="text-align:center;background:#EAF3DE">加分项</th>`;
   h += '<th rowspan="2" style="text-align:center;width:70px">当月在职天数</th>';
   h += '<th rowspan="2" style="text-align:center;width:80px">当月销售职级</th>';
-  h += '<th rowspan="2" style="text-align:center;min-width:160px">总评</th>';
+  h += '<th rowspan="2" style="text-align:center;min-width:180px">总评</th>';
   h += '<th rowspan="2" style="text-align:center;width:70px">绩效评分</th>';
   h += '<th rowspan="2" style="text-align:center;width:80px">绩效基数</th>';
   h += '<th rowspan="2" style="text-align:center;width:90px">绩效奖金</th>';
@@ -9686,8 +9686,8 @@ function refreshPerfSingle() {
     const rec0 = cloudData.performanceRecords[k] || {};
     const isManualScore = (rec0.finalScore !== undefined && rec0.finalScore !== null && rec0.finalScore !== '');
     h += `<tr>`;
-    h += `<td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
-    h += `<td>${esc(row.team)}</td>`;
+    h += `<td class="perf-freeze" style="position:sticky;left:0;z-index:2;background:#fff;white-space:nowrap">${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
+    h += `<td class="perf-freeze" style="position:sticky;left:150px;z-index:2;background:#fff;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">${esc(row.team)}</td>`;
     d.items.forEach(x => {
       const it = x.it, ik = it.key;
       // 要求列（所有考核项统一：描述 + 要求数值），演示考核与手动录入样式一致
@@ -9730,9 +9730,9 @@ function refreshPerfSingle() {
     h += `<td style="text-align:center">${d.level || '—'}</td>`;
     // 总评
     if (d.frozen) {
-      h += `<td>${esc(d.comment || '')}</td>`;
+      h += `<td style="white-space:pre-wrap">${esc(d.comment || '')}</td>`;
     } else {
-      h += `<td><input type="text" class="form-control form-control-sm" value="${(d.comment || '').replace(/"/g,'&quot;')}" onchange="savePerfByKey('${k}', {comment:this.value})" placeholder="评语"></td>`;
+      h += `<td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;min-height:40px;font-size:12px;width:100%" onchange="savePerfByKey('${k}', {comment:this.value})" placeholder="评语">${esc(d.comment || '')}</textarea></td>`;
     }
     // 绩效评分（可手动修改，↺ 重置为公式自动值）
     if (d.frozen) {
