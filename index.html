@@ -608,6 +608,7 @@ async function loadCoreData() {
     if (!cloudData.formConfig.performanceConfig || typeof cloudData.formConfig.performanceConfig !== 'object') {
       cloudData.formConfig.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
     }
+    cloudData.formConfig.performanceConfig = normalizePerfConfig(cloudData.formConfig.performanceConfig);
     if (!cloudData.formConfig.performanceBase || typeof cloudData.formConfig.performanceBase !== 'object') cloudData.formConfig.performanceBase = {};
     if (!fcData) {
       try { await fetch(FB_BASE + '/formConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.formConfig)}); } catch(e) {}
@@ -716,6 +717,7 @@ async function loadCoreData() {
     if (!cloudData.formConfig.performanceConfig || typeof cloudData.formConfig.performanceConfig !== 'object') {
       cloudData.formConfig.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
     }
+    cloudData.formConfig.performanceConfig = normalizePerfConfig(cloudData.formConfig.performanceConfig);
     if (!cloudData.formConfig.performanceBase || typeof cloudData.formConfig.performanceBase !== 'object') cloudData.formConfig.performanceBase = {};
   }
 }
@@ -1300,14 +1302,20 @@ const DEFAULT_FORM_CONFIG = {
   teamTargets: {},
   // 销售绩效统计配置
   performanceConfig: {
-    // 考核项权重（总和应为100）
-    weights: { demo: 70, effective: 10, channel: 10, newMedia: 10 },
-    // 默认目标值（可被单月看板中每行覆盖）
-    targets: { demo: 10, effective: 75, channel: 1, newMedia: 8 },
-    // 加分项：name=显示名，points=单项分值
-    bonusList: [
-      { key: 'roleModelAward', name: '个人获奖', points: 10 },
-      { key: 'roleModelNominee', name: '参评', points: 2 }
+    // 总分是否可超过100（false 则封顶100）
+    totalCapAt100: true,
+    // 考核项（系统预设，可启用/停用、可自定义）：name=名称；type=auto-demo(自动取自拓演示)/manual(手动录入)；
+    // enabled=启用；weight=权重(%)；standard=考核标准/数字(用于计算得分)；text=文字描述(默认，可在单月每行覆盖)；capAt100=该项得分是否可超过100
+    items: [
+      { key: 'demo', name: '演示考核', type: 'auto-demo', enabled: true, weight: 70, standard: 10, text: '完成自拓演示', capAt100: true },
+      { key: 'effective', name: '有效建联', type: 'manual', enabled: true, weight: 10, standard: 75, text: '有效建联', capAt100: true },
+      { key: 'channel', name: '渠道', type: 'manual', enabled: true, weight: 10, standard: 1, text: '渠道拓展', capAt100: true },
+      { key: 'newMedia', name: '新媒体', type: 'manual', enabled: true, weight: 10, standard: 8, text: '新媒体运营', capAt100: true }
+    ],
+    // 加分项：name=名称；points=单项分值；text=文字描述；enabled=启用；capAt100=该项得分是否可超过100
+    bonus: [
+      { key: 'roleModelAward', name: '个人获奖', points: 10, text: '', enabled: true, capAt100: false },
+      { key: 'roleModelNominee', name: '参评', points: 2, text: '', enabled: true, capAt100: false }
     ]
   },
   // 绩效基数：按销售职级（gradeConfig.name）设置，最终基数 = 配置值 × 当月在职天数/30
@@ -4518,7 +4526,7 @@ function renderFormConfig() {
       <div class="summary-tab ${configTab==='signinEvents'?'active':''}" onclick="switchConfigTab('signinEvents')">签到事件配置</div>
       <div class="summary-tab ${configTab==='customerTags'?'active':''}" onclick="switchConfigTab('customerTags')">客户标签配置</div>
       <div class="summary-tab ${configTab==='gradeConfig'?'active':''}" onclick="switchConfigTab('gradeConfig')">评级标准配置</div>
-      <div class="summary-tab ${configTab==='performance'?'active':''}" onclick="switchConfigTab('performance')">绩效配置</div>
+      <div class="summary-tab ${configTab==='performance'?'active':''}" onclick="switchConfigTab('performance')">销售绩效配置</div>
     </div>
     <div id="configContent"></div>
     <div style="margin-top:12px;font-size:12px;color:var(--gray-500)">
@@ -4707,47 +4715,77 @@ function renderConfigContent() {
   }
   // ===== 绩效配置 tab（销售绩效统计）=====
   if (configTab === 'performance') {
-    const cfg = cloudData.formConfig.performanceConfig || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
-    const w = cfg.weights || DEFAULT_FORM_CONFIG.performanceConfig.weights;
-    const t = cfg.targets || DEFAULT_FORM_CONFIG.performanceConfig.targets;
-    const bl = cfg.bonusList || DEFAULT_FORM_CONFIG.performanceConfig.bonusList;
+    const cfg = normalizePerfConfig(cloudData.formConfig.performanceConfig || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig)));
+    cloudData.formConfig.performanceConfig = cfg;
     const levels = (cloudData.formConfig.gradeConfig || DEFAULT_FORM_CONFIG.gradeConfig).map(l => l.name);
     const baseMap = cloudData.formConfig.performanceBase || {};
+    const items = cfg.items || [];
+    const bonus = cfg.bonus || [];
     c.innerHTML = `
       <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
-        配置销售绩效统计的<b>权重、默认目标、加分项</b>以及<b>各职级的绩效基数</b>。保存后立即生效；单月看板中每行的目标值可在此基础上单独覆盖。
+        配置销售绩效统计的<b>考核项（系统预设，可启用/停用/自定义）</b>、<b>加分项</b>以及<b>各职级绩效基数</b>。保存后立即生效；单月看板中每行可单独覆盖考核要求、完成情况、描述文字与加分次数。
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><h4>考核项权重与默认目标</h4><span style="font-size:12px;color:var(--gray-500)">权重总和建议为100；目标值可在单月看板按行覆盖</span></div>
+        <div class="card-header"><h4>总分规则</h4></div>
         <div class="card-body">
-          <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:14px;margin-bottom:14px">
-            <div class="form-group" style="margin-bottom:0"><label>演示考核权重(%)</label><input type="number" class="form-control" value="${w.demo}" onchange="updatePerfConfig('weights','demo',parseFloat(this.value)||0)" placeholder="70"></div>
-            <div class="form-group" style="margin-bottom:0"><label>有效建联权重(%)</label><input type="number" class="form-control" value="${w.effective}" onchange="updatePerfConfig('weights','effective',parseFloat(this.value)||0)" placeholder="10"></div>
-            <div class="form-group" style="margin-bottom:0"><label>渠道权重(%)</label><input type="number" class="form-control" value="${w.channel}" onchange="updatePerfConfig('weights','channel',parseFloat(this.value)||0)" placeholder="10"></div>
-            <div class="form-group" style="margin-bottom:0"><label>新媒体权重(%)</label><input type="number" class="form-control" value="${w.newMedia}" onchange="updatePerfConfig('weights','newMedia',parseFloat(this.value)||0)" placeholder="10"></div>
-          </div>
-          <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:14px">
-            <div class="form-group" style="margin-bottom:0"><label>演示默认目标</label><input type="number" class="form-control" value="${t.demo}" onchange="updatePerfConfig('targets','demo',parseFloat(this.value)||0)" placeholder="10"></div>
-            <div class="form-group" style="margin-bottom:0"><label>有效建联默认目标</label><input type="number" class="form-control" value="${t.effective}" onchange="updatePerfConfig('targets','effective',parseFloat(this.value)||0)" placeholder="75"></div>
-            <div class="form-group" style="margin-bottom:0"><label>渠道默认目标</label><input type="number" class="form-control" value="${t.channel}" onchange="updatePerfConfig('targets','channel',parseFloat(this.value)||0)" placeholder="1"></div>
-            <div class="form-group" style="margin-bottom:0"><label>新媒体默认目标</label><input type="number" class="form-control" value="${t.newMedia}" onchange="updatePerfConfig('targets','newMedia',parseFloat(this.value)||0)" placeholder="8"></div>
-          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <input type="checkbox" ${cfg.totalCapAt100 ? 'checked' : ''} onchange="updatePerfTotalCap(this.checked)"> 总分是否可超过 100（<b>不勾选</b>则各项加权与加分累加后的总分封顶 100）
+          </label>
         </div>
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><h4>加分项配置</h4><span style="font-size:12px;color:var(--gray-500)">在单月绩效看板中可勾选/输入次数，自动累加对应分值</span></div>
+        <div class="card-header"><h4>考核项配置（系统预设，可启用/停用）</h4><span style="font-size:12px;color:var(--gray-500)">权重总和建议为100；数字=考核标准/目标（用于计算得分）；文字=考核项描述（默认，可在单月每行覆盖）</span></div>
         <div class="card-body">
-          <div id="perfBonusList">
-            ${bl.map((b, i) => `
-              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-                <span class="badge badge-gray" style="font-size:12px">${i + 1}</span>
-                <input type="text" class="form-control" value="${b.name.replace(/"/g,'&quot;')}" onchange="updatePerfBonus(${i}, 'name', this.value)" style="flex:1;min-width:120px;max-width:200px" placeholder="如：个人获奖">
-                <input type="number" class="form-control" value="${b.points}" onchange="updatePerfBonus(${i}, 'points', parseFloat(this.value)||0)" style="width:110px" placeholder="分值">
-                <button class="btn btn-danger btn-sm" onclick="deletePerfBonus(${i})">删除</button>
+          <div id="perfItemsList">
+            ${items.map((it, i) => `
+              <div class="perf-item-card" style="border:1px solid var(--gray-200);border-radius:10px;padding:12px;margin-bottom:12px;${it.enabled ? '' : 'opacity:.55'}">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                  <input type="checkbox" ${it.enabled ? 'checked' : ''} onchange="togglePerfItemEnabled(${i})" title="启用/停用">
+                  <b style="font-size:13px">${i + 1}. ${esc(it.name)}</b>
+                  <span class="badge badge-gray" style="font-size:11px">${it.type === 'auto-demo' ? '自动(自拓演示)' : '手动录入'}</span>
+                  <div style="flex:1"></div>
+                  <button class="btn btn-sm btn-outline" onclick="movePerfItem(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
+                  <button class="btn btn-sm btn-outline" onclick="movePerfItem(${i}, 1)" ${i === items.length - 1 ? 'disabled' : ''}>↓</button>
+                  <button class="btn btn-sm btn-danger" onclick="deletePerfItem(${i})">删除</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px">
+                  <div class="form-group" style="margin-bottom:0"><label>考核项名称</label><input type="text" class="form-control" value="${esc(it.name)}" onchange="updatePerfItem(${i}, 'name', this.value)"></div>
+                  <div class="form-group" style="margin-bottom:0"><label>类型</label><select class="form-control" onchange="updatePerfItem(${i}, 'type', this.value)"><option value="auto-demo" ${it.type === 'auto-demo' ? 'selected' : ''}>自动(自拓演示)</option><option value="manual" ${it.type === 'manual' ? 'selected' : ''}>手动录入</option></select></div>
+                  <div class="form-group" style="margin-bottom:0"><label>权重(%)</label><input type="number" class="form-control" value="${it.weight}" onchange="updatePerfItem(${i}, 'weight', parseFloat(this.value) || 0)"></div>
+                  <div class="form-group" style="margin-bottom:0"><label>考核标准(数字)</label><input type="number" class="form-control" value="${it.standard}" onchange="updatePerfItem(${i}, 'standard', parseFloat(this.value) || 0)"></div>
+                  <div class="form-group" style="margin-bottom:0;grid-column:span 2"><label>文字描述</label><input type="text" class="form-control" value="${esc(it.text || '')}" onchange="updatePerfItem(${i}, 'text', this.value)" placeholder="考核项描述，可在单月每行覆盖"></div>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${it.capAt100 ? 'checked' : ''} onchange="updatePerfItem(${i}, 'capAt100', this.checked)"> 该项得分可超100</label>
+                </div>
               </div>
             `).join('')}
           </div>
-          <button class="btn btn-outline" style="width:100%;padding:10px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addPerfBonus()">添加加分项</button>
+          <button class="btn btn-outline" style="width:100%;padding:10px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addPerfItem()">添加考核项</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>加分项配置</h4><span style="font-size:12px;color:var(--gray-500)">在单月绩效看板中可录入次数，自动累加对应分值</span></div>
+        <div class="card-body">
+          <div id="perfBonusList">
+            ${bonus.map((b, i) => `
+              <div class="perf-item-card" style="border:1px solid var(--gray-200);border-radius:10px;padding:12px;margin-bottom:12px;${b.enabled ? '' : 'opacity:.55'}">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                  <input type="checkbox" ${b.enabled ? 'checked' : ''} onchange="togglePerfBonusEnabled(${i})" title="启用/停用">
+                  <b style="font-size:13px">${esc(b.name)}</b>
+                  <div style="flex:1"></div>
+                  <button class="btn btn-sm btn-outline" onclick="movePerfBonusItem(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
+                  <button class="btn btn-sm btn-outline" onclick="movePerfBonusItem(${i}, 1)" ${i === bonus.length - 1 ? 'disabled' : ''}>↓</button>
+                  <button class="btn btn-sm btn-danger" onclick="deletePerfBonusItem(${i})">删除</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px">
+                  <div class="form-group" style="margin-bottom:0"><label>加分项名称</label><input type="text" class="form-control" value="${esc(b.name)}" onchange="updatePerfBonusItem(${i}, 'name', this.value)"></div>
+                  <div class="form-group" style="margin-bottom:0"><label>分值</label><input type="number" class="form-control" value="${b.points}" onchange="updatePerfBonusItem(${i}, 'points', parseFloat(this.value) || 0)"></div>
+                  <div class="form-group" style="margin-bottom:0"><label>文字描述</label><input type="text" class="form-control" value="${esc(b.text || '')}" onchange="updatePerfBonusItem(${i}, 'text', this.value)" placeholder="可选"></div>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${b.capAt100 ? 'checked' : ''} onchange="updatePerfBonusItem(${i}, 'capAt100', this.checked)"> 该项得分可超100</label>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn btn-outline" style="width:100%;padding:10px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addPerfBonusItem()">添加加分项</button>
         </div>
       </div>
       <div class="card" style="margin-bottom:16px">
@@ -4756,8 +4794,8 @@ function renderConfigContent() {
           <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:14px">
             ${levels.map((lv, i) => `
               <div class="form-group" style="margin-bottom:0">
-                <label>${lv}</label>
-                <input type="number" class="form-control" value="${baseMap[lv] || 0}" onchange="updatePerfBase(${JSON.stringify(lv)}, parseFloat(this.value)||0)" placeholder="0">
+                <label>${esc(lv)}</label>
+                <input type="number" class="form-control" value="${baseMap[lv] || 0}" onchange="updatePerfBase(${JSON.stringify(lv)}, parseFloat(this.value) || 0)" placeholder="0">
               </div>
             `).join('')}
           </div>
@@ -4921,32 +4959,73 @@ function deleteGradeLevel(i) {
   renderConfigContent();
 }
 
-// ===== 绩效配置 编辑助手 =====
-function updatePerfConfig(section, key, value) {
-  if (!cloudData.formConfig.performanceConfig) cloudData.formConfig.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
-  if (!cloudData.formConfig.performanceConfig[section]) cloudData.formConfig.performanceConfig[section] = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig[section]));
-  cloudData.formConfig.performanceConfig[section][key] = value;
-}
+// ===== 销售绩效配置 编辑助手 =====
 function updatePerfBase(levelName, value) {
   if (!cloudData.formConfig.performanceBase) cloudData.formConfig.performanceBase = {};
   cloudData.formConfig.performanceBase[levelName] = value;
 }
-function updatePerfBonus(i, field, value) {
-  if (!cloudData.formConfig.performanceConfig) cloudData.formConfig.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
-  const list = cloudData.formConfig.performanceConfig.bonusList || DEFAULT_FORM_CONFIG.performanceConfig.bonusList;
-  if (list[i]) list[i][field] = value;
+function updatePerfTotalCap(v) {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (cfg) cfg.totalCapAt100 = v;
 }
-function addPerfBonus() {
-  if (!cloudData.formConfig.performanceConfig) cloudData.formConfig.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
-  if (!cloudData.formConfig.performanceConfig.bonusList) cloudData.formConfig.performanceConfig.bonusList = [];
-  cloudData.formConfig.performanceConfig.bonusList.push({ key: 'bonus_' + Date.now(), name: '新加分项', points: 0 });
+function updatePerfItem(i, field, value) {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (cfg && cfg.items && cfg.items[i]) cfg.items[i][field] = value;
+}
+function togglePerfItemEnabled(i) {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (cfg && cfg.items && cfg.items[i]) { cfg.items[i].enabled = !cfg.items[i].enabled; renderConfigContent(); }
+}
+function movePerfItem(i, dir) {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (!cfg || !cfg.items) return;
+  const j = i + dir;
+  if (j < 0 || j >= cfg.items.length) return;
+  const tmp = cfg.items[i]; cfg.items[i] = cfg.items[j]; cfg.items[j] = tmp;
   renderConfigContent();
 }
-function deletePerfBonus(i) {
-  if (!confirm('确定删除此加分项吗？')) return;
-  if (cloudData.formConfig.performanceConfig && cloudData.formConfig.performanceConfig.bonusList) {
-    cloudData.formConfig.performanceConfig.bonusList.splice(i, 1);
-  }
+function addPerfItem() {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (!cfg) return;
+  if (!cfg.items) cfg.items = [];
+  cfg.items.push({ key: 'item_' + Date.now(), name: '新考核项', type: 'manual', enabled: true, weight: 0, standard: 0, text: '', capAt100: true });
+  renderConfigContent();
+}
+function deletePerfItem(i) {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (!cfg || !cfg.items) return;
+  if (!confirm('确定删除此考核项吗？已有绩效数据中的该项得分将不再计入（需点击保存才会写入云端）。')) return;
+  cfg.items.splice(i, 1);
+  renderConfigContent();
+}
+function updatePerfBonusItem(i, field, value) {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (cfg && cfg.bonus && cfg.bonus[i]) cfg.bonus[i][field] = value;
+}
+function togglePerfBonusEnabled(i) {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (cfg && cfg.bonus && cfg.bonus[i]) { cfg.bonus[i].enabled = !cfg.bonus[i].enabled; renderConfigContent(); }
+}
+function movePerfBonusItem(i, dir) {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (!cfg || !cfg.bonus) return;
+  const j = i + dir;
+  if (j < 0 || j >= cfg.bonus.length) return;
+  const tmp = cfg.bonus[i]; cfg.bonus[i] = cfg.bonus[j]; cfg.bonus[j] = tmp;
+  renderConfigContent();
+}
+function addPerfBonusItem() {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (!cfg) return;
+  if (!cfg.bonus) cfg.bonus = [];
+  cfg.bonus.push({ key: 'bonus_' + Date.now(), name: '新加分项', points: 0, text: '', enabled: true, capAt100: false });
+  renderConfigContent();
+}
+function deletePerfBonusItem(i) {
+  const cfg = cloudData.formConfig.performanceConfig;
+  if (!cfg || !cfg.bonus) return;
+  if (!confirm('确定删除此加分项吗？已有绩效数据中的该项得分将不再计入（需点击保存才会写入云端）。')) return;
+  cfg.bonus.splice(i, 1);
   renderConfigContent();
 }
 
@@ -8949,8 +9028,31 @@ let perfSingleMonth = (new Date().getMonth() + 1);
 
 function perfKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
 
+function normalizePerfConfig(cfg) {
+  if (!cfg || typeof cfg !== 'object') return { items: [], bonus: [], totalCapAt100: true };
+  if (Array.isArray(cfg.items)) {
+    if (cfg.totalCapAt100 === undefined) cfg.totalCapAt100 = true;
+    if (!Array.isArray(cfg.bonus)) cfg.bonus = [];
+    return cfg;
+  }
+  // 旧结构（weights/targets/bonusList）迁移到新结构（items/bonus）
+  const w = cfg.weights || {}, t = cfg.targets || {};
+  const items = [
+    { key: 'demo', name: '演示考核', type: 'auto-demo', enabled: true, weight: w.demo || 0, standard: t.demo || 0, text: '完成自拓演示', capAt100: true },
+    { key: 'effective', name: '有效建联', type: 'manual', enabled: true, weight: w.effective || 0, standard: t.effective || 0, text: '有效建联', capAt100: true },
+    { key: 'channel', name: '渠道', type: 'manual', enabled: true, weight: w.channel || 0, standard: t.channel || 0, text: '渠道拓展', capAt100: true },
+    { key: 'newMedia', name: '新媒体', type: 'manual', enabled: true, weight: w.newMedia || 0, standard: t.newMedia || 0, text: '新媒体运营', capAt100: true }
+  ];
+  const bonus = (cfg.bonusList || []).map(b => ({ key: b.key, name: b.name, points: b.points, text: '', enabled: true, capAt100: false }));
+  cfg.items = items;
+  cfg.bonus = bonus;
+  if (cfg.totalCapAt100 === undefined) cfg.totalCapAt100 = true;
+  delete cfg.weights; delete cfg.targets; delete cfg.bonusList;
+  return cfg;
+}
+
 function getPerfConfig() {
-  return (cloudData.formConfig && cloudData.formConfig.performanceConfig) || DEFAULT_FORM_CONFIG.performanceConfig;
+  return normalizePerfConfig((cloudData.formConfig && cloudData.formConfig.performanceConfig) || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig)));
 }
 
 function getPerfBase(level) {
@@ -9013,37 +9115,58 @@ function getPerfRecord(year, sp, m) {
   const cfg = getPerfConfig();
   const k = perfKey(year, sp, m);
   const stored = (cloudData.performanceRecords && cloudData.performanceRecords[k]) || {};
-  const defaults = {
-    demoTarget: (cfg.targets && cfg.targets.demo) || 0,
-    demoActual: countSelfDemo(year, m, sp),
-    effectiveActual: 0,
-    channelActual: 0,
-    newMediaActual: 0,
-    workingDays: 30,
-    comment: ''
-  };
-  (cfg.bonusList || []).forEach(b => { defaults['bonus_' + b.key] = 0; });
+  const defaults = { workingDays: 30, comment: '' };
+  (cfg.items || []).forEach(it => {
+    defaults['standard_' + it.key] = it.standard || 0;
+    defaults['actual_' + it.key] = 0;
+    defaults['manual_' + it.key] = false;
+    defaults['text_' + it.key] = it.text || '';
+  });
+  (cfg.bonus || []).forEach(b => { defaults['bonus_' + b.key] = 0; });
   return Object.assign({}, defaults, stored);
 }
 
-function computePerfScore(rec, cfg) {
-  const w = cfg.weights || {};
-  const t = cfg.targets || {};
-  const demoScore = t.demo ? Math.min(100, (rec.demoActual / t.demo) * 100) : 0;
-  const effScore = t.effective ? Math.min(100, (rec.effectiveActual / t.effective) * 100) : 0;
-  const chScore = t.channel ? Math.min(100, (rec.channelActual / t.channel) * 100) : 0;
-  const nmScore = t.newMedia ? Math.min(100, (rec.newMediaActual / t.newMedia) * 100) : 0;
-  let bonus = 0;
-  (cfg.bonusList || []).forEach(b => {
-    bonus += (parseFloat(rec['bonus_' + b.key]) || 0) * (b.points || 0);
+// 取某考核项的实际完成值：auto-demo 类型默认取自拓演示汇总，除非被手动覆盖
+function getPerfItemActual(item, rec, year, sp, month) {
+  if (item.type === 'auto-demo') {
+    if (rec['manual_' + item.key]) return parseFloat(rec['actual_' + item.key]) || 0;
+    return countSelfDemo(year, month, sp);
+  }
+  return parseFloat(rec['actual_' + item.key]) || 0;
+}
+
+function computePerfScore(rec, cfg, year, sp, month) {
+  const cfgN = normalizePerfConfig(cfg);
+  const itemScores = {};
+  let total = 0;
+  (cfgN.items || []).filter(it => it.enabled).forEach(it => {
+    const standard = parseFloat(rec['standard_' + it.key]);
+    const std = (isNaN(standard) || standard === 0) ? (it.standard || 0) : standard;
+    const actual = getPerfItemActual(it, rec, year, sp, month);
+    let raw = std ? (actual / std) * 100 : 0;
+    if (it.capAt100) raw = Math.min(100, raw);
+    const weighted = raw * (it.weight || 0) / 100;
+    itemScores[it.key] = { actual, standard: std, raw, weighted };
+    total += weighted;
   });
-  const score = demoScore * (w.demo || 0) / 100 + effScore * (w.effective || 0) / 100 + chScore * (w.channel || 0) / 100 + nmScore * (w.newMedia || 0) / 100 + bonus;
-  return { demoScore, effScore, chScore, nmScore, bonus, score };
+  const bonusScores = {};
+  let bonus = 0;
+  (cfgN.bonus || []).filter(b => b.enabled).forEach(b => {
+    const cnt = parseFloat(rec['bonus_' + b.key]) || 0;
+    let pts = cnt * (b.points || 0);
+    if (b.capAt100) pts = Math.min(100, pts);
+    bonusScores[b.key] = { cnt, pts };
+    bonus += pts;
+  });
+  let score = total + bonus;
+  if (cfgN.totalCapAt100) score = Math.min(100, score);
+  return { itemScores, bonusScores, total, bonus, score };
 }
 
 function savePerfByKey(key, patch) {
   if (!cloudData.performanceRecords) cloudData.performanceRecords = {};
   cloudData.performanceRecords[key] = Object.assign({}, cloudData.performanceRecords[key] || {}, patch);
+  if (perfTab === 'single') refreshPerfSingle();
   apiUpdate('performanceRecords', key, cloudData.performanceRecords[key]).catch(e => showToast('保存绩效数据失败: ' + e.message, 'error'));
 }
 
@@ -9077,7 +9200,7 @@ function renderSalesPerf() {
           <button class="btn btn-outline btn-sm" onclick="refreshPerfSingle()">刷新计算</button>
           `}
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：矩阵展示每位在职销售每月的销售职级（联动销售评级看板）与绩效评分。' : '说明：单月绩效看板中可编辑考核要求、完成情况、其他考核项、加分项、在职天数、总评；完成情况默认取自拜访数据「自拓演示」归类统计，可手动修正；绩效评分与绩效基数由公式实时计算（点击「刷新计算」更新）。'}</div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：矩阵展示每位在职销售每月的销售职级（联动销售评级看板）与绩效评分。' : '说明：单月绩效看板中，演示考核项的「完成情况」默认自动取自拜访数据「自拓演示」归类汇总（显示「自动」，手动修改后点 ↺ 可重置回自动值）；每行描述文字、考核要求、完成情况、加分次数、在职天数、总评均可单独编辑保存；绩效评分（含各项封顶/总分封顶规则）与绩效基数由公式实时计算（点击「刷新计算」更新）。'}</div>
         <div class="table-wrap"><table id="perfTable"></table></div>
       </div>
     </div>`;
@@ -9119,7 +9242,7 @@ function refreshPerfMatrix() {
     months.forEach(m => {
       const level = getSalesLevel(year, row.sp, m, baseMap);
       const rec = getPerfRecord(year, row.sp, m);
-      const score = computePerfScore(rec, cfg).score;
+      const score = computePerfScore(rec, cfg, year, row.sp, m).score;
       h += `<td class="num" style="text-align:center"><div>${level || '—'}</div><div style="color:var(--primary);font-weight:600">${score.toFixed(2)}</div></td>`;
     });
     h += '</tr>';
@@ -9148,47 +9271,66 @@ function refreshPerfSingle() {
   });
   const rows = [...spSet].sort((a, b) => a.localeCompare(b, 'zh')).map(sp => ({ sp, team: getSalesTeam(sp) }));
   const cfg = getPerfConfig();
-  const bonusList = cfg.bonusList || [];
+  const items = (cfg.items || []).filter(it => it.enabled);
+  const bonusList = (cfg.bonus || []).filter(b => b.enabled);
   const baseMap = buildSalesBaseForYear(year);
-  const otherWeight = (cfg.weights.effective || 0) + (cfg.weights.channel || 0) + (cfg.weights.newMedia || 0);
 
   let h = '<thead><tr>';
   h += '<th rowspan="2" style="text-align:left;width:100px">销售</th>';
   h += '<th rowspan="2" style="text-align:left;width:120px">团队</th>';
-  h += `<th colspan="3" style="text-align:center;background:#FAEEDA">演示考核（占${cfg.weights.demo || 0}%）</th>`;
-  h += `<th colspan="3" style="text-align:center;background:#E6F1FB">其他考核项（占${otherWeight}%）</th>`;
-  h += `<th colspan="${bonusList.length}" style="text-align:center;background:#EAF3DE">加分项</th>`;
+  items.forEach(it => {
+    const sub = it.type === 'auto-demo' ? 3 : 2;
+    h += `<th colspan="${sub}" style="text-align:center;background:#FAEEDA">${esc(it.name)}（${it.weight || 0}%）</th>`;
+  });
+  if (bonusList.length) h += `<th colspan="${bonusList.length}" style="text-align:center;background:#EAF3DE">加分项</th>`;
   h += '<th rowspan="2" style="text-align:center;width:70px">当月在职天数</th>';
   h += '<th rowspan="2" style="text-align:center;width:80px">当月销售职级</th>';
   h += '<th rowspan="2" style="text-align:center;width:70px">绩效评分</th>';
   h += '<th rowspan="2" style="text-align:center;min-width:160px">总评</th>';
   h += '<th rowspan="2" style="text-align:center;width:80px">绩效基数</th>';
   h += '</tr><tr>';
-  h += '<th style="background:#FAEEDA">考核要求</th><th style="background:#FAEEDA">完成情况</th><th style="background:#FAEEDA">得分</th>';
-  h += `<th style="background:#E6F1FB">有效建联${cfg.weights.effective || 0}%</th>`;
-  h += `<th style="background:#E6F1FB">渠道${cfg.weights.channel || 0}%</th>`;
-  h += `<th style="background:#E6F1FB">新媒体${cfg.weights.newMedia || 0}%</th>`;
+  items.forEach(it => {
+    if (it.type === 'auto-demo') {
+      h += '<th style="background:#FAEEDA">要求</th>';
+      h += '<th style="background:#FAEEDA">完成(自动)</th>';
+    } else {
+      h += '<th style="background:#FAEEDA">完成</th>';
+    }
+    h += '<th style="background:#FAEEDA">得分</th>';
+  });
   bonusList.forEach(b => { h += `<th style="background:#EAF3DE">${esc(b.name)}</th>`; });
   h += '</tr></thead><tbody>';
 
   rows.forEach(row => {
     const rec = getPerfRecord(year, row.sp, month);
-    const scores = computePerfScore(rec, cfg);
+    const scores = computePerfScore(rec, cfg, year, row.sp, month);
     const level = getSalesLevel(year, row.sp, month, baseMap);
     const base = getPerfBase(level) * (rec.workingDays || 30) / 30;
     const k = perfKey(year, row.sp, month);
     h += `<tr>`;
     h += `<td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
     h += `<td>${esc(row.team)}</td>`;
-    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.demoTarget}" onchange="savePerfByKey('${k}', {demoTarget:parseFloat(this.value)||0})" style="width:70px"></td>`;
-    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.demoActual}" onchange="savePerfByKey('${k}', {demoActual:parseFloat(this.value)||0})" style="width:70px"></td>`;
-    h += `<td style="text-align:center;font-weight:600">${scores.demoScore.toFixed(1)}</td>`;
-    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.effectiveActual}" onchange="savePerfByKey('${k}', {effectiveActual:parseFloat(this.value)||0})" style="width:70px"></td>`;
-    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.channelActual}" onchange="savePerfByKey('${k}', {channelActual:parseFloat(this.value)||0})" style="width:70px"></td>`;
-    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.newMediaActual}" onchange="savePerfByKey('${k}', {newMediaActual:parseFloat(this.value)||0})" style="width:70px"></td>`;
+    items.forEach(it => {
+      const ik = it.key;
+      const isAuto = it.type === 'auto-demo';
+      const manual = rec['manual_' + ik];
+      const actualVal = isAuto ? (manual ? (parseFloat(rec['actual_' + ik]) || 0) : countSelfDemo(year, month, row.sp)) : (parseFloat(rec['actual_' + ik]) || 0);
+      const stdVal = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '') ? rec['standard_' + ik] : (it.standard || 0);
+      const txtVal = (rec['text_' + ik] !== undefined && rec['text_' + ik] !== '') ? rec['text_' + ik] : (it.text || '');
+      const itemScore = (scores.itemScores[ik] || {}).raw || 0;
+      const descInput = `<input type="text" class="form-control form-control-sm" value="${esc(txtVal)}" onchange="savePerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px;margin-bottom:2px" placeholder="描述">`;
+      if (isAuto) {
+        h += `<td style="background:#FFF8EE">${descInput}<input type="number" class="form-control form-control-sm" value="${stdVal}" onchange="savePerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px"></td>`;
+        const resetBtn = manual ? `<button class="btn btn-xs btn-outline" title="重置为自动(自拓演示)" onclick="savePerfByKey('${k}', {'manual_${ik}':false})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
+        h += `<td style="background:#FFF8EE">${resetBtn}<input type="number" class="form-control form-control-sm" value="${actualVal}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:70px;margin-top:2px"></td>`;
+      } else {
+        h += `<td style="background:#FFF8EE">${descInput}<input type="number" class="form-control form-control-sm" value="${actualVal}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px"></td>`;
+      }
+      h += `<td style="text-align:center;font-weight:600">${itemScore.toFixed(1)}</td>`;
+    });
     bonusList.forEach(b => {
       const bk = 'bonus_' + b.key;
-      h += `<td><input type="number" class="form-control form-control-sm" value="${rec[bk] || 0}" onchange="savePerfByKey('${k}', {${JSON.stringify(bk)}:parseFloat(this.value)||0})" style="width:60px"></td>`;
+      h += `<td><input type="number" class="form-control form-control-sm" value="${rec[bk] || 0}" onchange="savePerfByKey('${k}', {'${bk}':parseFloat(this.value)||0})" style="width:60px"></td>`;
     });
     h += `<td><input type="number" class="form-control form-control-sm" value="${rec.workingDays}" onchange="savePerfByKey('${k}', {workingDays:parseInt(this.value,10)||30})" style="width:70px"></td>`;
     h += `<td style="text-align:center">${level || '—'}</td>`;
@@ -9197,7 +9339,8 @@ function refreshPerfSingle() {
     h += `<td style="text-align:center">${fmtSalesMoney(base)}</td>`;
     h += `</tr>`;
   });
-  if (!rows.length) h += `<tr><td colspan="${9 + bonusList.length}" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售</td></tr>`;
+  const colCount = 6 + items.reduce((s, it) => s + (it.type === 'auto-demo' ? 3 : 2), 0) + bonusList.length;
+  if (!rows.length) h += `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售</td></tr>`;
   h += '</tbody>';
   const tbl = document.getElementById('perfTable');
   if (tbl) tbl.innerHTML = h;
