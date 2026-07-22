@@ -1504,7 +1504,7 @@ function renderDashboard() {
 
   // --- Kanban 1: Daily missing reports (with date filter) ---
   const dailySubmitters = new Set(cloudData.dailyReports.filter(r => r.reportDate === dailyDate).map(r => r.userId));
-  const dailyMissing = activeUsers.filter(u => !dailySubmitters.has(u.id));
+  const dailyMissing = activeUsers.filter(u => u.role !== 'manager' && !dailySubmitters.has(u.id));
   const dailyBackfill = cloudData.dailyReports.filter(r => r.reportDate === dayBeforeYest && r.createdAt && r.createdAt.split('T')[0] === today);
 
   const dailyKanban = `
@@ -1536,7 +1536,7 @@ function renderDashboard() {
 
   // --- Kanban 2: Weekly missing reports (with date filter) ---
   const weeklySubmitters = new Set(cloudData.weeklyReports.filter(r => r.weekStart === weeklyDate).map(r => r.userId));
-  const weeklyMissing = activeUsers.filter(u => !weeklySubmitters.has(u.id));
+  const weeklyMissing = activeUsers.filter(u => u.role !== 'manager' && !weeklySubmitters.has(u.id));
 
   const weeklyKanban = `
     <div class="card" style="margin-bottom:20px">
@@ -1565,7 +1565,7 @@ function renderDashboard() {
   const ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
   const monthDaily = cloudData.dailyReports.filter(r => r.reportDate && r.reportDate.startsWith(ym));
   const monthWeekly = cloudData.weeklyReports.filter(r => r.weekStart && r.weekStart.startsWith(ym));
-  const monthStats = activeUsers.map(u => {
+  const monthStats = activeUsers.filter(u => u.role !== 'manager').map(u => {
     const dCount = monthDaily.filter(r => r.userId === u.id).length;
     const wCount = monthWeekly.filter(r => r.userId === u.id).length;
     return {name: u.name, department: u.department, dCount, wCount};
@@ -11192,7 +11192,7 @@ function mgrPerfRowDisplay(year, mgr, month, cfg, snap) {
   const items = (cfg.items || []).filter(it => it.enabled).map(it => {
     const ik = it.key;
     const manual = rec['manual_' + ik];
-    const actual = parseFloat(rec['actual_' + ik]) || 0;
+    const actual = (it.type === 'auto-team' || it.type === 'auto-demo') ? getPerfItemActual(it, rec, year, mgr, month) : (parseFloat(rec['actual_' + ik]) || 0);
     const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
     const stdRaw = manualStd ? rec['standard_' + ik] : (it.type === 'auto-team' ? teamTargetFor(year, mgr, month) : (it.standard || 0));
     const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
@@ -11232,7 +11232,7 @@ function saveMgrPerfSnapshot() {
     };
     (cfg.items || []).filter(it => it.enabled).forEach(it => {
       const ik = it.key;
-      const actual = parseFloat(rec['actual_' + ik]) || 0;
+      const actual = (it.type === 'auto-team' || it.type === 'auto-demo') ? getPerfItemActual(it, rec, year, mgr, month) : (parseFloat(rec['actual_' + ik]) || 0);
       const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
       const stdRaw = manualStd ? rec['standard_' + ik] : (it.type === 'auto-team' ? teamTargetFor(year, mgr, month) : (it.standard || 0));
       const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
