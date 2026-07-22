@@ -602,6 +602,7 @@ async function loadCoreData() {
       });
     }
     if (typeof cloudData.formConfig.customerSummaryNote !== 'string') cloudData.formConfig.customerSummaryNote = '';
+    if (!cloudData.formConfig.teamTargets || typeof cloudData.formConfig.teamTargets !== 'object') cloudData.formConfig.teamTargets = {};
     if (!fcData) {
       try { await fetch(FB_BASE + '/formConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.formConfig)}); } catch(e) {}
     }
@@ -1275,7 +1276,9 @@ const DEFAULT_FORM_CONFIG = {
     { name: '初级销售', promote: 0, demote: 0 },
     { name: '中级销售', promote: 300000, demote: 200000 },
     { name: '高级销售', promote: 600000, demote: 400000 }
-  ]
+  ],
+  // 团队月目标：{ [年份]: { [团队/门店]: { '01'..'12': 目标金额 } } }。用于报表看板2·团队业绩统计的月目标完成率计算，支持报表导入。
+  teamTargets: {}
 };
 
 function getChannels(type) {
@@ -6610,6 +6613,10 @@ const selectedSalesIds = new Set();
 let sbSortCol = null;          // 'total' 或 'YYYY-MM'
 let sbSortDir = 'desc';        // 'asc' | 'desc'
 let sbLastYearTeamMap = {};    // 团队 -> { 'YYYY-MM': 金额 }（上一年，用于同比）
+let sbTargetDraft = {};        // 团队月目标编辑草稿：{ 团队: { '01'..'12': 金额 } }
+let sbTargetDraftYear = '';    // 当前草稿所属年份
+let sbTargetTeams = [];        // 目标编辑表的团队顺序（用于按行索引更新）
+let sbTargetPanelOpen = false; // 目标设置面板是否展开
 const selectedUserIds = new Set();
 
 // 用户姓名 -> 状态(在职/离职/禁用) 映射，用于看板销售员标签
@@ -7092,8 +7099,21 @@ function renderSalesBoardStats() {
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="sbReset()">重置为全年</button></div>
       </div></div>
     </div>
-    <div class="card"><div class="card-header"><h4>📊 报表看板1 · 销售业绩统计</h4><span style="font-size:12px;color:var(--gray-500)">销售员（纵向）× 月份（横向）</span></div><div class="card-body"><div class="table-wrap"><table id="sbBoard1"></table></div></div></div>
-    <div class="card"><div class="card-header"><h4>📊 报表看板2 · 团队业绩统计</h4><span style="font-size:12px;color:var(--gray-500)">团队/门店（纵向）× 月份（横向）</span></div><div class="card-body"><div class="table-wrap"><table id="sbBoard2"></table></div></div></div>`;
+    <div class="card">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div><h4 style="display:inline">🎯 团队月目标设置（<span id="tgtYearLbl"></span> 年）</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">按团队×月份设定目标，支持报表导入</span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="downloadTeamTargetTemplate()">📋 下载模板</button>
+          <input type="file" id="tgtImportFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="importTeamTargets(this)">
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('tgtImportFile').click()">📥 导入报表</button>
+          <button class="btn btn-primary btn-sm" onclick="saveTeamTargets()">💾 保存目标</button>
+          <button class="btn btn-outline btn-sm" id="tgtToggleBtn" onclick="toggleTeamTargetPanel()">${sbTargetPanelOpen?'▲ 收起':'▼ 展开编辑'}</button>
+        </div>
+      </div>
+      <div class="card-body" id="tgtPanelBody" style="display:${sbTargetPanelOpen?'block':'none'}"><div class="table-wrap"><table id="tgtTable"></table></div></div>
+    </div>
+    <div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><div><h4 style="display:inline">📊 报表看板1 · 销售业绩统计</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">销售员（纵向）× 月份（横向）</span></div><button class="btn btn-outline btn-sm" onclick="exportSalesBoard1()">📤 导出</button></div><div class="card-body"><div class="table-wrap"><table id="sbBoard1"></table></div></div></div>
+    <div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><div><h4 style="display:inline">📊 报表看板2 · 团队业绩统计</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">团队/门店（纵向）× 月份（横向），含月目标完成率</span></div><button class="btn btn-outline btn-sm" onclick="exportSalesBoard2()">📤 导出</button></div><div class="card-body"><div class="table-wrap"><table id="sbBoard2"></table></div></div></div>`;
   const yEl = document.getElementById('sbYear'); if (yEl) yEl.value = year;
   document.getElementById('sbMFrom').value = '01';
   document.getElementById('sbMTo').value = '12';
@@ -7111,6 +7131,8 @@ function refreshSalesBoardStats() {
     if (!sbLastYearTeamMap[k]) sbLastYearTeamMap[k] = {};
     sbLastYearTeamMap[k][dm] = (sbLastYearTeamMap[k][dm] || 0) + toNum(r.amount);
   });
+  const tgtTbl = document.getElementById('tgtTable');
+  if (tgtTbl && (year !== sbTargetDraftYear || !tgtTbl.innerHTML.trim())) renderTeamTargetEditor(year);
   renderSalesBoardTable('sbBoard1', 'salesperson');
   renderSalesBoardTable('sbBoard2', 'team');
 }
@@ -7812,6 +7834,8 @@ function renderSalesBoardTable(tid, key) {
     rowsArr.sort((a, b) => b.t - a.t);
   }
   const userMap = key === 'salesperson' ? buildUserStatusMap() : null;
+  const sbYearVal = document.getElementById('sbYear') ? document.getElementById('sbYear').value : '';
+  const teamTargets = (key === 'team' && cloudData.formConfig.teamTargets && cloudData.formConfig.teamTargets[sbYearVal]) || {};
   let h = '<thead><tr><th>' + (key === 'salesperson' ? '销售员' : '团队/门店') + '</th>';
   months.forEach(m => {
     const ind = sbSortCol === m ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
@@ -7837,19 +7861,232 @@ function renderSalesBoardTable(tid, key) {
         } else {
           cell += `<div class="yoy-none">— 同比</div>`;
         }
+        const tgt = (teamTargets[row.k] && teamTargets[row.k][m.slice(5)]) || 0;
+        if (tgt > 0) {
+          const rate = v / tgt * 100;
+          cell += `<div style="font-size:11px;margin-top:2px;font-weight:600;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">完成 ${rate.toFixed(1)}%</div>`;
+        } else {
+          cell += `<div class="yoy-none">目标未设</div>`;
+        }
       }
       cell += `</td>`;
       h += cell;
     });
-    h += `<td class="num">${fmtSalesMoney(row.t)}</td></tr>`;
+    if (key === 'team') {
+      let rowTgt = 0;
+      months.forEach(m => { rowTgt += (teamTargets[row.k] && teamTargets[row.k][m.slice(5)]) || 0; });
+      let totCell = fmtSalesMoney(row.t);
+      if (rowTgt > 0) {
+        const rr = row.t / rowTgt * 100;
+        totCell += `<div style="font-size:11px;margin-top:2px;font-weight:600;color:${rr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(rowTgt)} · 完成 ${rr.toFixed(1)}%</div>`;
+      } else {
+        totCell += `<div class="yoy-none">目标未设</div>`;
+      }
+      h += `<td class="num">${totCell}</td></tr>`;
+    } else {
+      h += `<td class="num">${fmtSalesMoney(row.t)}</td></tr>`;
+    }
   });
   h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
-  let gt = 0;
+  let gt = 0, gTgt = 0;
+  if (key === 'team') { rowsArr.forEach(row => months.forEach(m => { gTgt += (teamTargets[row.k] && teamTargets[row.k][m.slice(5)]) || 0; })); }
   months.forEach(m => { gt += (colTot[m] || 0); h += `<td class="num">${fmtSalesMoney(colTot[m] || 0)}</td>`; });
-  h += `<td class="num">${fmtSalesMoney(gt)}</td></tr></tfoot>`;
+  let gtCell = fmtSalesMoney(gt);
+  if (key === 'team' && gTgt > 0) {
+    const gr = gt / gTgt * 100;
+    gtCell += `<div style="font-size:11px;margin-top:2px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(gTgt)} · 完成 ${gr.toFixed(1)}%</div>`;
+  }
+  h += `<td class="num">${gtCell}</td></tr></tfoot>`;
   document.getElementById(tid).innerHTML = h;
 }
 
+// ===== 团队月目标：设置 / 导入 / 导出 =====
+function sbAllTeams(year) {
+  const set = new Set();
+  cloudData.salesRecords.forEach(r => { if ((r.docMonth || '').slice(0, 4) === year) set.add(r.team || '(未分类)'); });
+  const tg = (cloudData.formConfig.teamTargets && cloudData.formConfig.teamTargets[year]) || {};
+  Object.keys(tg).forEach(t => set.add(t));
+  return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+}
+
+function renderTeamTargetEditor(year) {
+  sbTargetDraftYear = year;
+  const saved = (cloudData.formConfig.teamTargets && cloudData.formConfig.teamTargets[year]) || {};
+  sbTargetDraft = JSON.parse(JSON.stringify(saved));
+  const teams = sbAllTeams(year);
+  sbTargetTeams = teams;
+  const lbl = document.getElementById('tgtYearLbl'); if (lbl) lbl.textContent = year;
+  const mm = i => String(i).padStart(2, '0');
+  let h = '<thead><tr><th>团队/门店</th>';
+  for (let i = 1; i <= 12; i++) h += `<th class="num">${i}月</th>`;
+  h += '<th class="num">全年目标</th></tr></thead><tbody>';
+  if (!teams.length) {
+    h += `<tr><td colspan="14" style="text-align:center;color:var(--gray-400);padding:20px">当前年度暂无团队数据，可先「导入报表」设置目标。</td></tr>`;
+  }
+  teams.forEach((t, idx) => {
+    h += `<tr><td><span class="badge badge-team">${esc(t)}</span></td>`;
+    let rt = 0;
+    for (let i = 1; i <= 12; i++) {
+      const v = (sbTargetDraft[t] && sbTargetDraft[t][mm(i)]) || 0; rt += v;
+      h += `<td class="num"><input type="number" class="form-control form-control-sm" style="width:92px;text-align:right;font-size:12px;padding:2px 4px" value="${v || ''}" placeholder="0" onchange="setTeamTargetDraft(${idx},'${mm(i)}',this.value)"></td>`;
+    }
+    h += `<td class="num" style="font-weight:600"><span id="tgtRowTot_${idx}">${fmtSalesMoney(rt)}</span></td></tr>`;
+  });
+  h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
+  let gt = 0;
+  for (let i = 1; i <= 12; i++) {
+    let ct = 0; teams.forEach(t => { ct += (sbTargetDraft[t] && sbTargetDraft[t][mm(i)]) || 0; }); gt += ct;
+    h += `<td class="num"><span id="tgtColTot_${mm(i)}">${fmtSalesMoney(ct)}</span></td>`;
+  }
+  h += `<td class="num"><span id="tgtGrandTot">${fmtSalesMoney(gt)}</span></td></tr></tfoot>`;
+  const tbl = document.getElementById('tgtTable'); if (tbl) tbl.innerHTML = h;
+}
+
+function setTeamTargetDraft(idx, mm, val) {
+  const team = sbTargetTeams[idx]; if (team == null) return;
+  const n = parseFloat(String(val).replace(/,/g, '')) || 0;
+  if (!sbTargetDraft[team]) sbTargetDraft[team] = {};
+  sbTargetDraft[team][mm] = n;
+  let rt = 0; for (let i = 1; i <= 12; i++) rt += (sbTargetDraft[team][String(i).padStart(2, '0')]) || 0;
+  const rtEl = document.getElementById('tgtRowTot_' + idx); if (rtEl) rtEl.textContent = fmtSalesMoney(rt);
+  let ct = 0; sbTargetTeams.forEach(t => { ct += (sbTargetDraft[t] && sbTargetDraft[t][mm]) || 0; });
+  const ctEl = document.getElementById('tgtColTot_' + mm); if (ctEl) ctEl.textContent = fmtSalesMoney(ct);
+  let gt = 0; sbTargetTeams.forEach(t => { for (let i = 1; i <= 12; i++) gt += (sbTargetDraft[t] && sbTargetDraft[t][String(i).padStart(2, '0')]) || 0; });
+  const gEl = document.getElementById('tgtGrandTot'); if (gEl) gEl.textContent = fmtSalesMoney(gt);
+}
+
+function toggleTeamTargetPanel() {
+  sbTargetPanelOpen = !sbTargetPanelOpen;
+  const b = document.getElementById('tgtPanelBody'); if (b) b.style.display = sbTargetPanelOpen ? 'block' : 'none';
+  const btn = document.getElementById('tgtToggleBtn'); if (btn) btn.textContent = sbTargetPanelOpen ? '▲ 收起' : '▼ 展开编辑';
+}
+
+function pruneTargetDraft() {
+  const clean = {};
+  Object.keys(sbTargetDraft).forEach(t => {
+    const mo = {}; let any = false;
+    Object.keys(sbTargetDraft[t] || {}).forEach(mm => { const v = sbTargetDraft[t][mm] || 0; if (v > 0) { mo[mm] = v; any = true; } });
+    if (any) clean[t] = mo;
+  });
+  return clean;
+}
+
+async function saveTeamTargets() {
+  const year = sbTargetDraftYear || (new Date().getFullYear().toString());
+  if (!cloudData.formConfig.teamTargets) cloudData.formConfig.teamTargets = {};
+  cloudData.formConfig.teamTargets[year] = pruneTargetDraft();
+  try {
+    await fetch(FB_BASE + '/formConfig.json', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cloudData.formConfig) });
+    showToast('团队月目标已保存（' + year + ' 年）', 'success');
+    refreshSalesBoardStats();
+  } catch (e) { showToast('保存失败: ' + e.message, 'error', 4000); }
+}
+
+function downloadTeamTargetTemplate() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  const year = sbTargetDraftYear || (new Date().getFullYear().toString());
+  const header = ['团队/门店']; for (let i = 1; i <= 12; i++) header.push(i + '月');
+  const aoa = [header];
+  const teams = (sbTargetTeams && sbTargetTeams.length) ? sbTargetTeams : ['示例团队A', '示例团队B'];
+  teams.forEach(t => {
+    const row = [t];
+    for (let i = 1; i <= 12; i++) { const v = (sbTargetDraft[t] && sbTargetDraft[t][String(i).padStart(2, '0')]) || 0; row.push(v || 0); }
+    aoa.push(row);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '团队月目标');
+  XLSX.writeFile(wb, `团队月目标模板_${year}.xlsx`);
+}
+
+function importTeamTargets(input) {
+  const file = input.files && input.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (!rows.length) { alert('文件中没有数据行'); input.value = ''; return; }
+      const headers = Object.keys(rows[0]);
+      const teamCol = headers.find(h => { const s = String(h || '').trim().toLowerCase(); return s.indexOf('团队') >= 0 || s.indexOf('门店') >= 0 || s.indexOf('team') >= 0 || s.indexOf('名称') >= 0; }) || headers[0];
+      const monthColMap = {};
+      for (let i = 1; i <= 12; i++) {
+        const mm = String(i).padStart(2, '0');
+        const hit = headers.find(h => { const s = String(h || '').trim(); return s === i + '月' || s === mm + '月' || s === String(i) || s === mm || s.replace(/[^0-9]/g, '') === String(i); });
+        if (hit) monthColMap[mm] = hit;
+      }
+      if (!Object.keys(monthColMap).length) { alert('未识别到月份列。模板列应为：团队/门店、1月…12月'); input.value = ''; return; }
+      const draft = {};
+      rows.forEach(r => {
+        const t = String(r[teamCol] || '').trim();
+        if (!t || t === '合计') return;
+        const mo = {}; let any = false;
+        Object.keys(monthColMap).forEach(mm => { const v = parseFloat(String(r[monthColMap[mm]]).replace(/,/g, '')) || 0; if (v > 0) { mo[mm] = v; any = true; } });
+        if (any) draft[t] = mo;
+      });
+      if (!Object.keys(draft).length) { alert('没有有效的目标数据（团队名为空或金额均为 0）'); input.value = ''; return; }
+      const year = sbTargetDraftYear || (new Date().getFullYear().toString());
+      if (!confirm('成功识别 ' + Object.keys(draft).length + ' 个团队的目标，确定导入并覆盖 ' + year + ' 年的团队月目标吗？')) { input.value = ''; return; }
+      Object.keys(draft).forEach(t => { sbTargetDraft[t] = draft[t]; });
+      if (!cloudData.formConfig.teamTargets) cloudData.formConfig.teamTargets = {};
+      cloudData.formConfig.teamTargets[year] = pruneTargetDraft();
+      fetch(FB_BASE + '/formConfig.json', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cloudData.formConfig) })
+        .then(() => { showToast('团队月目标已导入并保存', 'success'); renderTeamTargetEditor(year); refreshSalesBoardStats(); })
+        .catch(err => showToast('保存失败: ' + err.message, 'error', 4000));
+    } catch (err) { alert('导入失败：' + (err.message || err)); }
+    input.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function exportSalesBoard1() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  const year = document.getElementById('sbYear') ? document.getElementById('sbYear').value : new Date().getFullYear().toString();
+  const months = sbMonthList();
+  const map = {};
+  cloudData.salesRecords.forEach(r => { const dm = r.docMonth || ''; if (!months.includes(dm)) return; const k = r.salesperson || '(未分类)'; if (!map[k]) map[k] = {}; map[k][dm] = (map[k][dm] || 0) + toNum(r.amount); });
+  const userMap = buildUserStatusMap();
+  const rows = Object.keys(map).map(k => { let t = 0; months.forEach(m => t += (map[k][m] || 0)); return { k, t }; }).sort((a, b) => b.t - a.t);
+  if (!rows.length) { showToast('当前无数据可导出', 'error'); return; }
+  const header = ['销售员', '状态']; months.forEach(m => header.push(parseInt(m.slice(5), 10) + '月')); header.push('合计');
+  const aoa = [header];
+  const colTot = {};
+  rows.forEach(row => { const arr = [row.k, (userMap[row.k] || '')]; months.forEach(m => { const v = map[row.k][m] || 0; colTot[m] = (colTot[m] || 0) + v; arr.push(v); }); arr.push(row.t); aoa.push(arr); });
+  const totalRow = ['合计', '']; let gt = 0; months.forEach(m => { gt += (colTot[m] || 0); totalRow.push(colTot[m] || 0); }); totalRow.push(gt); aoa.push(totalRow);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '销售业绩统计');
+  XLSX.writeFile(wb, `销售业绩统计_${year}_${months[0].slice(5)}-${months[months.length - 1].slice(5)}月.xlsx`);
+  showToast('已导出销售业绩统计', 'success');
+}
+
+function exportSalesBoard2() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  const year = document.getElementById('sbYear') ? document.getElementById('sbYear').value : new Date().getFullYear().toString();
+  const months = sbMonthList();
+  const targets = (cloudData.formConfig.teamTargets && cloudData.formConfig.teamTargets[year]) || {};
+  const map = {};
+  cloudData.salesRecords.forEach(r => { const dm = r.docMonth || ''; if (!months.includes(dm)) return; const k = r.team || '(未分类)'; if (!map[k]) map[k] = {}; map[k][dm] = (map[k][dm] || 0) + toNum(r.amount); });
+  const rows = Object.keys(map).map(k => { let t = 0; months.forEach(m => t += (map[k][m] || 0)); return { k, t }; }).sort((a, b) => b.t - a.t);
+  if (!rows.length) { showToast('当前无数据可导出', 'error'); return; }
+  const pct = (a, b) => b > 0 ? (Math.round(a / b * 1000) / 10 + '%') : '—';
+  const header1 = ['团队/门店']; months.forEach(m => { header1.push(parseInt(m.slice(5), 10) + '月'); header1.push(''); header1.push(''); }); header1.push('合计'); header1.push(''); header1.push('');
+  const header2 = ['']; months.forEach(() => { header2.push('业绩'); header2.push('目标'); header2.push('完成率'); }); header2.push('业绩'); header2.push('目标'); header2.push('完成率');
+  const aoa = [header1, header2];
+  const colAct = {}, colTgt = {};
+  rows.forEach(row => {
+    const arr = [row.k]; let rowTgt = 0;
+    months.forEach(m => { const v = map[row.k][m] || 0; const tg = (targets[row.k] && targets[row.k][m.slice(5)]) || 0; colAct[m] = (colAct[m] || 0) + v; colTgt[m] = (colTgt[m] || 0) + tg; rowTgt += tg; arr.push(v); arr.push(tg); arr.push(pct(v, tg)); });
+    arr.push(row.t); arr.push(rowTgt); arr.push(pct(row.t, rowTgt)); aoa.push(arr);
+  });
+  const totalRow = ['合计']; let gAct = 0, gTgt = 0;
+  months.forEach(m => { const a = colAct[m] || 0, tg = colTgt[m] || 0; gAct += a; gTgt += tg; totalRow.push(a); totalRow.push(tg); totalRow.push(pct(a, tg)); });
+  totalRow.push(gAct); totalRow.push(gTgt); totalRow.push(pct(gAct, gTgt)); aoa.push(totalRow);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const merges = []; let ci = 1; months.forEach(() => { merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ci += 3; }); merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ws['!merges'] = merges;
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '团队业绩统计');
+  XLSX.writeFile(wb, `团队业绩统计_${year}_${months[0].slice(5)}-${months[months.length - 1].slice(5)}月.xlsx`);
+  showToast('已导出团队业绩统计', 'success');
+}
 
 // ===== 销售升降级看板 =====
 // 自动评定级别：根据滚动业绩对照评级标准（升级业绩分档 + 降级业绩保底）
