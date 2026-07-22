@@ -242,6 +242,14 @@ tr:hover td{background:var(--gray-50)}
 .ai-msg-images{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .ai-msg-images img{max-width:180px;max-height:180px;border-radius:8px;cursor:pointer;transition:opacity .15s}
 .ai-msg-images img:hover{opacity:.85}
+.ai-input-files{display:flex;gap:8px;flex-wrap:wrap;padding:0 0 8px}
+.ai-file-chip{display:flex;align-items:center;gap:6px;background:var(--gray-100,#f1f5f9);border:1px solid var(--gray-300,#cbd5e1);border-radius:6px;padding:5px 8px;font-size:12px;max-width:200px}
+.ai-file-chip .ai-file-icon{flex-shrink:0}
+.ai-file-chip .ai-file-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ai-file-chip .remove{flex-shrink:0;background:rgba(0,0,0,.45);color:#fff;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:10px;line-height:1}
+.ai-file-chip .remove:hover{background:var(--danger,#ef4444)}
+.ai-msg-files{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.ai-msg-file{display:inline-flex;align-items:center;background:var(--gray-100,#f1f5f9);border:1px solid var(--gray-300,#cbd5e1);border-radius:6px;padding:2px 8px;font-size:12px;color:var(--gray-600,#475569)}
 <omitted>
 /* ============ Mobile Navigation ============ */
 .mobile-menu-btn{display:none;position:fixed;top:12px;left:12px;z-index:1001;background:var(--gray-900);color:#fff;border:none;border-radius:8px;width:40px;height:40px;font-size:20px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.2)}
@@ -580,21 +588,13 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes, m0Res, prRes, psRes, m0pRes, m0psRes, mgrpRes, mgrpsRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
       fetch(FB_BASE + '/aiConfig.json'),
       fetch(FB_BASE + '/roleConfig.json'),
-      fetch(FB_BASE + '/visitConfig.json'),
-      fetch(FB_BASE + '/gradeRecords.json'),
-      fetch(FB_BASE + '/m0Records.json'),
-      fetch(FB_BASE + '/performanceRecords.json'),
-      fetch(FB_BASE + '/performanceSnapshots.json'),
-      fetch(FB_BASE + '/m0PerformanceSnapshots.json'),
-      fetch(FB_BASE + '/m0PerformanceRecords.json'),
-      fetch(FB_BASE + '/mgrPerformanceSnapshots.json'),
-      fetch(FB_BASE + '/mgrPerformanceRecords.json')
+      fetch(FB_BASE + '/visitConfig.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -713,30 +713,11 @@ async function loadCoreData() {
     } else {
       cloudData.visitConfig = JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
     }
-    // Load grade records (manual overrides for sales grade board)
-    const grData = grRes.ok ? await grRes.json() : null;
-    cloudData.gradeRecords = (grData && typeof grData === 'object') ? grData : {};
-    // Load M0 records (manual overrides for M0 board)
-    const m0Data = m0Res.ok ? await m0Res.json() : null;
-    cloudData.m0Records = (m0Data && typeof m0Data === 'object') ? m0Data : {};
-    // Load performance records (sales performance scoring data)
-    const prData = prRes.ok ? await prRes.json() : null;
-    cloudData.performanceRecords = (prData && typeof prData === 'object') ? prData : {};
-    // Load performance snapshots (final-saved frozen data, independent of config changes)
-    const psData = psRes.ok ? await psRes.json() : null;
-    cloudData.performanceSnapshots = (psData && typeof psData === 'object') ? psData : {};
-    // Load M0 performance records (M0 perf scoring data, separate node from sales performanceRecords)
-    const m0pData = m0pRes.ok ? await m0pRes.json() : null;
-    cloudData.m0PerformanceRecords = (m0pData && typeof m0pData === 'object') ? m0pData : {};
-    // Load M0 performance snapshots (M0 final-saved frozen data, independent of config changes)
-    const m0psData = m0psRes.ok ? await m0psRes.json() : null;
-    cloudData.m0PerformanceSnapshots = (m0psData && typeof m0psData === 'object') ? m0psData : {};
-    // Load manager performance records (manager perf scoring data, separate node from sales/M0 performanceRecords)
-    const mgrpData = mgrpRes.ok ? await mgrpRes.json() : null;
-    cloudData.mgrPerformanceRecords = (mgrpData && typeof mgrpData === 'object') ? mgrpData : {};
-    // Load manager performance snapshots (manager final-saved frozen data, independent of config changes)
-    const mgrpsData = mgrpsRes.ok ? await mgrpsRes.json() : null;
-    cloudData.mgrPerformanceSnapshots = (mgrpsData && typeof mgrpsData === 'object') ? mgrpsData : {};
+    // 注：销售评级 / 销售绩效 / 管理绩效等「管理类记录节点」(gradeRecords / m0Records /
+    // performanceRecords / performanceSnapshots / m0PerformanceRecords / m0PerformanceSnapshots /
+    // mgrPerformanceRecords / mgrPerformanceSnapshots) 不再在此处无条件加载，
+    // 改由 loadRoleScopedData() 按当前登录用户的角色权限按需加载，
+    // 普通员工(成员)不加载其无权限查看的管理数据，从而显著加快登录速度。
     // Ensure m0Config exists (team-shared M0 calculation scope)
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
@@ -779,6 +760,40 @@ async function loadCoreData() {
     cloudData.formConfig.mgrPerformanceConfig = normalizePerfConfig(cloudData.formConfig.mgrPerformanceConfig);
     migrateMgrPerfConfig();
     if (cloudData.formConfig.mgrPerformanceBase === undefined || cloudData.formConfig.mgrPerformanceBase === null) cloudData.formConfig.mgrPerformanceBase = DEFAULT_FORM_CONFIG.mgrPerformanceBase;
+  }
+}
+
+// Phase 1.5: 按角色权限加载「管理类记录节点」。
+// 仅拉取当前登录用户有权查看的节点，普通员工(成员)无需加载评级 / 绩效等管理数据，登录更快。
+// 映射关系（节点 → 对应看板权限）：
+//   gradeRecords, m0Records            → salesGrade
+//   performanceRecords, performanceSnapshots, m0PerformanceRecords, m0PerformanceSnapshots → salesPerf
+//   mgrPerformanceRecords, mgrPerformanceSnapshots → mgrPerf
+async function loadRoleScopedData() {
+  if (!currentUser) return;
+  const specs = [];
+  const reg = (perm, url, key) => { if (hasPermission(perm)) specs.push([url, key]); };
+  reg('salesGrade', '/gradeRecords.json', 'gradeRecords');
+  reg('salesGrade', '/m0Records.json', 'm0Records');
+  reg('salesPerf', '/performanceRecords.json', 'performanceRecords');
+  reg('salesPerf', '/performanceSnapshots.json', 'performanceSnapshots');
+  reg('salesPerf', '/m0PerformanceRecords.json', 'm0PerformanceRecords');
+  reg('salesPerf', '/m0PerformanceSnapshots.json', 'm0PerformanceSnapshots');
+  reg('mgrPerf', '/mgrPerformanceRecords.json', 'mgrPerformanceRecords');
+  reg('mgrPerf', '/mgrPerformanceSnapshots.json', 'mgrPerformanceSnapshots');
+  if (specs.length === 0) return; // 员工无管理权限 → 直接跳过，零开销
+  try {
+    const res = await Promise.all(specs.map(([url]) => fetch(FB_BASE + url)));
+    for (let i = 0; i < specs.length; i++) {
+      const [, key] = specs[i];
+      const r = res[i];
+      let d = null;
+      if (r && r.ok) { try { d = await r.json(); } catch(e) { d = null; } }
+      cloudData[key] = (d && typeof d === 'object') ? d : {};
+    }
+  } catch(e) {
+    console.warn('Role-scoped data fetch failed:', e.message);
+    ['gradeRecords','m0Records','performanceRecords','performanceSnapshots','m0PerformanceRecords','m0PerformanceSnapshots','mgrPerformanceRecords','mgrPerformanceSnapshots'].forEach(k => { cloudData[k] = {}; });
   }
 }
 
@@ -915,6 +930,7 @@ async function loadCloudData() {
   await _usersDataPromise;
   _coreDataPromise = loadCoreData();
   await _coreDataPromise;
+  await loadRoleScopedData();
   await loadReportData({force: true});
   return cloudData;
 }
@@ -1029,6 +1045,8 @@ function doLogout() {
 async function showApp() {
   // Wait for config data (formConfig, brandConfig, etc.) to finish loading
   if (_coreDataPromise) { try { await _coreDataPromise; } catch(e){} }
+  // 按角色权限加载管理类记录（员工在此几乎零开销）
+  await loadRoleScopedData();
   // If report data not loaded yet, show loading and await (cache hit → near-instant; network → spinner)
   if (!reportsLoaded) {
     const loadingEl = document.getElementById('loginLoading');
@@ -1110,27 +1128,32 @@ async function silentRefresh(page) {
   try {
     const needVisit = hasPermission('visitData') || hasPermission('visitStats');
     const needSales = hasPermission('salesDetail') || hasPermission('salesBoard');
+    const needPerf = hasPermission('salesPerf');
+    const needMgrPerf = hasPermission('mgrPerf');
     const fetches = [
       fetch(FB_BASE + '/dailyReports.json'),
-      fetch(FB_BASE + '/weeklyReports.json'),
-      fetch(FB_BASE + '/performanceSnapshots.json'),
-      fetch(FB_BASE + '/m0PerformanceSnapshots.json'),
-      fetch(FB_BASE + '/mgrPerformanceSnapshots.json')
+      fetch(FB_BASE + '/weeklyReports.json')
     ];
-    let iVisit = -1, iSales = -1;
+    let iVisit = -1, iSales = -1, iPerfSnap = -1, iM0Snap = -1, iMgrSnap = -1;
     if (needVisit) { iVisit = fetches.length; fetches.push(fetch(FB_BASE + '/visitRecords.json')); }
     if (needSales) { iSales = fetches.length; fetches.push(fetch(FB_BASE + '/salesRecords.json')); }
+    // 仅具权限者才在后台刷新管理绩效快照，避免普通员工无谓拉取
+    if (needPerf) {
+      iPerfSnap = fetches.length; fetches.push(fetch(FB_BASE + '/performanceSnapshots.json'));
+      iM0Snap = fetches.length; fetches.push(fetch(FB_BASE + '/m0PerformanceSnapshots.json'));
+    }
+    if (needMgrPerf) { iMgrSnap = fetches.length; fetches.push(fetch(FB_BASE + '/mgrPerformanceSnapshots.json')); }
     const results = await Promise.all(fetches);
     const newDaily = results[0].ok ? Object.values(await results[0].json() || {}) : [];
     const newWeekly = results[1].ok ? Object.values(await results[1].json() || {}) : [];
     const newVisit = (iVisit >= 0 && results[iVisit] && results[iVisit].ok) ? hydrateVisitRecords(await results[iVisit].json()) : cloudData.visitRecords;
     const newSales = (iSales >= 0 && results[iSales] && results[iSales].ok) ? hydrateSalesRecords(await results[iSales].json()) : cloudData.salesRecords;
-    // Refresh performance snapshots in background (does not force re-render)
-    const newSnap = results[2].ok ? await results[2].json() : null;
+    // 后台刷新管理绩效快照（仅具备权限时）
+    const newSnap = (iPerfSnap >= 0 && results[iPerfSnap] && results[iPerfSnap].ok) ? await results[iPerfSnap].json() : null;
     if (newSnap && typeof newSnap === 'object') cloudData.performanceSnapshots = newSnap;
-    const newM0Snap = results[3].ok ? await results[3].json() : null;
+    const newM0Snap = (iM0Snap >= 0 && results[iM0Snap] && results[iM0Snap].ok) ? await results[iM0Snap].json() : null;
     if (newM0Snap && typeof newM0Snap === 'object') cloudData.m0PerformanceSnapshots = newM0Snap;
-    const newMgrSnap = results[4].ok ? await results[4].json() : null;
+    const newMgrSnap = (iMgrSnap >= 0 && results[iMgrSnap] && results[iMgrSnap].ok) ? await results[iMgrSnap].json() : null;
     if (newMgrSnap && typeof newMgrSnap === 'object') cloudData.mgrPerformanceSnapshots = newMgrSnap;
     // Only update + re-render if data count changed (new records added by others)
     if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length || newSales.length !== cloudData.salesRecords.length) {
@@ -3692,7 +3715,8 @@ function exportCSV(type) {
 }
 
 // ============ AI Chat Page ============
-let aiPendingImages = [];
+let aiPendingImages = [];      // 图片附件（base64，走视觉通道）
+let aiPendingFiles = [];       // 文件附件（文本 / 表格解析后的文本，走文本通道）
 
 function renderAIChat() {
   const body = document.getElementById('contentBody');
@@ -3719,15 +3743,16 @@ function renderAIChat() {
       </div>
       <div class="ai-chat-input-bar">
         <div id="aiInputImages" class="ai-input-images" style="display:none"></div>
+        <div id="aiInputFiles" class="ai-input-files" style="display:none"></div>
         <div class="ai-textarea-wrap">
-          <textarea id="aiChatInput" placeholder="输入问题或上传图片，AI将基于系统数据进行分析..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAIMessage()}"></textarea>
+          <textarea id="aiChatInput" placeholder="输入问题，或上传图片 / 文档 / 表格供 AI 分析..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAIMessage()}"></textarea>
         </div>
         <div class="ai-input-toolbar">
-          <button class="ai-tool-btn ai-upload-btn" onclick="document.getElementById('aiImageInput').click()" title="上传图片（支持多选）">
+          <button class="ai-tool-btn ai-upload-btn" onclick="document.getElementById('aiFileInput').click()" title="上传图片 / 文档 / 表格（支持多选）">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-            <span>添加图片</span>
+            <span>添加图片/文件</span>
           </button>
-          <input type="file" id="aiImageInput" accept="image/*" multiple style="display:none" onchange="handleAIImageUpload(event)">
+          <input type="file" id="aiFileInput" accept="image/*,.txt,.csv,.tsv,.json,.md,.log,.yaml,.yml,.xml,.sql,.xls,.xlsx" multiple style="display:none" onchange="handleAIFileUpload(event)">
           <div class="ai-input-spacer"></div>
           <span class="ai-input-hint">Enter 发送 · Shift+Enter 换行</span>
           <button class="ai-send-btn" onclick="sendAIMessage()" title="发送（Enter）">
@@ -3739,6 +3764,7 @@ function renderAIChat() {
   </div>`;
 
   aiPendingImages = [];
+  aiPendingFiles = [];
   initAIChat();
 }
 
@@ -3829,7 +3855,7 @@ function renderSettings() {
     </div>
     <div class="card-body collapsible-body${aiConfigCollapsed?' collapsed':''}">
       <div id="aiConfigAlert"></div>
-      <div style="margin-bottom:16px;font-size:12px;color:var(--gray-500)">配置大模型API后，可在左侧导航栏"🤖 AI助手"页面与AI对话。AI将读取系统全部数据（用户、日报、周报、拜访数据、渠道配置）进行分析。支持OpenAI兼容的API格式。</div>
+      <div style="margin-bottom:16px;font-size:12px;color:var(--gray-500)">配置大模型API后，可在左侧导航栏"🤖 AI助手"页面与AI对话。AI将读取系统全部数据（用户、日报、周报、拜访数据、业绩数据、管理周报、客户汇总、团队目标/人数、团队业绩统计、销售绩效、销售评级、M0绩效与评级、管理绩效统计等）进行分析，也支持直接上传图片、文档或表格（CSV / TXT / JSON / Excel 等）让 AI 解读。支持OpenAI兼容的API格式。</div>
       <div class="ai-config-grid">
         <div class="form-group">
           <label>API提供商</label>
@@ -4177,6 +4203,58 @@ function buildAIContext() {
     visitSnapshot: r.visitSnapshot ? { total: r.visitSnapshot.total || 0, details: r.visitSnapshot.details || [] } : null
   })).sort((a, b) => (a.weekStart || '').localeCompare(b.weekStart || ''));
 
+  // ===== 新增模块数据（务必接入，确保 AI 助手可读取；后续任何新数据模块都应在此追加对应节点） =====
+  // 团队月目标 & 团队人数（业绩统计·报表看板2/3）
+  const teamTargets = fc.teamTargets || {};
+  const teamHeadcount = fc.teamHeadcount || {};
+
+  // 团队业绩统计汇总（目标 / 业绩 / 完成率 / 人数 / 人效）—— 供 AI 回答团队维度问题
+  const teamPerfByTM = {};
+  salesData.forEach(s => {
+    const tm = s.team || '未知团队', mo = s.docMonth || '未知月份';
+    if (!teamPerfByTM[tm]) teamPerfByTM[tm] = {};
+    if (!teamPerfByTM[tm][mo]) teamPerfByTM[tm][mo] = { amount: 0, grossProfit: 0, count: 0 };
+    teamPerfByTM[tm][mo].amount += toNum(s.amount);
+    teamPerfByTM[tm][mo].grossProfit += toNum(s.grossProfit);
+    teamPerfByTM[tm][mo].count += 1;
+  });
+  const teamPerformanceSummary = {};
+  Object.keys(teamTargets).forEach(year => {
+    Object.keys(teamTargets[year] || {}).forEach(tm => {
+      if (!teamPerformanceSummary[tm]) teamPerformanceSummary[tm] = { byMonth: {} };
+      Object.keys(teamTargets[year][tm] || {}).forEach(mo => {
+        const target = toNum(teamTargets[year][tm][mo]);
+        const perf = (teamPerfByTM[tm] && teamPerfByTM[tm][mo]) || { amount: 0, grossProfit: 0, count: 0 };
+        const amt = Math.round(toNum(perf.amount) * 100) / 100;
+        const hc = toNum((teamHeadcount[year] && teamHeadcount[year][tm] && teamHeadcount[year][tm][mo]) || 0);
+        teamPerformanceSummary[tm].byMonth[mo] = {
+          target: target,
+          amount: amt,
+          grossProfit: Math.round(toNum(perf.grossProfit) * 100) / 100,
+          completionRate: target > 0 ? Math.round(amt / target * 1000) / 10 : null,
+          headcount: hc,
+          efficiency: hc > 0 ? Math.round(amt / hc * 100) / 100 : null
+        };
+      });
+    });
+  });
+
+  // 销售绩效统计
+  const perfCfg = fc.performanceConfig || {};
+  const perfRecords = cloudData.performanceRecords || {};
+  // 销售评级看板
+  const gradeRecords = cloudData.gradeRecords || {};
+  const gradeCfg = fc.gradeConfig || {};
+  // M0 绩效 & 评级
+  const m0PerfCfg = fc.m0PerformanceConfig || {};
+  const m0PerfRecords = cloudData.m0PerformanceRecords || {};
+  const m0Records = cloudData.m0Records || {};
+  const m0Cfg = fc.m0Config || {};
+  // 管理绩效统计（管理者角色）
+  const mgrPerfCfg = fc.mgrPerformanceConfig || {};
+  const mgrPerfRecords = cloudData.mgrPerformanceRecords || {};
+  const mgrPerfBase = fc.mgrPerformanceBase;
+
   const activeUsers = cloudData.users.filter(u => u.active);
   const context = {
     systemDate: new Date().toLocaleDateString('zh-CN'),
@@ -4190,7 +4268,13 @@ function buildAIContext() {
       visitRecordCount: visitData.length,
       visitDateRange: visitData.length > 0 ? {earliest: visitData[0].contactTime, latest: visitData[visitData.length-1].contactTime} : null,
       salesRecordCount: salesData.length,
-      salesDateRange: salesData.length > 0 ? {earliest: salesData[0].docDate, latest: salesData[salesData.length-1].docDate} : null
+      salesDateRange: salesData.length > 0 ? {earliest: salesData[0].docDate, latest: salesData[salesData.length-1].docDate} : null,
+      teamCount: Object.keys(teamTargets).length > 0 ? Object.keys(Object.values(teamTargets)[0]).length : 0,
+      gradeRecordCount: Object.keys(gradeRecords).length,
+      m0RecordCount: Object.keys(m0Records).length,
+      performanceRecordCount: Object.keys(perfRecords).length,
+      m0PerformanceRecordCount: Object.keys(m0PerfRecords).length,
+      mgrPerformanceRecordCount: Object.keys(mgrPerfRecords).length
     },
     users: activeUsers.map(u => ({name: u.name, department: u.department, role: u.role})),
     dailyChannels: (fc.daily || []).map(c => ({name: c.name, reference: c.reference})),
@@ -4205,14 +4289,28 @@ function buildAIContext() {
     salesSummary: salesSummary,
     salesTeamOptions: SALES_KA_TEAMS,
     mgrReports: mgrData,
-    customerSummary: customerSummary
+    customerSummary: customerSummary,
+    teamTargets: teamTargets,
+    teamHeadcount: teamHeadcount,
+    teamPerformanceSummary: teamPerformanceSummary,
+    gradeRecords: gradeRecords,
+    gradeConfig: gradeCfg,
+    performanceConfig: perfCfg,
+    performanceRecords: perfRecords,
+    m0PerformanceConfig: m0PerfCfg,
+    m0PerformanceRecords: m0PerfRecords,
+    m0Records: m0Records,
+    m0Config: m0Cfg,
+    mgrPerformanceConfig: mgrPerfCfg,
+    mgrPerformanceRecords: mgrPerfRecords,
+    mgrPerformanceBase: mgrPerfBase
   };
   return JSON.stringify(context, null, 2);
 }
 
 function buildAISystemMessage() {
   const dataContext = buildAIContext();
-  return '你是团队SOP数据管理系统的AI数据分析助手。你可以读取系统的全部数据，包括用户信息、日报数据、周报数据、拜访数据、业绩数据、管理周报（含拜访汇总快照）、客户汇总数据（客户来源/客户画像/品类）和渠道配置。\n\n'
+  return '你是团队SOP数据管理系统的AI数据分析助手。你可以读取系统的全部数据，包括用户信息、日报数据、周报数据、拜访数据、业绩数据、管理周报（含拜访汇总快照）、客户汇总数据（客户来源/客户画像/品类）、渠道配置；以及团队月目标与团队人数、团队业绩统计（目标/完成率/人效）、销售绩效统计（考核项得分/绩效评分）、销售评级看板（升降级/评级）、M0绩效与M0评级看板、管理绩效统计（管理者绩效得分）。\n\n'
     + '你的职责：\n'
     + '1. 根据用户的问题，对系统数据进行分析、汇总和对比\n'
     + '2. 提供数据洞察、趋势分析和改进建议\n'
@@ -4264,6 +4362,18 @@ function buildAISystemMessage() {
     + '【数据来源路由补充】\n'
     + '- 当用户的问题涉及「管理周报 / 周工作总结 / 部门周报 / 管理视角的拜访汇总 / 某部门某周的拜访情况」时，必须使用 mgrReports 与 visitSnapshot 回答。\n'
     + '- 当用户的问题涉及「客户来源 / 客户画像 / 品类 / 各类客户业绩分布」时，优先引用 customerSummary（基于销售记录的客户标签聚合）。\n'
+    + '- 当用户的问题涉及「团队目标 / 团队月目标 / 目标完成率 / 团队业绩 / 团队人效（人均产能）/ 团队人数」时，必须使用 teamPerformanceSummary（已含 目标/业绩/完成率/人数/人效）或 teamTargets/teamHeadcount 回答，不要用销售员个人业绩代替团队维度。\n'
+    + '- 当用户的问题涉及「销售绩效 / 考核项得分 / 绩效评分 / 绩效基数 / 加分项」时，必须使用 performanceRecords 与 performanceConfig 回答。\n'
+    + '- 当用户的问题涉及「销售评级 / 升降级 / 评级 / 职级」时，必须使用 gradeRecords（key=年_销售_月）与 gradeConfig 回答。\n'
+    + '- 当用户的问题涉及「M0 绩效 / M0 考核 / M0 得分」时，必须使用 m0PerformanceRecords 与 m0PerformanceConfig 回答；涉及「M0 评级 / M0 升降级」时使用 m0Records 与 m0Config 回答。\n'
+    + '- 当用户的问题涉及「管理绩效 / 管理者绩效 / 主管绩效得分」时，必须使用 mgrPerformanceRecords 与 mgrPerformanceConfig 回答（管理者角色用户，无职级之分，绩效基数默认 5000，最终基数=基数×在职天数/30）。\n'
+    + '- 团队业绩统计(teamPerformanceSummary)字段:\n'
+    + '  - byMonth[月份]: { target(月目标金额), amount(实际业绩金额), grossProfit(毛利), completionRate(完成率%, 目标为0时为null), headcount(团队人数), efficiency(人效=业绩÷人数, 人数为0时为null) }\n'
+    + '- 销售绩效(performanceRecords)字段: key=年_销售_月，含 workingDays(在职天数)/comment(总评)/base(基数)/items(各考核项:{actual完成,standard要求,score得分,text描述})/bonus(加分项次数)\n'
+    + '- 销售评级(gradeRecords)字段: key=年_销售_月，含 grade(当月职级)/prevGrade(上月职级)/promote(升级/降级/保持/新入职等状态)/note(备注)\n'
+    + '- M0绩效(m0PerformanceRecords)字段: key=年_M0_月，结构同销售绩效但全为手动考核项，无自拓演示自动计数\n'
+    + '- M0评级(m0Records)字段: key=年_M0_月，含 grade/prevGrade/promote/note\n'
+    + '- 管理绩效(mgrPerformanceRecords)字段: key=年_管理者_月，结构同绩效(含 items/bonus/workingDays/comment/base)，管理者无职级列\n'
     + '以下是当前系统的完整数据（JSON格式）：\n' + dataContext;
 }
 
@@ -4442,7 +4552,7 @@ function initAIChat() {
   if (!cfg.apiKey) {
     msgArea.innerHTML = '<div class="ai-msg system">⚠️ 请先在"设置 → AI模型配置"中设置API Key，保存后即可开始对话</div>';
   } else {
-    msgArea.innerHTML = '<div class="ai-msg assistant">👋 你好！我是AI数据分析助手。我可以读取系统全部数据（用户、日报、周报、拜访、业绩、管理周报、客户汇总、渠道配置）进行分析。\n\n你可以问我：\n- 统计各部门提交完成率\n- 分析各渠道转化效果\n- 找出未提交报告的人员\n- 对比不同时期的数据趋势\n\n请问你想了解什么？</div>';
+    msgArea.innerHTML = '<div class="ai-msg assistant">👋 你好！我是AI数据分析助手。我可以读取系统全部数据（用户、日报、周报、拜访、业绩、管理周报、客户汇总、渠道配置）进行分析。\n\n你也可以直接上传图片、文档或表格（CSV / TXT / JSON / Excel 等）让我解读。\n\n你可以问我：\n- 统计各部门提交完成率\n- 分析各渠道转化效果\n- 找出未提交报告的人员\n- 对比不同时期的数据趋势\n- 帮我解读上传的表格 / 文档\n\n请问你想了解什么？</div>';
   }
 }
 
@@ -4451,7 +4561,7 @@ function fillAIInput(text) {
   if (input) { input.value = text; input.focus(); }
 }
 
-function appendAIMessage(role, content, images) {
+function appendAIMessage(role, content, images, files) {
   const msgArea = document.getElementById('aiChatMessages');
   if (!msgArea) return;
   const div = document.createElement('div');
@@ -4466,6 +4576,12 @@ function appendAIMessage(role, content, images) {
       imgDiv.innerHTML = images.map(src => '<img src="' + src + '" onclick="window.open(this.src)" loading="lazy">').join('');
       div.appendChild(imgDiv);
     }
+    if (files && files.length > 0) {
+      const fDiv = document.createElement('div');
+      fDiv.className = 'ai-msg-files';
+      fDiv.innerHTML = files.map(n => '<span class="ai-msg-file">📎 ' + escapeHtml(n) + '</span>').join('');
+      div.appendChild(fDiv);
+    }
   } else {
     div.textContent = content;
   }
@@ -4473,21 +4589,89 @@ function appendAIMessage(role, content, images) {
   msgArea.scrollTop = msgArea.scrollHeight;
 }
 
-function handleAIImageUpload(event) {
-  const files = event.target.files;
-  if (!files || files.length === 0) return;
-  Array.from(files).forEach(file => {
-    if (!file.type.startsWith('image/')) return;
-    if (file.size > 10 * 1024 * 1024) {
-      appendAIMessage('system', '⚠️ 图片 "' + file.name + '" 超过10MB，请压缩后上传');
+// 可走文本通道的附件后缀（直接读取为文本）；xlsx/xls 走表格解析
+const AI_TEXT_EXT = ['txt','csv','tsv','json','md','log','yaml','yml','xml','sql','text','html','htm','js','py','css'];
+// 暂无法直接读取的二进制格式（不让其垃圾文本污染上下文，给出提示）
+const AI_UNREADABLE_EXT = ['pdf','doc','docx','ppt','pptx','zip','rar','7z','exe','bin'];
+
+// 把文件解析为可喂给 AI 的文本（图片除外）。xlsx/xls 用 SheetJS 解析为多 sheet 的 CSV 文本。
+function readFileAsAttachment(file) {
+  return new Promise((resolve) => {
+    const lower = (file.name || '').toLowerCase();
+    const isXls = /\.(xlsx|xls)$/.test(lower);
+    if (isXls) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          if (typeof XLSX === 'undefined') {
+            // 动态加载 SheetJS
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+            s.onload = () => { try { resolve(parseXlsToText(new Uint8Array(e.target.result))); } catch(err) { resolve(''); } };
+            s.onerror = () => resolve('');
+            document.head.appendChild(s);
+          } else {
+            resolve(parseXlsToText(new Uint8Array(e.target.result)));
+          }
+        } catch(err) { resolve(''); }
+      };
+      reader.onerror = () => resolve('');
+      reader.readAsArrayBuffer(file);
       return;
     }
     const reader = new FileReader();
-    reader.onload = function(e) {
-      aiPendingImages.push(e.target.result);
-      renderAIImagePreviews();
-    };
-    reader.readAsDataURL(file);
+    reader.onload = (e) => resolve(e.target.result || '');
+    reader.onerror = () => resolve('');
+    reader.readAsText(file);
+  });
+}
+function parseXlsToText(buf) {
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  return wb.SheetNames.map(sn => {
+    const ws = wb.Sheets[sn];
+    const csv = XLSX.utils.sheet_to_csv(ws, { FS: ',', RS: '\n' });
+    return '=== Sheet: ' + sn + ' ===\n' + csv;
+  }).join('\n\n');
+}
+
+function handleAIFileUpload(event) {
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
+  Array.from(files).forEach(file => {
+    const lower = (file.name || '').toLowerCase();
+    const ext = (lower.split('.').pop() || '').toLowerCase();
+    // 图片 → 视觉通道（base64）
+    if (file.type.startsWith('image/')) {
+      if (file.size > 10 * 1024 * 1024) {
+        appendAIMessage('system', '⚠️ 图片 "' + file.name + '" 超过10MB，请压缩后上传');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        aiPendingImages.push(e.target.result);
+        renderAIImagePreviews();
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+    // 暂不可直接读取的二进制格式 → 提示，但仍列出文件名
+    if (AI_UNREADABLE_EXT.includes(ext)) {
+      aiPendingFiles.push({ name: file.name, text: '[该文件格式（' + ext + '）AI 暂不支持直接读取，请另存为 CSV / TXT / XLSX 后上传]' });
+      renderAIFilePreviews();
+      return;
+    }
+    // 文本 / 表格 → 解析为文本通道内容
+    if (file.size > 2 * 1024 * 1024) {
+      appendAIMessage('system', '⚠️ 文件 "' + file.name + '" 超过2MB，可能超出模型上下文，请精简后上传');
+    }
+    readFileAsAttachment(file).then(text => {
+      let t = String(text || '');
+      if (t.length > 60000) {
+        t = t.slice(0, 60000) + '\n…(内容过长已截断，仅保留前 60000 字符)';
+      }
+      aiPendingFiles.push({ name: file.name, text: t });
+      renderAIFilePreviews();
+    });
   });
   event.target.value = '';
 }
@@ -4495,6 +4679,11 @@ function handleAIImageUpload(event) {
 function removeAIImage(index) {
   aiPendingImages.splice(index, 1);
   renderAIImagePreviews();
+}
+
+function removeAIFile(index) {
+  aiPendingFiles.splice(index, 1);
+  renderAIFilePreviews();
 }
 
 function renderAIImagePreviews() {
@@ -4511,24 +4700,49 @@ function renderAIImagePreviews() {
   ).join('');
 }
 
+function renderAIFilePreviews() {
+  const container = document.getElementById('aiInputFiles');
+  if (!container) return;
+  if (aiPendingFiles.length === 0) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  container.style.display = 'flex';
+  container.innerHTML = aiPendingFiles.map((f, i) =>
+    '<div class="ai-file-chip"><span class="ai-file-icon">📄</span><span class="ai-file-name" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span><div class="remove" onclick="removeAIFile(' + i + ')">✕</div></div>'
+  ).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 async function sendAIMessage() {
   if (aiChatLoading) return;
   const input = document.getElementById('aiChatInput');
   if (!input) return;
   const text = input.value.trim();
   const images = [...aiPendingImages];
-  if (!text && images.length === 0) return;
+  const files = [...aiPendingFiles];
+  if (!text && images.length === 0 && files.length === 0) return;
   const cfg = getAIConfig();
   if (!cfg.apiKey) {
     appendAIMessage('system', '⚠️ 请先在上方"AI模型配置"中设置API Key');
     return;
   }
 
-  // Show user message (with images if any)
-  appendAIMessage('user', text || '(图片)', images);
+  // 组装文件附件文本（图片走视觉通道，文档/表格走文本通道）
+  const fileBlocks = files.map(f => '【附件：' + f.name + '】\n' + f.text).join('\n\n');
+  const userLabel = text || (images.length ? '(图片)' : '(附件)');
+
+  // Show user message (with images & files if any)
+  appendAIMessage('user', userLabel, images, files.map(f => f.name));
   input.value = '';
   aiPendingImages = [];
+  aiPendingFiles = [];
   renderAIImagePreviews();
+  renderAIFilePreviews();
 
   // Show typing indicator
   const msgArea = document.getElementById('aiChatMessages');
@@ -4547,14 +4761,15 @@ async function sendAIMessage() {
     // Build messages: system (fresh data) + history + new user message
     const systemMsg = {role: 'system', content: buildAISystemMessage()};
     const historyMsgs = aiChatHistory.map(m => ({role: m.role, content: m.content}));
-    // Build user message with optional images (OpenAI vision format)
+    // Build user message (支持图片视觉通道 + 文件文本通道)
+    const combinedText = (text ? text + '\n' : '') + (fileBlocks ? '\n' + fileBlocks : '');
     let userMsg;
     if (images.length > 0) {
-      const content = [{type: 'text', text: text || '请分析这张图片'}];
+      const content = [{type: 'text', text: combinedText || '请分析这些图片与附件'}];
       images.forEach(img => content.push({type: 'image_url', image_url: {url: img}}));
       userMsg = {role: 'user', content: content};
     } else {
-      userMsg = {role: 'user', content: text};
+      userMsg = {role: 'user', content: combinedText || '(附件)'};
     }
     const allMsgs = [systemMsg, ...historyMsgs, userMsg];
 
@@ -4567,8 +4782,8 @@ async function sendAIMessage() {
     // Show AI response
     appendAIMessage('assistant', response);
 
-    // Save to history (text only for context)
-    aiChatHistory.push({role: 'user', content: text || '(图片)'});
+    // Save to history (text only for context; 文件仅记名称避免撑爆 token)
+    aiChatHistory.push({role: 'user', content: userLabel});
     aiChatHistory.push({role: 'assistant', content: response});
 
     // Keep history to last 20 messages to avoid token overflow
@@ -4593,6 +4808,7 @@ async function sendAIMessage() {
 function clearAIChat() {
   aiChatHistory = [];
   aiPendingImages = [];
+  aiPendingFiles = [];
   initAIChat();
 }
 
@@ -8593,9 +8809,9 @@ function renderSalesBoardTable(tid, key) {
         const lyv = (sbLastYearTeamMap[row.k] && sbLastYearTeamMap[row.k][lyMonth(m)]) ? sbLastYearTeamMap[row.k][lyMonth(m)] : 0;
         if (lyv > 0) {
           const g = (v - lyv) / lyv * 100;
-          cell += `<div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}">${g >= 0 ? '+' : ''}${g.toFixed(1)}% 同比</div>`;
+          cell += `<div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${g >= 0 ? '+' : ''}${g.toFixed(1)}% 同比</div>`;
         } else {
-          cell += `<div class="yoy-none">— 同比</div>`;
+          cell += `<div class="yoy-none" style="white-space:nowrap">— 同比</div>`;
         }
         const tgt = (teamTargets[row.k] && teamTargets[row.k][m.slice(5)]) || 0;
         if (tgt > 0) {
@@ -9001,29 +9217,34 @@ function renderSalesBoardTableEff(tid, key) {
       const hc = (headcount[row.k] && headcount[row.k][m.slice(5)]) || 0;
       const eff = hc > 0 ? (v / hc) : 0;
       colTot[m] = (colTot[m] || 0) + v; colHc[m] = (colHc[m] || 0) + hc;
-      let cell = `<td class="num">${fmtSalesMoney(v)}`;
-      cell += `<div style="font-size:11px;margin-top:2px;color:var(--gray-500)">人数 ${hc || '—'}</div>`;
-      cell += `<div style="font-size:11px;font-weight:600">人效 ${hc > 0 ? fmtSalesMoney(eff) : '—'}</div>`;
+      let cell = `<td class="num" style="white-space:nowrap">${fmtSalesMoney(v)}`;
+      cell += `<div style="font-size:11px;margin-top:2px;color:var(--gray-500);white-space:nowrap">人数 ${hc || '—'}</div>`;
+      cell += `<div style="font-size:11px;font-weight:600;white-space:nowrap">人效 ${hc > 0 ? fmtSalesMoney(eff) : '—'}</div>`;
       if (key === 'team') {
         const lyv = (sbLastYearTeamMap[row.k] && sbLastYearTeamMap[row.k][lyMonth(m)]) ? sbLastYearTeamMap[row.k][lyMonth(m)] : 0;
         if (lyv > 0) {
           const g = (v - lyv) / lyv * 100;
-          cell += `<div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}">${g >= 0 ? '+' : ''}${g.toFixed(1)}% 同比</div>`;
+          cell += `<div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${g >= 0 ? '+' : ''}${g.toFixed(1)}% 同比</div>`;
         } else {
-          cell += `<div class="yoy-none">— 同比</div>`;
+          cell += `<div class="yoy-none" style="white-space:nowrap">— 同比</div>`;
         }
       }
       cell += `</td>`;
       h += cell;
     });
-    h += `<td class="num">${fmtSalesMoney(row.t)}</td>`;
-    h += `<td class="num" style="font-weight:600">${row.hc > 0 ? fmtSalesMoney(row.t / row.hc) : '—'}</td></tr>`;
+    h += `<td class="num" style="white-space:nowrap">${fmtSalesMoney(row.t)}</td>`;
+    h += `<td class="num" style="font-weight:600;white-space:nowrap">${row.hc > 0 ? fmtSalesMoney(row.t / row.hc) : '—'}</td></tr>`;
   });
   h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
   let gt = 0, ghc = 0;
-  months.forEach(m => { gt += (colTot[m] || 0); ghc += (colHc[m] || 0); h += `<td class="num">${fmtSalesMoney(colTot[m] || 0)}</td>`; });
-  h += `<td class="num">${fmtSalesMoney(gt)}</td>`;
-  h += `<td class="num" style="font-weight:600">${ghc > 0 ? fmtSalesMoney(gt / ghc) : '—'}</td></tr></tfoot>`;
+  months.forEach(m => {
+    gt += (colTot[m] || 0); ghc += (colHc[m] || 0);
+    const me = (colHc[m] > 0) ? (colTot[m] / colHc[m]) : 0;
+    h += `<td class="num" style="white-space:nowrap">${colHc[m] > 0 ? fmtSalesMoney(me) : '—'}</td>`;
+  });
+  const gtEff = ghc > 0 ? (gt / ghc) : 0;
+  h += `<td class="num" style="white-space:nowrap">${ghc > 0 ? fmtSalesMoney(gtEff) : '—'}</td>`;
+  h += `<td class="num" style="font-weight:600;white-space:nowrap">${ghc > 0 ? fmtSalesMoney(gtEff) : '—'}</td></tr></tfoot>`;
   document.getElementById(tid).innerHTML = h;
 }
 
@@ -11664,6 +11885,8 @@ function applyMgrPerfBatchStandard() {
       localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
       // Wait for config data before showing dashboard
       if (_coreDataPromise) { try { await _coreDataPromise; } catch(e){} }
+      // 按角色权限加载管理类记录（员工几乎零开销）
+      await loadRoleScopedData();
       // Wait for report data (cache hit → instant; otherwise spinner) before showing dashboard
       if (!reportsLoaded) {
         if (loadingEl) {
