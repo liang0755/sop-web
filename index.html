@@ -9203,9 +9203,7 @@ function renderSalesBoardTableEff(tid, key) {
     const act = sbSortCol === m ? ' active' : '';
     h += `<th class="num sort-th${act}" onclick="sbSortBy('${m}', '${tid}')">${m.slice(5)}月<span class="sort-ind${act}">${ind}</span></th>`;
   });
-  const totInd = sbSortCol === 'total' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
-  const totAct = sbSortCol === 'total' ? ' active' : '';
-  h += `<th class="num sort-th${totAct}" onclick="sbSortBy('total', '${tid}')">总业绩<span class="sort-ind${totAct}">${totInd}</span></th></tr></thead><tbody>`;
+  h += '</tr></thead><tbody>';
   const colTot = {}, colHc = {};
   rowsArr.forEach(row => {
     h += `<tr><td><span class="badge badge-team">${esc(row.k)}</span></td>`;
@@ -9217,29 +9215,17 @@ function renderSalesBoardTableEff(tid, key) {
       let cell = `<td class="num" style="white-space:nowrap">${fmtSalesMoney(v)}`;
       cell += `<div style="font-size:11px;margin-top:2px;color:var(--gray-500);white-space:nowrap">人数 ${hc || '—'}</div>`;
       cell += `<div style="font-size:11px;font-weight:600;white-space:nowrap">人效 ${hc > 0 ? fmtSalesMoney(eff) : '—'}</div>`;
-      if (key === 'team') {
-        const lyv = (sbLastYearTeamMap[row.k] && sbLastYearTeamMap[row.k][lyMonth(m)]) ? sbLastYearTeamMap[row.k][lyMonth(m)] : 0;
-        if (lyv > 0) {
-          const g = (v - lyv) / lyv * 100;
-          cell += `<div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${g >= 0 ? '+' : ''}${g.toFixed(1)}% 同比</div>`;
-        } else {
-          cell += `<div class="yoy-none" style="white-space:nowrap">— 同比</div>`;
-        }
-      }
       cell += `</td>`;
       h += cell;
     });
-    h += `<td class="num" style="white-space:nowrap">${fmtSalesMoney(row.t)}</td></tr>`;
+    h += '</tr>';
   });
   h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
-  let gt = 0, ghc = 0;
   months.forEach(m => {
-    gt += (colTot[m] || 0); ghc += (colHc[m] || 0);
     const me = (colHc[m] > 0) ? (colTot[m] / colHc[m]) : 0;
     h += `<td class="num" style="white-space:nowrap">${colHc[m] > 0 ? fmtSalesMoney(me) : '—'}</td>`;
   });
-  const gtEff = ghc > 0 ? (gt / ghc) : 0;
-  h += `<td class="num" style="font-weight:600;white-space:nowrap">${ghc > 0 ? fmtSalesMoney(gtEff) : '—'}</td></tr></tfoot>`;
+  h += '</tr></tfoot>';
   document.getElementById(tid).innerHTML = h;
 }
 
@@ -9252,20 +9238,20 @@ function exportSalesBoard3() {
   cloudData.salesRecords.forEach(r => { const dm = r.docMonth || ''; if (!months.includes(dm)) return; const k = r.team || '(未分类)'; if (!map[k]) map[k] = {}; map[k][dm] = (map[k][dm] || 0) + toNum(r.amount); });
   const rows = Object.keys(map).map(k => { let t = 0, hc = 0; months.forEach(m => { t += (map[k][m] || 0); hc += (headcount[k] && headcount[k][m.slice(5)]) || 0; }); return { k, t, hc, eff: hc > 0 ? t / hc : 0 }; }).sort((a, b) => b.t - a.t);
   if (!rows.length) { showToast('当前无数据可导出', 'error'); return; }
-  const header1 = ['团队/门店']; months.forEach(m => { header1.push(parseInt(m.slice(5), 10) + '月'); header1.push(''); header1.push(''); }); header1.push('总业绩'); header1.push('');
-  const header2 = ['']; months.forEach(() => { header2.push('业绩'); header2.push('人数'); header2.push('人效'); }); header2.push('业绩'); header2.push('人数');
+  const header1 = ['团队/门店']; months.forEach(m => { header1.push(parseInt(m.slice(5), 10) + '月'); header1.push(''); header1.push(''); });
+  const header2 = ['']; months.forEach(() => { header2.push('业绩'); header2.push('人数'); header2.push('人效'); });
   const aoa = [header1, header2];
   const colAct = {}, colHc = {};
   rows.forEach(row => {
     const arr = [row.k]; let rhc = 0;
     months.forEach(m => { const v = map[row.k][m] || 0; const hc = (headcount[row.k] && headcount[row.k][m.slice(5)]) || 0; rhc += hc; colAct[m] = (colAct[m] || 0) + v; colHc[m] = (colHc[m] || 0) + hc; arr.push(v, hc, hc > 0 ? Math.round(v / hc) : '—'); });
-    arr.push(row.t, row.hc); aoa.push(arr);
+    aoa.push(arr);
   });
-  const totalRow = ['合计']; let gAct = 0, gHc = 0;
-  months.forEach(m => { const a = colAct[m] || 0, hc = colHc[m] || 0; gAct += a; gHc += hc; totalRow.push(a, hc, hc > 0 ? Math.round(a / hc) : '—'); });
-  totalRow.push(gAct, gHc); aoa.push(totalRow);
+  const totalRow = ['合计'];
+  months.forEach(m => { const a = colAct[m] || 0, hc = colHc[m] || 0; totalRow.push(a, hc, hc > 0 ? Math.round(a / hc) : '—'); });
+  aoa.push(totalRow);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const merges = []; let ci = 1; months.forEach(() => { merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ci += 3; }); merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 1 } }); ws['!merges'] = merges;
+  const merges = []; let ci = 1; months.forEach(() => { merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ci += 3; }); ws['!merges'] = merges;
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '团队人效统计');
   XLSX.writeFile(wb, `团队人效统计_${year}_${months[0].slice(5)}-${months[months.length - 1].slice(5)}月.xlsx`);
   showToast('已导出团队人效统计', 'success');
