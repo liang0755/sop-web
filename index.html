@@ -9532,6 +9532,7 @@ function refreshPerfSingle() {
   h += '<th rowspan="2" style="text-align:center;width:70px">绩效评分</th>';
   h += '<th rowspan="2" style="text-align:center;min-width:160px">总评</th>';
   h += '<th rowspan="2" style="text-align:center;width:80px">绩效基数</th>';
+  h += '<th rowspan="2" style="text-align:center;width:90px">绩效奖金</th>';
   h += '</tr><tr>';
   items.forEach(it => {
     if (it.type === 'auto-demo') {
@@ -9607,9 +9608,12 @@ function refreshPerfSingle() {
     }
     // 绩效基数
     h += `<td style="text-align:center">${fmtSalesMoney(d.base)}</td>`;
+    // 绩效奖金 = 绩效基数 × 绩效评分 / 100
+    const bonusMoney = (d.base || 0) * (d.finalScore || 0) / 100;
+    h += `<td style="text-align:center;font-weight:700">${fmtSalesMoney(bonusMoney)}</td>`;
     h += `</tr>`;
   });
-  const colCount = 6 + items.reduce((s, it) => s + (it.type === 'auto-demo' ? 3 : 2), 0) + bonusList.length;
+  const colCount = 8 + items.reduce((s, it) => s + (it.type === 'auto-demo' ? 3 : 2), 0) + bonusList.length;
   if (!rows.length) h += `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售</td></tr>`;
   h += '</tbody>';
   const tbl = document.getElementById('perfTable');
