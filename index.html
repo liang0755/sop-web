@@ -9659,16 +9659,16 @@ function refreshPerfSingle() {
   else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
 
   let h = '<thead><tr>';
-  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:150px;white-space:nowrap">销售</th>';
-  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:150px;z-index:3;background:#fff;text-align:left;width:160px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">团队</th>';
+  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:120px;white-space:nowrap">销售</th>';
+  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:120px;z-index:3;background:#fff;text-align:left;width:140px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">团队</th>';
   items.forEach(it => {
     h += `<th colspan="3" style="text-align:center;background:#FAEEDA">${esc(it.name)}（${it.weight || 0}%）</th>`;
   });
   if (bonusList.length) h += `<th colspan="${bonusList.length}" style="text-align:center;background:#EAF3DE">加分项</th>`;
   h += '<th rowspan="2" style="text-align:center;width:70px">当月在职天数</th>';
   h += '<th rowspan="2" style="text-align:center;width:80px">当月销售职级</th>';
-  h += '<th rowspan="2" style="text-align:center;min-width:180px">总评</th>';
-  h += '<th rowspan="2" style="text-align:center;width:70px">绩效评分</th>';
+  h += '<th rowspan="2" style="text-align:center;min-width:150px">总评</th>';
+  h += '<th rowspan="2" style="text-align:center;width:100px">绩效评分</th>';
   h += '<th rowspan="2" style="text-align:center;width:80px">绩效基数</th>';
   h += '<th rowspan="2" style="text-align:center;width:90px">绩效奖金</th>';
   h += '</tr><tr>';
@@ -9686,8 +9686,8 @@ function refreshPerfSingle() {
     const rec0 = cloudData.performanceRecords[k] || {};
     const isManualScore = (rec0.finalScore !== undefined && rec0.finalScore !== null && rec0.finalScore !== '');
     h += `<tr>`;
-    h += `<td class="perf-freeze" style="position:sticky;left:0;z-index:2;background:#fff;white-space:nowrap">${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
-    h += `<td class="perf-freeze" style="position:sticky;left:150px;z-index:2;background:#fff;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">${esc(row.team)}</td>`;
+    h += `<td class="perf-freeze" style="position:sticky;left:0;z-index:2;background:#fff;white-space:nowrap;width:120px">${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
+    h += `<td class="perf-freeze" style="position:sticky;left:120px;z-index:2;background:#fff;white-space:nowrap;width:140px;box-shadow:2px 0 0 0 var(--gray-200)">${esc(row.team)}</td>`;
     d.items.forEach(x => {
       const it = x.it, ik = it.key;
       // 要求列（所有考核项统一：描述 + 要求数值），演示考核与手动录入样式一致
@@ -9710,7 +9710,7 @@ function refreshPerfSingle() {
       }
       h += `<td style="background:#FFF8EE">${stdCell}</td>`;
       h += `<td style="background:#FFF8EE">${actCell}</td>`;
-      h += `<td style="text-align:center;font-weight:600">${Number(x.score).toFixed(1)}</td>`;
+      h += `<td style="text-align:center;font-weight:600">${Number(x.score).toFixed(2)}</td>`;
     });
     d.bonus.forEach(x => {
       if (d.frozen) {
@@ -9739,7 +9739,7 @@ function refreshPerfSingle() {
       h += `<td style="text-align:center;color:${scoreColor(d.finalScore)};font-weight:700">${Number(d.finalScore).toFixed(2)}</td>`;
     } else {
       const resetBtn = isManualScore ? `<button class="btn btn-xs btn-outline" title="重置为公式自动值" onclick="savePerfByKey('${k}', {finalScore:null})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
-      h += `<td style="text-align:center">${resetBtn}<input type="number" class="form-control form-control-sm" value="${Number(d.finalScore).toFixed(2)}" onchange="savePerfByKey('${k}', {finalScore:this.value===''||this.value===null?null:parseFloat(this.value)})" style="width:70px;margin-top:2px;color:${scoreColor(d.finalScore)};font-weight:700"></td>`;
+      h += `<td style="text-align:center">${resetBtn}<input type="number" class="form-control form-control-sm" value="${Number(d.finalScore).toFixed(2)}" onchange="savePerfByKey('${k}', {finalScore:this.value===''||this.value===null?null:parseFloat(this.value)})" style="width:90px;margin-top:2px;color:${scoreColor(d.finalScore)};font-weight:700"></td>`;
     }
     // 绩效基数
     h += `<td style="text-align:center">${fmtSalesMoney(d.base)}</td>`;
@@ -9794,7 +9794,7 @@ function exportPerfSingleXlsx() {
     const d = perfRowDisplay(year, row.sp, month, cfg, baseMap, perfViewSnapshot ? getPerfSnapshot(year, row.sp, month) : null);
     const line = [row.sp, row.team];
     d.items.forEach(x => {
-      line.push(x.standard, x.actual, Number(x.score).toFixed(1));
+      line.push(x.standard, x.actual, Number(x.score).toFixed(2));
     });
     d.bonus.forEach(x => line.push(x.cnt));
     const bonusMoney = (d.base || 0) * (d.finalScore || 0) / 100;
