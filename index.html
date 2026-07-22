@@ -11431,19 +11431,19 @@ function refreshMgrPerfSingle() {
       const it = x.it, ik = it.key;
       const stdCell = d.frozen
         ? `<div style="font-size:11px;margin-bottom:2px">${esc(x.text || '')}</div><div style="font-size:11px">要求 ${x.standard}</div>`
-        : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="saveMgrPerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="saveMgrPerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">${x.isAuto ? '<div style="font-size:10px;color:var(--gray-400);margin-top:2px">自动取团队目标</div>' : ''}`;
+        : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="saveMgrPerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="saveMgrPerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:120px">${x.isAuto ? '<div style="font-size:10px;color:var(--gray-400);margin-top:2px">自动取团队目标</div>' : ''}`;
       let actCell;
       if (x.isAuto) {
         if (d.frozen) {
           actCell = `<div style="font-size:11px">${x.actual}</div>`;
         } else {
           const resetBtn = x.manual ? `<button class="btn btn-xs btn-outline" title="重置为自动(团队业绩)" onclick="saveMgrPerfByKey('${k}', {'manual_${ik}':false})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
-          actCell = `${resetBtn}<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveMgrPerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:70px;margin-top:2px">`;
+          actCell = `${resetBtn}<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveMgrPerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:120px;margin-top:2px">`;
         }
       } else {
         actCell = d.frozen
           ? `<div style="font-size:11px">${x.actual}</div>`
-          : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveMgrPerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+          : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveMgrPerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:120px">`;
       }
       h += `<td style="background:#FFF8EE">${stdCell}</td>`;
       h += `<td style="background:#FFF8EE">${actCell}</td>`;
