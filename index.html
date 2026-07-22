@@ -9246,7 +9246,9 @@ function getPerfRecord(year, sp, m) {
   const stored = (cloudData.performanceRecords && cloudData.performanceRecords[k]) || {};
   const defaults = { workingDays: 30, comment: '', finalScore: null };
   (cfg.items || []).forEach(it => {
-    defaults['standard_' + it.key] = it.standard || 0;
+    // 注意：standard_<ik> 不在此预填默认值——若预填，manualSet/manualStd 判断会恒为真，
+    // 导致"要求"列与评分永远不按在职天数折算（详见 perfProrationRatio / computePerfScore）。
+    // 未手动覆盖时由 it.standard 兜底（在 perfRowDisplay / computePerfScore 内按 ratio 折算）。
     defaults['actual_' + it.key] = 0;
     defaults['manual_' + it.key] = false;
     defaults['text_' + it.key] = it.text || '';
