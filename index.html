@@ -8099,11 +8099,24 @@ function autoGrade(amount, levels) {
   if (idx > 0 && amount < (best.demote || 0)) best = sorted[idx - 1];
   return best.name;
 }
+// 职级在「按 promote 阈值排序」后的名次（与评级标准配置顺序无关，手动改职级也能正确比较升降）
+function gradeRankIndex(name, levels) {
+  if (!levels || !levels.length) return 0;
+  const sorted = [...levels].sort((a, b) => (a.promote || 0) - (b.promote || 0));
+  const idx = sorted.findIndex(l => l.name === name);
+  return idx >= 0 ? idx : 0;
+}
 function gradeKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
 function saveGradeByKey(key, patch) {
   if (!cloudData.gradeRecords) cloudData.gradeRecords = {};
   cloudData.gradeRecords[key] = Object.assign({}, cloudData.gradeRecords[key] || {}, patch);
   apiUpdate('gradeRecords', key, cloudData.gradeRecords[key]).catch(e => showToast('保存评级失败: ' + e.message, 'error'));
+}
+// 修改评级后实时重算「升降级」（当前月对比上月，含手动改动的职级）
+function saveGradeRefresh(key, patch) {
+  saveGradeByKey(key, patch);
+  if (salesGradeTab === 'single') refreshSalesGradeSingle();
+  else if (salesGradeTab === 'matrix') refreshSalesGrade();
 }
 
 let salesGradeYear = '';
@@ -8404,12 +8417,12 @@ function sgExportDispatch() {
   else exportSalesGrade();
 }
 function sgNoteText() {
-  if (salesGradeTab === 'single') return '说明：单月评级看板为「升降级矩阵」的表格视图，数据与矩阵<b>联动</b>（评级/备注修改即时同步）。纵向仅显示在册<b>在职</b>销售，横向为：评级业绩（滚动3月）/ 评级 / 升降级 / 备注。';
+  if (salesGradeTab === 'single') return '说明：单月评级看板为「升降级矩阵」的表格视图，数据与矩阵<b>联动</b>（评级/备注修改即时同步）。纵向仅显示在册<b>在职</b>销售，横向为：评级业绩（滚动3月）/ 评级 / 升降级 / 备注。<b>升降级为实时</b>按当月职级对比上月职级自动计算（修改评级即时刷新）。';
   if (salesGradeTab === 'm0matrix' || salesGradeTab === 'm0single') {
     const cnt = ((cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || []).length;
     return '说明：M0 看板考核业绩 = <b>M0 人员当月业绩</b> + 所选<b>累加人员当月业绩</b>之和（仅取当月，不滚动 3 月）。评级 / 升降级均为<b>手动填写</b>（下拉选择），不与上月联动。' + (cnt ? '' : ' <b style="color:#dc2626">当前未配置 M0 计算范围，请在上方「⚙️ M0 计算范围」中设置。</b>');
   }
-  return '说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为当月职级对比上月职级的变化。';
+  return '说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为<b>实时</b>按当月职级对比上月职级自动计算（修改评级后即时刷新，含手动改动的职级）。';
 }
 function refreshM0Grade() {
   const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
@@ -8601,14 +8614,14 @@ function refreshSalesGrade() {
       if (m > 1) {
         const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m - 1)]) || {};
         const prevGrade = prevRec.grade || autoGrade(row.roll[m - 1], levels);
-        const ci = gradeOpts.indexOf(grade), pi = gradeOpts.indexOf(prevGrade);
+        const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
         if (ci > pi) upFlag = ' <span style="color:#16a34a;font-size:10px">▲升级</span>';
         else if (ci < pi) upFlag = ' <span style="color:#dc2626;font-size:10px">▼降级</span>';
       }
       const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
       const k = gradeKey(year, row.sp, m);
       h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div>`
-         + `<div style="margin-top:4px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveGradeByKey('${k}', {grade:this.value})">${opts}</select>${upFlag}</div>`
+         + `<div style="margin-top:4px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveGradeRefresh('${k}', {grade:this.value})">${opts}</select>${upFlag}</div>`
          + `<input type="text" class="form-control form-control-sm" style="font-size:11px;margin-top:3px;padding:1px 4px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveGradeByKey('${k}', {note:this.value})"></td>`;
     });
     decTot += row.dec;
@@ -8670,7 +8683,7 @@ function exportSalesGrade() {
       if (m > 1) {
         const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m - 1)]) || {};
         const prevGrade = prevRec.grade || autoGrade(Math.round(row.roll[m - 1]), levels);
-        const ci = gradeOpts.indexOf(grade), pi = gradeOpts.indexOf(prevGrade);
+        const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
         chg = ci > pi ? '▲升级' : (ci < pi ? '▼降级' : '持平');
       }
       r.push(v, grade, chg, rec.note || '');
@@ -8730,7 +8743,7 @@ function refreshSalesGradeSingle() {
     if (month > 1) {
       const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
       const prevGrade = prevRec.grade || autoGrade(row.roll[month - 1], levels);
-      const ci = gradeOpts.indexOf(grade), pi = gradeOpts.indexOf(prevGrade);
+      const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
       if (ci > pi) upFlag = '<span style="color:#16a34a;font-weight:600">▲升级</span>';
       else if (ci < pi) upFlag = '<span style="color:#dc2626;font-weight:600">▼降级</span>';
       else upFlag = '<span style="color:var(--gray-400)">持平</span>';
@@ -8739,7 +8752,7 @@ function refreshSalesGradeSingle() {
     const k = gradeKey(year, row.sp, month);
     h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`
        + `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div></td>`
-       + `<td><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveGradeByKey('${k}', {grade:this.value})">${opts}</select></td>`
+       + `<td><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveGradeRefresh('${k}', {grade:this.value})">${opts}</select></td>`
        + `<td style="text-align:center">${upFlag}</td>`
        + `<td><input type="text" class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveGradeByKey('${k}', {note:this.value})"></td>`
        + `</tr>`;
@@ -8791,7 +8804,7 @@ function exportSalesGradeSingle() {
     if (month > 1) {
       const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
       const prevGrade = prevRec.grade || autoGrade(Math.round(row.roll[month - 1]), levels);
-      const ci = gradeOpts.indexOf(grade), pi = gradeOpts.indexOf(prevGrade);
+      const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
       chg = ci > pi ? '▲升级' : (ci < pi ? '▼降级' : '持平');
     }
     aoa.push([row.sp, v, single, grade, chg, rec.note || '']);
