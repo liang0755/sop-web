@@ -8211,7 +8211,7 @@ function refreshM0Grade() {
       const chgOpts = m0ChgOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===chg)?'selected':''}>${o?o:'（未填）'}</option>`).join('');
       const k = m0Key(year, m0, m);
       h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div>`
-         + `<div style="margin-top:4px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveM0ByKey('${k}', {grade:this.value})">${gradeOpts}</select></div>`
+         + `<div style="margin-top:4px"><input type="text" class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" placeholder="评级" value="${grade.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {grade:this.value})"></div>`
          + `<div style="margin-top:3px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveM0ByKey('${k}', {chg:this.value})">${chgOpts}</select></div>`
          + `<input type="text" class="form-control form-control-sm" style="font-size:11px;margin-top:3px;padding:1px 4px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {note:this.value})"></td>`;
     });
@@ -8250,7 +8250,7 @@ function refreshM0GradeSingle() {
     const k = m0Key(year, m0, month);
     h += `<tr><td>${esc(m0)}${userStatusBadge(m0, statusMap)}<div style="font-size:10px;color:var(--gray-400)">含 ${members.length} 人累加</div></td>`
        + `<td class="num" style="font-weight:600">${fmtSalesMoney(row.v)}</td>`
-       + `<td><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveM0ByKey('${k}', {grade:this.value})">${gradeOpts}</select></td>`
+       + `<td><input type="text" class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" placeholder="评级" value="${grade.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {grade:this.value})"></td>`
        + `<td style="text-align:center"><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveM0ByKey('${k}', {chg:this.value})">${chgOpts}</select></td>`
        + `<td><input type="text" class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {note:this.value})"></td></tr>`;
   });
