@@ -4792,14 +4792,14 @@ function renderConfigContent() {
               <div class="perf-item-card" style="border:1px solid var(--gray-200);border-radius:10px;padding:12px;margin-bottom:12px;${b.enabled ? '' : 'opacity:.55'}">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
                   <input type="checkbox" ${b.enabled ? 'checked' : ''} onchange="togglePerfBonusEnabled(${i})" title="启用/停用">
-                  <b style="font-size:13px">${esc(b.name)}</b>
+                  <b style="font-size:13px;white-space:pre-wrap">${esc(b.name)}</b>
                   <div style="flex:1"></div>
                   <button class="btn btn-sm btn-outline" onclick="movePerfBonusItem(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
                   <button class="btn btn-sm btn-outline" onclick="movePerfBonusItem(${i}, 1)" ${i === bonus.length - 1 ? 'disabled' : ''}>↓</button>
                   <button class="btn btn-sm btn-danger" onclick="deletePerfBonusItem(${i})">删除</button>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px">
-                  <div class="form-group" style="margin-bottom:0"><label>加分项名称</label><input type="text" class="form-control" value="${esc(b.name)}" onchange="updatePerfBonusItem(${i}, 'name', this.value)"></div>
+                  <div class="form-group" style="margin-bottom:0"><label>加分项名称</label><textarea class="form-control" rows="2" onchange="updatePerfBonusItem(${i}, 'name', this.value)" style="resize:vertical;min-height:38px">${esc(b.name)}</textarea></div>
                   <div class="form-group" style="margin-bottom:0"><label>分值</label><input type="number" class="form-control" value="${b.points}" onchange="updatePerfBonusItem(${i}, 'points', parseFloat(this.value) || 0)"></div>
                   <div class="form-group" style="margin-bottom:0"><label>文字描述</label><input type="text" class="form-control" value="${esc(b.text || '')}" onchange="updatePerfBonusItem(${i}, 'text', this.value)" placeholder="可选"></div>
                   <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${b.capAt100 ? 'checked' : ''} onchange="updatePerfBonusItem(${i}, 'capAt100', this.checked)"> 该项得分可超100</label>
@@ -9542,7 +9542,7 @@ function refreshPerfSingle() {
     }
     h += '<th style="background:#FAEEDA">得分</th>';
   });
-  bonusList.forEach(b => { h += `<th style="background:#EAF3DE">${esc(b.name)}</th>`; });
+  bonusList.forEach(b => { h += `<th style="background:#EAF3DE;white-space:pre-wrap">${esc(b.name)}</th>`; });
   h += '</tr></thead><tbody>';
 
   rows.forEach(row => {
