@@ -10345,6 +10345,34 @@ function savePerfByKey(key, patch) {
   apiUpdate('performanceRecords', key, cloudData.performanceRecords[key]).catch(e => showToast('保存绩效数据失败: ' + e.message, 'error'));
 }
 
+// 批量设置单月绩效看板某考核项的「要求(考核标准)」：对所有在职销售一次性统一设值，跳过已冻结快照的行
+function batchSetPerfStandard(ik) {
+  const cfg = getPerfConfig();
+  const it = (cfg.items || []).find(x => x.key === ik);
+  const itemName = it ? it.name : ik;
+  const year = perfYear;
+  const month = perfSingleMonth;
+  const v = prompt('将所有在职销售「' + itemName + '」的要求(考核标准)统一设置为：', '');
+  if (v === null) return;
+  const num = parseFloat(v);
+  if (isNaN(num)) { showToast('请输入有效数字', 'error'); return; }
+  const statusMap = buildUserStatusMap();
+  const records = cloudData.salesRecords || [];
+  const spSet = new Set();
+  records.forEach(r => { const dm = r.docMonth || ''; if (dm.slice(0, 4) !== year) return; const sp = (r.salesperson || '').trim(); if (!sp) return; if (statusMap[sp] !== '在职') return; spSet.add(sp); });
+  if (!cloudData.performanceRecords) cloudData.performanceRecords = {};
+  let n = 0, skipped = 0;
+  [...spSet].filter(perfFilterSp).forEach(sp => {
+    if (perfViewSnapshot && getPerfSnapshot(year, sp, month)) { skipped++; return; }
+    const k = perfKey(year, sp, month);
+    cloudData.performanceRecords[k] = Object.assign({}, cloudData.performanceRecords[k] || {}, { ['standard_' + ik]: num });
+    apiUpdate('performanceRecords', k, cloudData.performanceRecords[k]).catch(function () {});
+    n++;
+  });
+  refreshPerfSingle();
+  showToast('已为 ' + n + ' 名销售批量设置「' + itemName + '」要求为 ' + num + (skipped ? '（跳过 ' + skipped + ' 名已冻结快照）' : ''), 'success');
+}
+
 // ===== 最终保存快照（冻结，独立于表单配置修改）=====
 function getPerfSnapshot(year, sp, month) {
   if (!cloudData.performanceSnapshots) return null;
@@ -10704,7 +10732,7 @@ function refreshPerfSingle() {
   h += '<th rowspan="2" style="text-align:center;width:90px">绩效奖金</th>';
   h += '</tr><tr>';
   items.forEach(it => {
-    h += '<th style="background:#FAEEDA">要求</th>';
+    h += `<th style="background:#FAEEDA;white-space:nowrap">要求<button class="btn btn-xs btn-outline" style="margin-left:4px;font-size:10px;padding:1px 5px;line-height:1.4" onclick="batchSetPerfStandard('${it.key}')" title="批量设置全部在职销售该项要求(考核标准)">批量</button></th>`;
     h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' ? '完成(自动)' : '完成'}</th>`;
     h += '<th style="background:#FAEEDA">得分</th>';
   });
