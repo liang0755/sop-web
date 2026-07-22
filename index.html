@@ -4751,7 +4751,7 @@ function renderConfigContent() {
         <div class="card-header"><h4>总分规则</h4></div>
         <div class="card-body">
           <label style="display:flex;align-items:center;gap:8px;font-size:13px">
-            <input type="checkbox" ${cfg.totalCapAt100 ? 'checked' : ''} onchange="updatePerfTotalCap(this.checked)"> 总分是否可超过 100（<b>不勾选</b>则各项加权与加分累加后的总分封顶 100）
+            <input type="checkbox" ${!cfg.totalCapAt100 ? 'checked' : ''} onchange="updatePerfTotalCap(!this.checked)"> 总分是否可超过 100（<b>不勾选</b>则各项加权与加分累加后的总分封顶 100）
           </label>
         </div>
       </div>
@@ -4776,7 +4776,7 @@ function renderConfigContent() {
                   <div class="form-group" style="margin-bottom:0"><label>权重(%)</label><input type="number" class="form-control" value="${it.weight}" onchange="updatePerfItem(${i}, 'weight', parseFloat(this.value) || 0)"></div>
                   <div class="form-group" style="margin-bottom:0"><label>考核标准(数字)</label><input type="number" class="form-control" value="${it.standard}" onchange="updatePerfItem(${i}, 'standard', parseFloat(this.value) || 0)"></div>
                   <div class="form-group" style="margin-bottom:0;grid-column:span 2"><label>文字描述</label><input type="text" class="form-control" value="${esc(it.text || '')}" onchange="updatePerfItem(${i}, 'text', this.value)" placeholder="考核项描述，可在单月每行覆盖"></div>
-                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${it.capAt100 ? 'checked' : ''} onchange="updatePerfItem(${i}, 'capAt100', this.checked)"> 该项得分可超100</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${!it.capAt100 ? 'checked' : ''} onchange="updatePerfItem(${i}, 'capAt100', !this.checked)"> 该项得分可超100（不勾选则封顶100）</label>
                 </div>
               </div>
             `).join('')}
@@ -4802,7 +4802,7 @@ function renderConfigContent() {
                   <div class="form-group" style="margin-bottom:0"><label>加分项名称</label><textarea class="form-control" rows="2" onchange="updatePerfBonusItem(${i}, 'name', this.value)" style="resize:vertical;min-height:38px">${esc(b.name)}</textarea></div>
                   <div class="form-group" style="margin-bottom:0"><label>分值</label><input type="number" class="form-control" value="${b.points}" onchange="updatePerfBonusItem(${i}, 'points', parseFloat(this.value) || 0)"></div>
                   <div class="form-group" style="margin-bottom:0"><label>文字描述</label><input type="text" class="form-control" value="${esc(b.text || '')}" onchange="updatePerfBonusItem(${i}, 'text', this.value)" placeholder="可选"></div>
-                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${b.capAt100 ? 'checked' : ''} onchange="updatePerfBonusItem(${i}, 'capAt100', this.checked)"> 该项得分可超100</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${!b.capAt100 ? 'checked' : ''} onchange="updatePerfBonusItem(${i}, 'capAt100', !this.checked)"> 该项得分可超100（不勾选则封顶100）</label>
                 </div>
               </div>
             `).join('')}
@@ -4817,7 +4817,7 @@ function renderConfigContent() {
             ${levels.map((lv, i) => `
               <div class="form-group" style="margin-bottom:0">
                 <label>${esc(lv)}</label>
-                <input type="number" class="form-control" value="${baseMap[lv] || 0}" onchange="updatePerfBase(${JSON.stringify(lv)}, parseFloat(this.value) || 0)" placeholder="0">
+                <input type="number" class="form-control" value="${baseMap[lv] || 0}" onchange='updatePerfBase(${JSON.stringify(lv)}, parseFloat(this.value) || 0)' placeholder="0">
               </div>
             `).join('')}
           </div>
