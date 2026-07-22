@@ -73,6 +73,8 @@ th{background:var(--gray-50);padding:11px 14px;text-align:left;font-weight:600;c
 td{padding:10px 14px;border-bottom:1px solid var(--gray-100);color:var(--gray-700)}
 tr:hover td{background:var(--gray-50)}
 .table-wrap{overflow-x:auto}
+/* 绩效看板：相邻 sticky 冻结列在 border-collapse:collapse 下会出现亚像素缝隙，改用 separate+0 间距消除（本表仅 border-bottom 无竖边，视觉不变） */
+#perfTable{border-collapse:separate;border-spacing:0}
 .badge{padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;display:inline-block}
 .badge-success{background:var(--success-light);color:var(--success)}
 .badge-info{background:var(--primary-light);color:var(--primary)}
