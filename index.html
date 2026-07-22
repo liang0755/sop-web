@@ -630,6 +630,7 @@ async function loadCoreData() {
       cloudData.formConfig.mgrPerformanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.mgrPerformanceConfig));
     }
     cloudData.formConfig.mgrPerformanceConfig = normalizePerfConfig(cloudData.formConfig.mgrPerformanceConfig);
+    migrateMgrPerfConfig();
     if (cloudData.formConfig.mgrPerformanceBase === undefined || cloudData.formConfig.mgrPerformanceBase === null) cloudData.formConfig.mgrPerformanceBase = DEFAULT_FORM_CONFIG.mgrPerformanceBase;
     if (!fcData) {
       try { await fetch(FB_BASE + '/formConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.formConfig)}); } catch(e) {}
@@ -776,6 +777,7 @@ async function loadCoreData() {
       cloudData.formConfig.mgrPerformanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.mgrPerformanceConfig));
     }
     cloudData.formConfig.mgrPerformanceConfig = normalizePerfConfig(cloudData.formConfig.mgrPerformanceConfig);
+    migrateMgrPerfConfig();
     if (cloudData.formConfig.mgrPerformanceBase === undefined || cloudData.formConfig.mgrPerformanceBase === null) cloudData.formConfig.mgrPerformanceBase = DEFAULT_FORM_CONFIG.mgrPerformanceBase;
   }
 }
@@ -1421,7 +1423,9 @@ const DEFAULT_FORM_CONFIG = {
   // ===== 管理绩效配置（针对管理者角色用户，考核项均为手动录入，无评级配置；管理者无职级之分，绩效基数统一默认 5000 可手动修改）=====
   mgrPerformanceConfig: {
     totalCapAt100: true,
+    totalCap: 100,
     items: [
+      { key: 'achv', name: '业绩考核', type: 'auto-team', enabled: true, weight: 70, standard: 0, text: '团队业绩目标完成', capAt100: true },
       { key: 'effective', name: '有效建联', type: 'manual', enabled: true, weight: 10, standard: 75, text: '有效建联', capAt100: true },
       { key: 'channel', name: '渠道', type: 'manual', enabled: true, weight: 10, standard: 1, text: '渠道拓展', capAt100: true },
       { key: 'newMedia', name: '新媒体', type: 'manual', enabled: true, weight: 10, standard: 8, text: '新媒体运营', capAt100: true }
@@ -5045,18 +5049,22 @@ function renderConfigContent() {
     const bonus = cfg.bonus || [];
     c.innerHTML = `
       <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
-        配置<b>管理者</b>绩效统计的<b>考核项（手动录入，<b>不</b>自动带入自拓演示数量</b>）、<b>加分项</b>以及<b>统一绩效基数</b>。管理者无职级之分，绩效基数对所有管理者一致。保存后立即生效；单月看板中每行可单独覆盖考核要求、完成情况、描述文字与加分次数。
+        配置<b>管理者</b>绩效统计的<b>考核项</b>、<b>加分项</b>以及<b>统一绩效基数</b>。考核项支持「手动录入」与「自动(团队目标/业绩)」两种类型：自动类型会按当月自动取<b>团队目标</b>（要求）与<b>团队业绩总和</b>（完成），并可在单月看板每行手动覆盖。管理者无职级之分，绩效基数对所有管理者一致。保存后立即生效；单月看板中每行可单独覆盖考核要求、完成情况、描述文字与加分次数。
       </div>
       <div class="card" style="margin-bottom:16px">
         <div class="card-header"><h4>总分规则</h4></div>
         <div class="card-body">
           <label style="display:flex;align-items:center;gap:8px;font-size:13px">
-            <input type="checkbox" ${!cfg.totalCapAt100 ? 'checked' : ''} onchange="updateMgrPerfTotalCap(!this.checked)"> 总分是否可超过 100（<b>不勾选</b>则各项加权与加分累加后的总分封顶 100）
+            <input type="checkbox" ${cfg.totalCapAt100 ? 'checked' : ''} onchange="updateMgrPerfTotalCap(this.checked)"> 总分是否封顶（<b>勾选</b>则各项加权与加分累加后的总分不超过下方「封顶分值」）
           </label>
+          <div class="form-group" style="margin-bottom:0;max-width:240px;margin-top:10px">
+            <label>封顶分值（总和不可超过的分值，可手动修改）</label>
+            <input type="number" class="form-control" value="${cfg.totalCap || 100}" onchange="updateMgrPerfTotalCapValue(parseFloat(this.value) || 0)" ${cfg.totalCapAt100 ? '' : 'disabled'} placeholder="100">
+          </div>
         </div>
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><h4>考核项配置（手动录入）</h4><span style="font-size:12px;color:var(--gray-500)">权重总和建议为100；数字=考核标准/目标（用于计算得分）；文字=考核项描述（默认，可在单月每行覆盖）</span></div>
+        <div class="card-header"><h4>考核项配置</h4><span style="font-size:12px;color:var(--gray-500)">权重总和建议为100；「自动(团队目标/业绩)」类型的考核标准自动取当月团队目标、完成取当月团队业绩总和（可在单月每行手动覆盖）；「手动录入」类型的数字=考核标准/目标（用于计算得分）；文字=考核项描述（默认，可在单月每行覆盖）</span></div>
         <div class="card-body">
           <div id="mgrPerfItemsList">
             ${items.map((it, i) => `
@@ -5064,19 +5072,21 @@ function renderConfigContent() {
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
                   <input type="checkbox" ${it.enabled ? 'checked' : ''} onchange="toggleMgrPerfItemEnabled(${i})" title="启用/停用">
                   <b style="font-size:13px">${i + 1}. ${esc(it.name)}</b>
-                  <span class="badge badge-gray" style="font-size:11px">手动录入</span>
+                  <span class="badge badge-gray" style="font-size:11px">${it.type === 'auto-team' ? '自动(团队目标/业绩)' : '手动录入'}</span>
                   <div style="flex:1"></div>
                   <button class="btn btn-sm btn-outline" onclick="moveMgrPerfItem(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
                   <button class="btn btn-sm btn-outline" onclick="moveMgrPerfItem(${i}, 1)" ${i === items.length - 1 ? 'disabled' : ''}>↓</button>
                   <button class="btn btn-sm btn-danger" onclick="deleteMgrPerfItem(${i})">删除</button>
                 </div>
-                <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px">
+                <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px">
+                  <div class="form-group" style="margin-bottom:0"><label>类型</label><select class="form-control" onchange="updateMgrPerfItem(${i}, 'type', this.value)"><option value="auto-team" ${it.type === 'auto-team' ? 'selected' : ''}>自动(团队目标/业绩)</option><option value="manual" ${it.type === 'manual' ? 'selected' : ''}>手动录入</option></select></div>
                   <div class="form-group" style="margin-bottom:0"><label>考核项名称</label><input type="text" class="form-control" value="${esc(it.name)}" onchange="updateMgrPerfItem(${i}, 'name', this.value)"></div>
                   <div class="form-group" style="margin-bottom:0"><label>权重(%)</label><input type="number" class="form-control" value="${it.weight}" onchange="updateMgrPerfItem(${i}, 'weight', parseFloat(this.value) || 0)"></div>
-                  <div class="form-group" style="margin-bottom:0"><label>考核标准(数字)</label><input type="number" class="form-control" value="${it.standard}" onchange="updateMgrPerfItem(${i}, 'standard', parseFloat(this.value) || 0)"></div>
-                  <div class="form-group" style="margin-bottom:0;grid-column:span 2"><label>文字描述</label><input type="text" class="form-control" value="${esc(it.text || '')}" onchange="updateMgrPerfItem(${i}, 'text', this.value)" placeholder="考核项描述，可在单月每行覆盖"></div>
+                  <div class="form-group" style="margin-bottom:0"><label>考核标准(数字)</label><input type="number" class="form-control" value="${it.standard}" onchange="updateMgrPerfItem(${i}, 'standard', parseFloat(this.value) || 0)" ${it.type === 'auto-team' ? 'disabled title="业绩考核标准自动取当月团队目标，可在单月看板每行手动覆盖"' : ''}></div>
+                  <div class="form-group" style="margin-bottom:0;grid-column:span 3"><label>文字描述</label><input type="text" class="form-control" value="${esc(it.text || '')}" onchange="updateMgrPerfItem(${i}, 'text', this.value)" placeholder="考核项描述，可在单月每行覆盖"></div>
                   <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${!it.capAt100 ? 'checked' : ''} onchange="updateMgrPerfItem(${i}, 'capAt100', !this.checked)"> 该项得分可超100（不勾选则封顶100）</label>
                 </div>
+                ${it.type === 'auto-team' ? '<div style="font-size:12px;color:var(--gray-500);margin-top:8px">业绩考核的「要求(考核标准)」自动取<b>当月团队目标</b>、「完成」自动取<b>当月团队业绩总和</b>，均可在单月绩效看板每行手动覆盖。</div>' : ''}
               </div>
             `).join('')}
           </div>
@@ -5436,6 +5446,10 @@ function getMgrPerfConfig() {
 function updateMgrPerfTotalCap(v) {
   const cfg = cloudData.formConfig.mgrPerformanceConfig;
   if (cfg) cfg.totalCapAt100 = v;
+}
+function updateMgrPerfTotalCapValue(v) {
+  const cfg = cloudData.formConfig.mgrPerformanceConfig;
+  if (cfg) cfg.totalCap = v;
 }
 function updateMgrPerfItem(i, field, value) {
   const cfg = cloudData.formConfig.mgrPerformanceConfig;
@@ -9901,9 +9915,10 @@ function perfKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]
 function mgrKey(year, mgr, m) { return year + '_' + String(mgr).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
 
 function normalizePerfConfig(cfg) {
-  if (!cfg || typeof cfg !== 'object') return { items: [], bonus: [], totalCapAt100: true };
+  if (!cfg || typeof cfg !== 'object') return { items: [], bonus: [], totalCapAt100: true, totalCap: 100 };
   if (Array.isArray(cfg.items)) {
     if (cfg.totalCapAt100 === undefined) cfg.totalCapAt100 = true;
+    if (cfg.totalCap === undefined) cfg.totalCap = 100;
     if (!Array.isArray(cfg.bonus)) cfg.bonus = [];
     return cfg;
   }
@@ -10006,13 +10021,52 @@ function getPerfRecord(year, sp, m) {
   return Object.assign({}, defaults, stored);
 }
 
-// 取某考核项的实际完成值：auto-demo 类型默认取自拓演示汇总，除非被手动覆盖
+// 取某考核项的实际完成值：auto-demo 类型默认取自拓演示汇总；auto-team 类型默认取当月团队业绩总和；两者均支持手动覆盖
 function getPerfItemActual(item, rec, year, sp, month) {
   if (item.type === 'auto-demo') {
     if (rec['manual_' + item.key]) return parseFloat(rec['actual_' + item.key]) || 0;
     return countSelfDemo(year, month, sp);
   }
+  if (item.type === 'auto-team') {
+    if (rec['manual_' + item.key]) return parseFloat(rec['actual_' + item.key]) || 0;
+    return teamPerfSum(year, sp, month);
+  }
   return parseFloat(rec['actual_' + item.key]) || 0;
+}
+// 管理者团队（取该人员所属团队/门店，与团队月目标、团队业绩统计同一口径）
+function teamTargetFor(year, sp, month) {
+  const team = getSalesTeam(sp);
+  if (!team) return 0;
+  const mm = String(month).padStart(2, '0');
+  return (((cloudData.formConfig.teamTargets || {})[year] || {})[team] || {})[mm] || 0;
+}
+// 当月团队业绩总和（该团队所有销售员在指定年月的业绩金额合计）
+function teamPerfSum(year, sp, month) {
+  const team = getSalesTeam(sp);
+  if (!team) return 0;
+  const ym = String(year) + '-' + String(month).padStart(2, '0');
+  let s = 0;
+  (cloudData.salesRecords || []).forEach(r => {
+    if ((r.team || '').trim() !== team) return;
+    if ((r.docMonth || '') !== ym) return;
+    s += toNum(r.amount);
+  });
+  return s;
+}
+// 管理绩效配置迁移：将已有的手动「业绩」考核项升级为自动(团队目标/团队业绩)类型，仅执行一次
+function migrateMgrPerfConfig() {
+  const cfg = cloudData.formConfig && cloudData.formConfig.mgrPerformanceConfig;
+  if (!cfg || !Array.isArray(cfg.items)) return;
+  if (cfg.migratedAutoTeam) return;
+  if (cfg.items.some(it => it.type === 'auto-team')) { cfg.migratedAutoTeam = true; return; }
+  const target = cfg.items.find(it => (it.name || '').indexOf('业绩') >= 0 && it.type === 'manual');
+  if (target) {
+    target.type = 'auto-team';
+    if (!target.weight) target.weight = 70;
+    target.standard = 0;
+    target.text = target.text || '团队业绩目标完成';
+    cfg.migratedAutoTeam = true;
+  }
 }
 
 // 绩效评分颜色：<60 红；60-90 黄；>=90 绿
@@ -10044,7 +10098,7 @@ function computePerfScore(rec, cfg, year, sp, month) {
   (cfgN.items || []).filter(it => it.enabled).forEach(it => {
     const standard = parseFloat(rec['standard_' + it.key]);
     const manualSet = !isNaN(standard) && standard !== 0;
-    const stdFull = manualSet ? standard : (it.standard || 0);
+    const stdFull = manualSet ? standard : (it.type === 'auto-team' ? teamTargetFor(year, sp, month) : (it.standard || 0));
     // 目标按在职天数折算（仅不足 30 天且未手动设定目标时），避免月中入职被整月目标惩罚
     const std = manualSet ? stdFull : stdFull * perfProrationRatio(rec);
     const actual = getPerfItemActual(it, rec, year, sp, month);
@@ -10064,7 +10118,7 @@ function computePerfScore(rec, cfg, year, sp, month) {
     bonus += pts;
   });
   let score = total + bonus;
-  if (cfgN.totalCapAt100) score = Math.min(100, score);
+  if (cfgN.totalCapAt100) score = Math.min((cfgN.totalCap || 100), score);
   return { itemScores, bonusScores, total, bonus, score };
 }
 
@@ -10601,7 +10655,7 @@ function m0PerfRowDisplay(year, m0, month, cfg, snap) {
   if (snap) {
     const items = (cfg.items || []).filter(it => it.enabled).map(it => {
       const si = snap.items[it.key] || {};
-      return { it, actual: si.actual || 0, standard: (si.standard !== undefined ? si.standard : (it.standard || 0)), score: si.score || 0, text: si.text || '', frozen: true, isAuto: false };
+      return { it, actual: si.actual || 0, standard: (si.standard !== undefined ? si.standard : (it.standard || 0)), score: si.score || 0, text: si.text || '', frozen: true, isAuto: (it.type === 'auto-demo' || it.type === 'auto-team') };
     });
     const bonus = (cfg.bonus || []).filter(b => b.enabled).map(b => ({ b, cnt: (snap.bonus[b.key] || {}).cnt || 0, frozen: true }));
     return { level: snap.level || '', base: snap.base || 0, workingDays: snap.workingDays || 30, comment: snap.comment || '', finalScore: snap.finalScore, computedScore: snap.computedScore, items, bonus, frozen: true };
@@ -10833,7 +10887,7 @@ function refreshM0PerfSingle() {
   h += '</tr><tr>';
   items.forEach(it => {
     h += '<th style="background:#FAEEDA">要求</th>';
-    h += `<th style="background:#FAEEDA">完成</th>`;
+    h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' || it.type === 'auto-team' ? '完成(自动)' : '完成'}</th>`;
     h += '<th style="background:#FAEEDA">得分</th>';
   });
   bonusList.forEach(b => { h += `<th style="background:#EAF3DE;white-space:pre-wrap">${esc(b.name)}</th>`; });
@@ -11127,7 +11181,7 @@ function mgrPerfRowDisplay(year, mgr, month, cfg, snap) {
   if (snap) {
     const items = (cfg.items || []).filter(it => it.enabled).map(it => {
       const si = snap.items[it.key] || {};
-      return { it, actual: si.actual || 0, standard: (si.standard !== undefined ? si.standard : (it.standard || 0)), score: si.score || 0, text: si.text || '', frozen: true, isAuto: false };
+      return { it, actual: si.actual || 0, standard: (si.standard !== undefined ? si.standard : (it.standard || 0)), score: si.score || 0, text: si.text || '', frozen: true, isAuto: (it.type === 'auto-demo' || it.type === 'auto-team') };
     });
     const bonus = (cfg.bonus || []).filter(b => b.enabled).map(b => ({ b, cnt: (snap.bonus[b.key] || {}).cnt || 0, frozen: true }));
     return { base: snap.base || 0, workingDays: snap.workingDays || 30, comment: snap.comment || '', finalScore: snap.finalScore, computedScore: snap.computedScore, items, bonus, frozen: true };
@@ -11140,10 +11194,10 @@ function mgrPerfRowDisplay(year, mgr, month, cfg, snap) {
     const manual = rec['manual_' + ik];
     const actual = parseFloat(rec['actual_' + ik]) || 0;
     const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
-    const stdRaw = manualStd ? rec['standard_' + ik] : (it.standard || 0);
+    const stdRaw = manualStd ? rec['standard_' + ik] : (it.type === 'auto-team' ? teamTargetFor(year, mgr, month) : (it.standard || 0));
     const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
     const txt = (rec['text_' + ik] !== undefined && rec['text_' + ik] !== '') ? rec['text_' + ik] : (it.text || '');
-    return { it, actual, standard: std, score: (scores.itemScores[ik] || {}).raw || 0, text: txt, frozen: false, isAuto: false, manual };
+    return { it, actual, standard: std, score: (scores.itemScores[ik] || {}).raw || 0, text: txt, frozen: false, isAuto: (it.type === 'auto-demo' || it.type === 'auto-team'), manual };
   });
   const bonus = (cfg.bonus || []).filter(b => b.enabled).map(b => ({ b, cnt: parseFloat(rec['bonus_' + b.key]) || 0, frozen: false }));
   return { base, workingDays: rec.workingDays || 30, comment: rec.comment || '', finalScore: getFinalScore(rec, cfg, year, mgr, month), computedScore: scores.score, items, bonus, frozen: false };
@@ -11180,7 +11234,7 @@ function saveMgrPerfSnapshot() {
       const ik = it.key;
       const actual = parseFloat(rec['actual_' + ik]) || 0;
       const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
-      const stdRaw = manualStd ? rec['standard_' + ik] : (it.standard || 0);
+      const stdRaw = manualStd ? rec['standard_' + ik] : (it.type === 'auto-team' ? teamTargetFor(year, mgr, month) : (it.standard || 0));
       const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
       const raw = (scores.itemScores[ik] || {}).raw || 0;
       snap.items[ik] = { name: it.name, actual, standard: std, score: raw, text: (rec['text_' + ik] || it.text || '') };
@@ -11359,7 +11413,7 @@ function refreshMgrPerfSingle() {
   h += '</tr><tr>';
   items.forEach(it => {
     h += '<th style="background:#FAEEDA">要求</th>';
-    h += `<th style="background:#FAEEDA">完成</th>`;
+    h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' || it.type === 'auto-team' ? '完成(自动)' : '完成'}</th>`;
     h += '<th style="background:#FAEEDA">得分</th>';
   });
   bonusList.forEach(b => { h += `<th style="background:#EAF3DE;white-space:pre-wrap">${esc(b.name)}</th>`; });
@@ -11377,10 +11431,20 @@ function refreshMgrPerfSingle() {
       const it = x.it, ik = it.key;
       const stdCell = d.frozen
         ? `<div style="font-size:11px;margin-bottom:2px">${esc(x.text || '')}</div><div style="font-size:11px">要求 ${x.standard}</div>`
-        : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="saveMgrPerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="saveMgrPerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
-      const actCell = d.frozen
-        ? `<div style="font-size:11px">${x.actual}</div>`
-        : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveMgrPerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+        : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="saveMgrPerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="saveMgrPerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">${x.isAuto ? '<div style="font-size:10px;color:var(--gray-400);margin-top:2px">自动取团队目标</div>' : ''}`;
+      let actCell;
+      if (x.isAuto) {
+        if (d.frozen) {
+          actCell = `<div style="font-size:11px">${x.actual}</div>`;
+        } else {
+          const resetBtn = x.manual ? `<button class="btn btn-xs btn-outline" title="重置为自动(团队业绩)" onclick="saveMgrPerfByKey('${k}', {'manual_${ik}':false})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
+          actCell = `${resetBtn}<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveMgrPerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:70px;margin-top:2px">`;
+        }
+      } else {
+        actCell = d.frozen
+          ? `<div style="font-size:11px">${x.actual}</div>`
+          : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveMgrPerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+      }
       h += `<td style="background:#FFF8EE">${stdCell}</td>`;
       h += `<td style="background:#FFF8EE">${actCell}</td>`;
       h += `<td style="text-align:center;font-weight:600">${Number(x.score).toFixed(2)}</td>`;
