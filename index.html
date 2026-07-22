@@ -21,7 +21,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft Y
 .login-card .logo{width:120px;height:60px;margin:0 auto 16px;background:linear-gradient(135deg,#3b82f6,#06b6d4);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:28px;color:#fff;box-shadow:0 8px 20px rgba(59,130,246,.4);overflow:hidden}
 .login-card .logo img{width:100%;height:100%;object-fit:cover;border-radius:12px}
 .app-layout{display:flex;min-height:100vh}
-.sidebar{width:220px;background:var(--gray-900);color:#fff;flex-shrink:0;display:flex;flex-direction:column}
+.sidebar{width:220px;background:var(--gray-900);color:#fff;flex-shrink:0;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;align-self:flex-start;z-index:50}
 .sidebar-header{padding:20px;text-align:center;border-bottom:1px solid rgba(255,255,255,.1)}
 .sidebar-header .logo-icon{font-size:28px;margin-bottom:6px;display:flex;align-items:center;justify-content:center}
 .sidebar-header .logo-icon img{width:80px;height:40px;border-radius:8px;object-fit:cover}
@@ -798,7 +798,7 @@ async function fetchReportsFromCloud() {
   };
   if (needVisit && iVisit >= 0) out.visit = hydrateVisitRecords(await okJson(res[iVisit]));
   if (needMgr && iMgr >= 0) out.mgr = Object.values(await okJson(res[iMgr]) || {});
-  if (needSales && iSales >= 0) out.sales = Object.values(await okJson(res[iSales]) || {});
+  if (needSales && iSales >= 0) out.sales = hydrateSalesRecords(await okJson(res[iSales]));
   return out;
 }
 
@@ -888,6 +888,19 @@ async function apiDelete(collection, id) {
 function hydrateVisitRecords(dict) {
   if (!dict || typeof dict !== 'object') return [];
   return Object.entries(dict).map(([k, v]) => ({ ...(v && typeof v === 'object' ? v : {}), id: k }));
+}
+function hydrateSalesRecords(dict) {
+  if (!dict || typeof dict !== 'object') return [];
+  return Object.entries(dict).map(([k, v]) => ({ ...(v && typeof v === 'object' ? v : {}), id: v && v.id ? v.id : k }));
+}
+function isBlankSalesRecord(r) {
+  const sp = String(r.salesperson || '').trim();
+  const team = String(r.team || '').trim();
+  const doc = String(r.docDate || '').trim();
+  const cust = String(r.customer || '').trim();
+  const docNo = String(r.docNo || '').trim();
+  const amt = toNum(r.amount);
+  return !sp && !team && !doc && !cust && !docNo && amt === 0;
 }
 
 // ============ Auth ============
@@ -1048,7 +1061,7 @@ async function silentRefresh(page) {
     const newDaily = results[0].ok ? Object.values(await results[0].json() || {}) : [];
     const newWeekly = results[1].ok ? Object.values(await results[1].json() || {}) : [];
     const newVisit = (iVisit >= 0 && results[iVisit] && results[iVisit].ok) ? hydrateVisitRecords(await results[iVisit].json()) : cloudData.visitRecords;
-    const newSales = (iSales >= 0 && results[iSales] && results[iSales].ok) ? (Object.values(await results[iSales].json() || {}) || []) : cloudData.salesRecords;
+    const newSales = (iSales >= 0 && results[iSales] && results[iSales].ok) ? hydrateSalesRecords(await results[iSales].json()) : cloudData.salesRecords;
     // Only update + re-render if data count changed (new records added by others)
     if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length || newSales.length !== cloudData.salesRecords.length) {
       cloudData.dailyReports = newDaily;
@@ -7010,8 +7023,11 @@ async function deleteSalesRecord(id) {
 async function renderSalesDetail() {
   const canEdit = hasPermission('salesDetail');
   const f = salesDetailFilters;
+  // 过滤掉无意义的空白记录（有销售员/团队/日期/客户/单据编号/金额任一有效才展示）
+  const meaningful = cloudData.salesRecords.filter(r => !isBlankSalesRecord(r));
+  const blankCount = cloudData.salesRecords.length - meaningful.length;
   // 筛选
-  const base = cloudData.salesRecords.filter(r => {
+  const base = meaningful.filter(r => {
     const d = (r.docDate || '');
     if (f.start && d && d < f.start) return false;
     if (f.end && d && d > f.end) return false;
@@ -7122,7 +7138,7 @@ async function renderSalesDetail() {
     </div>
   </div>
   <div class="card">
-    <div class="card-header"><h4>📋 业绩明细（共 ${totalRows} 条${Object.values(f).some(v => v) ? '，已筛选' : ''}）</h4></div>
+    <div class="card-header"><h4>📋 业绩明细（共 ${totalRows} 条${Object.values(f).some(v => v) ? '，已筛选' : ''}${blankCount > 0 ? '；已过滤 ' + blankCount + ' 条空白记录' : ''}）</h4>${canEdit && blankCount > 0 ? `<button class="btn btn-outline btn-sm" onclick="cleanupBlankSalesRecords()">🧹 清理 ${blankCount} 条空白记录</button>` : ''}</div>
     <div class="card-body">
       ${canEdit ? `<div class="sticky-submit-bar" id="salesBatchBar" style="display:none">
         <span id="salesSelCount" style="align-self:center">已选 0 条</span>
@@ -7158,6 +7174,24 @@ function resetSalesFilters() {
   renderSalesDetail();
 }
 
+async function cleanupBlankSalesRecords() {
+  const blanks = cloudData.salesRecords.filter(r => isBlankSalesRecord(r) && r.id);
+  if (!blanks.length) { showToast('没有可清理的空白记录', 'success'); return; }
+  if (!confirm(`确定删除 ${blanks.length} 条空白记录吗？这些记录没有销售员、团队、日期、客户、单据编号且金额为 0，删除后不可恢复。`)) return;
+  let ok = 0, fail = 0;
+  for (let i = 0; i < blanks.length; i++) {
+    const r = blanks[i];
+    try {
+      await apiDelete('salesRecords', r.id);
+      ok++;
+    } catch (e) { fail++; }
+    if (i % 50 === 49) showToast(`正在清理空白记录… ${i + 1} / ${blanks.length}`, 'info');
+  }
+  cloudData.salesRecords = cloudData.salesRecords.filter(r => !isBlankSalesRecord(r));
+  saveReportsCache();
+  renderSalesDetail();
+  showToast(`清理完成：成功 ${ok} 条${fail ? '，失败 ' + fail + ' 条' : ''}`, fail ? 'warning' : 'success');
+}
 function onSalesSelect(id, checked) {
   if (checked) selectedSalesIds.add(id); else selectedSalesIds.delete(id);
   updateSalesBatchBar();
@@ -8327,6 +8361,8 @@ let salesGradeTab = 'matrix';
 let salesGradeMonth = (new Date().getMonth() + 1);
 let salesGradeSpFilter = [];          // 选中的销售名单（空数组=全部在职销售）
 let salesGradeSpFilterLoaded = false; // 是否已从 localStorage 载入默认
+let salesGradeTeamFilter = '';        // 按团队筛选（空=全部）
+let salesGradeSortBy = 'amount';      // 排序方式：'amount' 按评级业绩降序，'team' 按团队+姓名
 // ===== M0 看板状态 =====
 let m0ConfigPanelOpen = false;        // 配置面板是否展开
 let m0ConfigDraft = null;             // 编辑中的配置副本（保存前不落库）
@@ -8381,6 +8417,20 @@ function renderSalesGrade() {
                 <button type="button" class="btn btn-sm btn-outline" onclick="toggleSgSpPanel(false)">关闭</button>
               </div>
             </div>
+          </div>
+          <div class="form-group">
+            <label style="font-size:12px;color:var(--gray-500)">团队</label>
+            <select class="form-control" id="sgTeamFilter" onchange="sgTeamFilterChange(this.value)">
+              <option value="">全部团队</option>
+              ${sgTeamOptions(year)}
+            </select>
+          </div>
+          <div class="form-group">
+            <label style="font-size:12px;color:var(--gray-500)">排序</label>
+            <select class="form-control" id="sgSortBy" onchange="sgSortChange(this.value)">
+              <option value="amount" ${salesGradeSortBy==='amount'?'selected':''}>按评级业绩降序</option>
+              <option value="team" ${salesGradeSortBy==='team'?'selected':''}>按团队+姓名</option>
+            </select>
           </div>`}
         </div>
         ${isM0 ? `<div id="m0ConfigPanel" style="${m0ConfigPanelOpen?'':'display:none'};margin:6px 0 10px;padding:12px;border:1px solid var(--gray-200);border-radius:8px;background:var(--gray-50)">${renderM0ConfigPanel()}</div>` : ''}
@@ -8445,6 +8495,32 @@ function saveSgSpDefault() {
   try { localStorage.setItem('sop_sg_sp_filter', JSON.stringify(salesGradeSpFilter)); showToast('已保存为默认筛选（' + salesGradeSpFilter.length + ' 名销售）', 'success'); }
   catch (e) { showToast('保存失败: ' + e.message, 'error'); }
   toggleSgSpPanel(false);
+}
+function sgTeamOptions(year) {
+  const teams = new Set();
+  (cloudData.salesRecords || []).forEach(r => {
+    if ((r.docMonth || '').slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    const t = r.team || getSalesTeam(sp);
+    if (t) teams.add(t);
+  });
+  // 也从未在职用户 departments 补充
+  (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
+  return [...teams].sort((a, b) => a.localeCompare(b, 'zh')).map(t => `<option value="${esc(t)}" ${t === salesGradeTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
+}
+function sgTeamFilterChange(val) {
+  salesGradeTeamFilter = val;
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+}
+function sgSortChange(val) {
+  salesGradeSortBy = val;
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+}
+function sgPassTeamFilter(sp) {
+  if (!salesGradeTeamFilter) return true;
+  const t = getSalesTeam(sp) || '';
+  return t === salesGradeTeamFilter;
 }
 
 // ===== M0 看板（考核业绩 = M0 本人当月 + 累加人员当月，仅取当月，不滚动） =====
@@ -8604,6 +8680,10 @@ function m0GroupAmount(base, g, m) {
   return s;
 }
 function sgYearDispatch() {
+  const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
+  salesGradeYear = year;
+  const sel = document.getElementById('sgTeamFilter');
+  if (sel) sel.innerHTML = '<option value="">全部团队</option>' + sgTeamOptions(year);
   if (salesGradeTab === 'single') refreshSalesGradeSingle();
   else if (salesGradeTab === 'm0matrix') refreshM0Grade();
   else if (salesGradeTab === 'm0single') refreshM0GradeSingle();
@@ -8689,8 +8769,8 @@ function refreshM0GradeSingle() {
   const m0GradeOpts = [''].concat(gradeConfig.length ? gradeConfig.map(l => l.name) : ['初级','中级','高级']);
   const m0ChgOpts = ['', '升级', '降级', '持平'];
   const rows = groups.map(g => ({ g, v: m0GroupAmount(base, g, month) })).sort((a, b) => b.v - a.v);
-  let h = `<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（M0）</span></th><th class="num">${month}月 M0 考核业绩</th><th>评级</th><th style="text-align:center">升降级</th><th>备注</th></tr></thead><tbody>`;
-  if (!rows.length) h += `<tr><td colspan="5" style="text-align:center;color:var(--gray-400);padding:24px">尚未配置 M0 计算范围，请点击上方「⚙️ M0 计算范围」设置分组。</td></tr>`;
+  let h = `<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（M0）</span></th><th>上月职级</th><th class="num">${month}月 M0 考核业绩</th><th>评级</th><th style="text-align:center">升降级</th><th>备注</th></tr></thead><tbody>`;
+  if (!rows.length) h += `<tr><td colspan="6" style="text-align:center;color:var(--gray-400);padding:24px">尚未配置 M0 计算范围，请点击上方「⚙️ M0 计算范围」设置分组。</td></tr>`;
   rows.forEach(row => {
     const m0 = row.g.m0 || '（未命名）';
     const members = row.g.members || [];
@@ -8698,10 +8778,16 @@ function refreshM0GradeSingle() {
     const grade = rec.grade || '';
     const chg = rec.chg || '';
     const note = rec.note || '';
+    let prevGrade = '—';
+    if (month > 1) {
+      const prevRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, month - 1)]) || {};
+      prevGrade = prevRec.grade || '—';
+    }
     const gradeOpts = m0GradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===grade)?'selected':''}>${o?o:'（未评级）'}</option>`).join('');
     const chgOpts = m0ChgOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===chg)?'selected':''}>${o?o:'（未填）'}</option>`).join('');
     const k = m0Key(year, m0, month);
     h += `<tr><td>${esc(m0)}${userStatusBadge(m0, statusMap)}<div style="font-size:10px;color:var(--gray-400)">含 ${members.length} 人累加</div></td>`
+       + `<td style="text-align:center">${esc(prevGrade)}</td>`
        + `<td class="num" style="font-weight:600">${fmtSalesMoney(row.v)}</td>`
        + `<td><input type="text" class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" placeholder="评级" value="${grade.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {grade:this.value})"></td>`
        + `<td style="text-align:center"><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveM0ByKey('${k}', {chg:this.value})">${chgOpts}</select></td>`
@@ -8751,12 +8837,17 @@ function exportM0GradeSingle() {
   if (!groups.length) { showToast('尚未配置 M0 计算范围', 'error'); return; }
   const aoa = [];
   aoa.push([`M0 当月评级看板 · ${year}年${month}月（M0 考核业绩 = 本人当月 + 累加人员当月，仅取当月）`]);
-  aoa.push(['销售员', '累加人数', 'M0考核业绩', '评级', '升降级', '备注']);
+  aoa.push(['销售员', '上月职级', '累加人数', 'M0考核业绩', '评级', '升降级', '备注']);
   groups.map(g => ({ g, v: m0GroupAmount(base, g, month) })).sort((a, b) => b.v - a.v).forEach(row => {
     const m0 = row.g.m0 || '（未命名）';
     const members = row.g.members || [];
     const rec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, month)]) || {};
-    aoa.push([m0, members.length, Math.round(row.v), rec.grade || '', rec.chg || '', rec.note || '']);
+    let prevGrade = '—';
+    if (month > 1) {
+      const prevRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, month - 1)]) || {};
+      prevGrade = prevRec.grade || '—';
+    }
+    aoa.push([m0, prevGrade, members.length, Math.round(row.v), rec.grade || '', rec.chg || '', rec.note || '']);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
@@ -8785,26 +8876,28 @@ function refreshSalesGrade() {
     spSet.add(sp);
   });
   const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  const rows = [...spSet].filter(sp => !salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0).map(sp => {
-    const row = { sp, roll: {}, dec: 0, single: base[sp] || {} };
+  const rows = [...spSet].filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp)).map(sp => {
+    const row = { sp, team: getSalesTeam(sp) || '', roll: {}, single: base[sp] || {} };
     months.forEach(m => {
       let s = 0;
       for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0);
       row.roll[m] = s;
     });
-    row.dec = row.roll[12]; // 年末评级业绩(10+11+12 滚动)
     return row;
   });
-  rows.sort((a, b) => b.dec - a.dec); // 默认按年末评级业绩降序
-  let h = '<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（在职）</span></th>';
+  if (salesGradeSortBy === 'team') {
+    rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  } else {
+    rows.sort((a, b) => b.roll[12] - a.roll[12] || a.sp.localeCompare(b.sp, 'zh'));
+  }
+  let h = '<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（在职）</span></th><th>团队</th>';
   months.forEach(m => { h += `<th class="num">${m}月</th>`; });
-  h += '<th class="num">年末评级业绩<br><span style="font-weight:400;font-size:10px;color:var(--gray-400)">10-12月滚动</span></th></tr></thead><tbody>';
+  h += '</tr></thead><tbody>';
   const colTot = {}; months.forEach(m => colTot[m] = 0);
-  let decTot = 0;
   const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
   const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
   rows.forEach(row => {
-    h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
+    h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td><td>${esc(row.team) || '-'}</td>`;
     months.forEach(m => {
       const v = row.roll[m];
       colTot[m] += v;
@@ -8827,15 +8920,14 @@ function refreshSalesGrade() {
          + `<div style="margin-top:4px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveGradeRefresh('${k}', {grade:this.value})">${opts}</select>${upFlag}</div>`
          + `<input type="text" class="form-control form-control-sm" style="font-size:11px;margin-top:3px;padding:1px 4px;height:auto" placeholder="备注" value="${note.replace(/"/g,'&quot;')}" onchange="saveGradeByKey('${k}', {note:this.value})"></td>`;
     });
-    decTot += row.dec;
-    h += `<td class="num" style="font-weight:700">${fmtSalesMoney(row.dec)}</td></tr>`;
+    h += `</tr>`;
   });
   if (!rows.length) {
     h += `<tr><td colspan="${months.length + 2}" style="text-align:center;color:var(--gray-400);padding:24px">本年度暂无在职销售的业绩数据</td></tr>`;
   }
-  h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
+  h += '</tbody><tfoot><tr class="total-row"><td>合计</td><td>-</td>';
   months.forEach(m => { h += `<td class="num">${fmtSalesMoney(colTot[m])}</td>`; });
-  h += `<td class="num">${fmtSalesMoney(decTot)}</td></tr></tfoot>`;
+  h += '</tr></tfoot>';
   const tbl = document.getElementById('sgTable');
   if (tbl) tbl.innerHTML = h;
 }
@@ -8859,24 +8951,27 @@ function exportSalesGrade() {
     spSet.add(sp);
   });
   const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  const rows = [...spSet].filter(sp => !salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0).map(sp => {
-    const row = { sp, roll: {} };
+  const rows = [...spSet].filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp)).map(sp => {
+    const row = { sp, team: getSalesTeam(sp) || '', roll: {} };
     months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); row.roll[m] = s; });
-    row.dec = row.roll[12];
     return row;
-  }).sort((a, b) => b.dec - a.dec);
+  });
+  if (salesGradeSortBy === 'team') {
+    rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  } else {
+    rows.sort((a, b) => b.roll[12] - a.roll[12] || a.sp.localeCompare(b.sp, 'zh'));
+  }
   if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
   const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
   const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
   const aoa = [];
   aoa.push([`销售升降级看板 · ${year}年（滚动3个月评级业绩）`]);
-  aoa.push(['说明：每个单元格 = 该销售员当月及前2个月业绩之和；年末评级业绩 = 10-12月滚动合计；评级按表单配置自动评定或手动覆盖，备注为手动填写']);
-  const head = ['销售员'];
+  aoa.push(['说明：每个单元格 = 该销售员当月及前2个月业绩之和；评级按表单配置自动评定或手动覆盖，备注为手动填写']);
+  const head = ['销售员', '团队'];
   months.forEach(m => { head.push(m + '月业绩'); head.push(m + '月评级'); head.push(m + '月升降'); head.push(m + '月备注'); });
-  head.push('年末评级业绩');
   aoa.push(head);
   rows.forEach(row => {
-    const r = [row.sp];
+    const r = [row.sp, row.team || ''];
     months.forEach(m => {
       const v = Math.round(row.roll[m]);
       const auto = autoGrade(v, levels);
@@ -8891,7 +8986,6 @@ function exportSalesGrade() {
       }
       r.push(v, grade, chg, rec.note || '');
     });
-    r.push(Math.round(row.dec));
     aoa.push(r);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -8923,17 +9017,21 @@ function refreshSalesGradeSingle() {
     spSet.add(sp);
   });
   const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  const rows = [...spSet].filter(sp => !salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0).map(sp => {
-    const row = { sp, roll: {}, single: base[sp] || {} };
+  const rows = [...spSet].filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp)).map(sp => {
+    const row = { sp, team: getSalesTeam(sp) || '', roll: {}, single: base[sp] || {} };
     months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); row.roll[m] = s; });
     return row;
   });
   const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
   const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
-  rows.sort((a, b) => (b.roll[month] || 0) - (a.roll[month] || 0));
-  let h = `<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（在职）</span></th><th class="num">${month}月 评级业绩<br><span style="font-weight:400;font-size:10px;color:var(--gray-400)">滚动3月</span></th><th>评级</th><th style="text-align:center">升降级</th><th>备注</th></tr></thead><tbody>`;
+  if (salesGradeSortBy === 'team') {
+    rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  } else {
+    rows.sort((a, b) => (b.roll[month] || 0) - (a.roll[month] || 0) || a.sp.localeCompare(b.sp, 'zh'));
+  }
+  let h = `<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（在职）</span></th><th>上月职级</th><th>团队</th><th class="num">${month}月 评级业绩<br><span style="font-weight:400;font-size:10px;color:var(--gray-400)">滚动3月</span></th><th>评级</th><th style="text-align:center">升降级</th><th>备注</th></tr></thead><tbody>`;
   if (!rows.length) {
-    h += `<tr><td colspan="5" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售的业绩数据</td></tr>`;
+    h += `<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售的业绩数据</td></tr>`;
   }
   rows.forEach(row => {
     const v = row.roll[month];
@@ -8942,11 +9040,16 @@ function refreshSalesGradeSingle() {
     const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month)]) || {};
     const grade = rec.grade || auto;
     const note = rec.note || '';
+    let prevGrade = '—';
+    if (month > 1) {
+      const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
+      prevGrade = prevRec.grade || autoGrade(row.roll[month - 1], levels);
+    }
     let upFlag = '<span style="color:var(--gray-400)">—</span>';
     if (month > 1) {
       const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
-      const prevGrade = prevRec.grade || autoGrade(row.roll[month - 1], levels);
-      const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
+      const prevGradeForChg = prevRec.grade || autoGrade(row.roll[month - 1], levels);
+      const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGradeForChg, levels);
       if (ci > pi) upFlag = '<span style="color:#16a34a;font-weight:600">▲升级</span>';
       else if (ci < pi) upFlag = '<span style="color:#dc2626;font-weight:600">▼降级</span>';
       else upFlag = '<span style="color:var(--gray-400)">持平</span>';
@@ -8954,6 +9057,8 @@ function refreshSalesGradeSingle() {
     const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
     const k = gradeKey(year, row.sp, month);
     h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`
+       + `<td style="text-align:center">${esc(prevGrade)}</td>`
+       + `<td>${esc(row.team) || '-'}</td>`
        + `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div></td>`
        + `<td><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveGradeRefresh('${k}', {grade:this.value})">${opts}</select></td>`
        + `<td style="text-align:center">${upFlag}</td>`
@@ -8985,32 +9090,38 @@ function exportSalesGradeSingle() {
     spSet.add(sp);
   });
   const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  const rows = [...spSet].filter(sp => !salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0).map(sp => {
-    const row = { sp, roll: {}, single: base[sp] || {} };
+  const rows = [...spSet].filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp)).map(sp => {
+    const row = { sp, team: getSalesTeam(sp) || '', roll: {}, single: base[sp] || {} };
     months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); row.roll[m] = s; });
     return row;
-  }).sort((a, b) => (b.roll[month] || 0) - (a.roll[month] || 0));
+  });
+  if (salesGradeSortBy === 'team') {
+    rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  } else {
+    rows.sort((a, b) => (b.roll[month] || 0) - (a.roll[month] || 0) || a.sp.localeCompare(b.sp, 'zh'));
+  }
   if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
   const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
   const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
   const aoa = [];
   aoa.push([`单月评级看板 · ${year}年${month}月（滚动3个月评级业绩）`]);
   aoa.push(['说明：评级业绩 = 该销售员当月及前2个月业绩之和；评级按表单配置自动评定或手动覆盖；升降级为当月评级对比上月评级；备注为手动填写']);
-  aoa.push(['销售员', '评级业绩(滚动3月)', '单月业绩', '评级', '升降级', '备注']);
+  aoa.push(['销售员', '上月职级', '团队', '评级业绩(滚动3月)', '单月业绩', '评级', '升降级', '备注']);
   rows.forEach(row => {
     const v = Math.round(row.roll[month]);
     const single = Math.round(row.single[month] || 0);
     const auto = autoGrade(v, levels);
     const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month)]) || {};
     const grade = rec.grade || auto;
+    let prevGrade = '—';
     let chg = '—';
     if (month > 1) {
       const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
-      const prevGrade = prevRec.grade || autoGrade(Math.round(row.roll[month - 1]), levels);
+      prevGrade = prevRec.grade || autoGrade(Math.round(row.roll[month - 1]), levels);
       const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
       chg = ci > pi ? '▲升级' : (ci < pi ? '▼降级' : '持平');
     }
-    aoa.push([row.sp, v, single, grade, chg, rec.note || '']);
+    aoa.push([row.sp, prevGrade, row.team || '', v, single, grade, chg, rec.note || '']);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
