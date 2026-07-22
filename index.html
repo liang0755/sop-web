@@ -578,7 +578,7 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes, m0Res, prRes, psRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes, m0Res, prRes, psRes, m0pRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
@@ -588,7 +588,8 @@ async function loadCoreData() {
       fetch(FB_BASE + '/gradeRecords.json'),
       fetch(FB_BASE + '/m0Records.json'),
       fetch(FB_BASE + '/performanceRecords.json'),
-      fetch(FB_BASE + '/performanceSnapshots.json')
+      fetch(FB_BASE + '/performanceSnapshots.json'),
+      fetch(FB_BASE + '/m0PerformanceRecords.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -613,6 +614,13 @@ async function loadCoreData() {
     }
     cloudData.formConfig.performanceConfig = normalizePerfConfig(cloudData.formConfig.performanceConfig);
     if (!cloudData.formConfig.performanceBase || typeof cloudData.formConfig.performanceBase !== 'object') cloudData.formConfig.performanceBase = {};
+    if (!cloudData.formConfig.m0GradeConfig || !Array.isArray(cloudData.formConfig.m0GradeConfig)) {
+      cloudData.formConfig.m0GradeConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0GradeConfig));
+    }
+    if (!cloudData.formConfig.m0PerformanceConfig || typeof cloudData.formConfig.m0PerformanceConfig !== 'object') {
+      cloudData.formConfig.m0PerformanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0PerformanceConfig));
+    }
+    cloudData.formConfig.m0PerformanceConfig = normalizePerfConfig(cloudData.formConfig.m0PerformanceConfig);
     if (!fcData) {
       try { await fetch(FB_BASE + '/formConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.formConfig)}); } catch(e) {}
     }
@@ -701,6 +709,9 @@ async function loadCoreData() {
     // Load performance snapshots (final-saved frozen data, independent of config changes)
     const psData = psRes.ok ? await psRes.json() : null;
     cloudData.performanceSnapshots = (psData && typeof psData === 'object') ? psData : {};
+    // Load M0 performance records (M0 perf scoring data, separate node from sales performanceRecords)
+    const m0pData = m0pRes.ok ? await m0pRes.json() : null;
+    cloudData.m0PerformanceRecords = (m0pData && typeof m0pData === 'object') ? m0pData : {};
     // Ensure m0Config exists (team-shared M0 calculation scope)
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
@@ -718,6 +729,7 @@ async function loadCoreData() {
     cloudData.m0Records = {};
     cloudData.performanceRecords = {};
     cloudData.performanceSnapshots = {};
+    cloudData.m0PerformanceRecords = {};
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
     }
@@ -726,6 +738,13 @@ async function loadCoreData() {
     }
     cloudData.formConfig.performanceConfig = normalizePerfConfig(cloudData.formConfig.performanceConfig);
     if (!cloudData.formConfig.performanceBase || typeof cloudData.formConfig.performanceBase !== 'object') cloudData.formConfig.performanceBase = {};
+    if (!cloudData.formConfig.m0GradeConfig || !Array.isArray(cloudData.formConfig.m0GradeConfig)) {
+      cloudData.formConfig.m0GradeConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0GradeConfig));
+    }
+    if (!cloudData.formConfig.m0PerformanceConfig || typeof cloudData.formConfig.m0PerformanceConfig !== 'object') {
+      cloudData.formConfig.m0PerformanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0PerformanceConfig));
+    }
+    cloudData.formConfig.m0PerformanceConfig = normalizePerfConfig(cloudData.formConfig.m0PerformanceConfig);
   }
 }
 
@@ -1142,8 +1161,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: true, deleteOthers: true, exportData: true,
         brandConfig: true, aiConfig: true,
         visitData: true, visitStats: true, mgrReport: true,
-        salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true
-      }
+        salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true      }
     },
     {
       key: 'manager', name: '主管', description: '可查看所有数据，可编辑他人数据，可导出',
@@ -1155,8 +1173,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: true, deleteOthers: false, exportData: true,
         brandConfig: false, aiConfig: false,
         visitData: true, visitStats: true, mgrReport: true,
-        salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true
-      }
+        salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true      }
     },
     {
       key: 'member', name: '成员', description: '可填写日报周报，查看数据和汇总',
@@ -1168,8 +1185,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
         visitData: false, visitStats: false, mgrReport: false,
-        salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true
-      }
+        salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true      }
     },
     {
       key: 'viewer', name: '查看者', description: '只能查看数据，不能填写',
@@ -1181,8 +1197,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
         visitData: false, visitStats: false, mgrReport: false,
-        salesDetail: false, salesBoard: true, salesGrade: true, salesPerf: true
-      }
+        salesDetail: false, salesBoard: true, salesGrade: true, salesPerf: true      }
     }
   ]
 };
@@ -1343,7 +1358,26 @@ const DEFAULT_FORM_CONFIG = {
     ]
   },
   // 绩效基数：按销售职级（gradeConfig.name）设置，最终基数 = 配置值 × 当月在职天数/30
-  performanceBase: {}
+  performanceBase: {},
+  // ===== M0 评级标准配置（无升降级业绩要求，仅级别名称有序列表，用于 M0 看板评级下拉与升降级自动判断）=====
+  m0GradeConfig: [
+    { name: '初级M0' },
+    { name: '中级M0' },
+    { name: '高级M0' }
+  ],
+  // ===== M0 绩效配置（参考销售绩效配置，但考核项均为手动录入，不自动带入自拓演示数量）=====
+  m0PerformanceConfig: {
+    totalCapAt100: true,
+    items: [
+      { key: 'effective', name: '有效建联', type: 'manual', enabled: true, weight: 10, standard: 75, text: '有效建联', capAt100: true },
+      { key: 'channel', name: '渠道', type: 'manual', enabled: true, weight: 10, standard: 1, text: '渠道拓展', capAt100: true },
+      { key: 'newMedia', name: '新媒体', type: 'manual', enabled: true, weight: 10, standard: 8, text: '新媒体运营', capAt100: true }
+    ],
+    bonus: [
+      { key: 'roleModelAward', name: '个人获奖', points: 10, text: '', enabled: true, capAt100: false },
+      { key: 'roleModelNominee', name: '参评', points: 2, text: '', enabled: true, capAt100: false }
+    ]
+  }
 };
 
 function getChannels(type) {
@@ -4551,6 +4585,8 @@ function renderFormConfig() {
       <div class="summary-tab ${configTab==='customerTags'?'active':''}" onclick="switchConfigTab('customerTags')">客户标签配置</div>
       <div class="summary-tab ${configTab==='gradeConfig'?'active':''}" onclick="switchConfigTab('gradeConfig')">评级标准配置</div>
       <div class="summary-tab ${configTab==='performance'?'active':''}" onclick="switchConfigTab('performance')">销售绩效配置</div>
+      <div class="summary-tab ${configTab==='m0GradeConfig'?'active':''}" onclick="switchConfigTab('m0GradeConfig')">M0评级</div>
+      <div class="summary-tab ${configTab==='m0PerfConfig'?'active':''}" onclick="switchConfigTab('m0PerfConfig')">M0绩效配置</div>
     </div>
     <div id="configContent"></div>
     <div style="margin-top:12px;font-size:12px;color:var(--gray-500)">
@@ -4828,6 +4864,122 @@ function renderConfigContent() {
       </div>`;
     return;
   }
+  // ===== M0 评级配置 tab（无升降级业绩要求，仅级别名称有序列表）=====
+  if (configTab === 'm0GradeConfig') {
+    if (!cloudData.formConfig.m0GradeConfig || !Array.isArray(cloudData.formConfig.m0GradeConfig)) {
+      cloudData.formConfig.m0GradeConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0GradeConfig));
+    }
+    const lv = cloudData.formConfig.m0GradeConfig;
+    c.innerHTML = `
+      <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
+        💡 配置 M0 评级看板的「评级标准」（仅级别名称，<b>无</b>升降级业绩要求）。列表顺序即职级高低（从上到下由低到高），用于 M0 看板「评级」下拉与「升降级」自动判断（升级 / 降级 / 持平）。修改后点击底部「保存配置」生效。
+      </div>
+      <div id="m0GradeList">
+        ${lv.map((g, i) => `
+          <div class="channel-card" style="margin-bottom:12px">
+            <div class="channel-card-header" style="padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span class="badge badge-gray" style="font-size:12px">级别 ${i + 1}</span>
+              <input type="text" class="form-control" value="${g.name.replace(/"/g,'&quot;')}" onchange="updateM0GradeLevel(${i}, 'name', this.value)" style="flex:1;min-width:140px;max-width:220px" placeholder="级别名称，如：中级M0">
+              <button class="btn btn-danger btn-sm" onclick="deleteM0GradeLevel(${i})">🗑 删除</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn btn-outline" style="width:100%;padding:12px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addM0GradeLevel()">➕ 添加级别</button>
+    `;
+    return;
+  }
+  // ===== M0 绩效配置 tab（参考销售绩效配置，考核项均为手动录入，不自动带入自拓演示）=====
+  if (configTab === 'm0PerfConfig') {
+    const cfg = normalizePerfConfig(cloudData.formConfig.m0PerformanceConfig || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0PerformanceConfig)));
+    cloudData.formConfig.m0PerformanceConfig = cfg;
+    if (!cloudData.formConfig.m0GradeConfig || !Array.isArray(cloudData.formConfig.m0GradeConfig)) cloudData.formConfig.m0GradeConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0GradeConfig));
+    const levels = cloudData.formConfig.m0GradeConfig.map(l => l.name);
+    const baseMap = cloudData.formConfig.performanceBase || {};
+    const items = cfg.items || [];
+    const bonus = cfg.bonus || [];
+    c.innerHTML = `
+      <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
+        配置 M0 绩效统计的<b>考核项（手动录入，<b>不</b>自动带入自拓演示数量</b>）、<b>加分项</b>以及<b>各 M0 职级绩效基数</b>。保存后立即生效；单月看板中每行可单独覆盖考核要求、完成情况、描述文字与加分次数。
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>总分规则</h4></div>
+        <div class="card-body">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <input type="checkbox" ${!cfg.totalCapAt100 ? 'checked' : ''} onchange="updateM0PerfTotalCap(!this.checked)"> 总分是否可超过 100（<b>不勾选</b>则各项加权与加分累加后的总分封顶 100）
+          </label>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>考核项配置（手动录入）</h4><span style="font-size:12px;color:var(--gray-500)">权重总和建议为100；数字=考核标准/目标（用于计算得分）；文字=考核项描述（默认，可在单月每行覆盖）</span></div>
+        <div class="card-body">
+          <div id="m0PerfItemsList">
+            ${items.map((it, i) => `
+              <div class="perf-item-card" style="border:1px solid var(--gray-200);border-radius:10px;padding:12px;margin-bottom:12px;${it.enabled ? '' : 'opacity:.55'}">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                  <input type="checkbox" ${it.enabled ? 'checked' : ''} onchange="toggleM0PerfItemEnabled(${i})" title="启用/停用">
+                  <b style="font-size:13px">${i + 1}. ${esc(it.name)}</b>
+                  <span class="badge badge-gray" style="font-size:11px">手动录入</span>
+                  <div style="flex:1"></div>
+                  <button class="btn btn-sm btn-outline" onclick="moveM0PerfItem(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
+                  <button class="btn btn-sm btn-outline" onclick="moveM0PerfItem(${i}, 1)" ${i === items.length - 1 ? 'disabled' : ''}>↓</button>
+                  <button class="btn btn-sm btn-danger" onclick="deleteM0PerfItem(${i})">删除</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px">
+                  <div class="form-group" style="margin-bottom:0"><label>考核项名称</label><input type="text" class="form-control" value="${esc(it.name)}" onchange="updateM0PerfItem(${i}, 'name', this.value)"></div>
+                  <div class="form-group" style="margin-bottom:0"><label>权重(%)</label><input type="number" class="form-control" value="${it.weight}" onchange="updateM0PerfItem(${i}, 'weight', parseFloat(this.value) || 0)"></div>
+                  <div class="form-group" style="margin-bottom:0"><label>考核标准(数字)</label><input type="number" class="form-control" value="${it.standard}" onchange="updateM0PerfItem(${i}, 'standard', parseFloat(this.value) || 0)"></div>
+                  <div class="form-group" style="margin-bottom:0;grid-column:span 2"><label>文字描述</label><input type="text" class="form-control" value="${esc(it.text || '')}" onchange="updateM0PerfItem(${i}, 'text', this.value)" placeholder="考核项描述，可在单月每行覆盖"></div>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${!it.capAt100 ? 'checked' : ''} onchange="updateM0PerfItem(${i}, 'capAt100', !this.checked)"> 该项得分可超100（不勾选则封顶100）</label>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn btn-outline" style="width:100%;padding:10px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addM0PerfItem()">添加考核项</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>加分项配置</h4><span style="font-size:12px;color:var(--gray-500)">在单月绩效看板中可录入次数，自动累加对应分值</span></div>
+        <div class="card-body">
+          <div id="m0PerfBonusList">
+            ${bonus.map((b, i) => `
+              <div class="perf-item-card" style="border:1px solid var(--gray-200);border-radius:10px;padding:12px;margin-bottom:12px;${b.enabled ? '' : 'opacity:.55'}">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                  <input type="checkbox" ${b.enabled ? 'checked' : ''} onchange="toggleM0PerfBonusEnabled(${i})" title="启用/停用">
+                  <b style="font-size:13px;white-space:pre-wrap">${esc(b.name)}</b>
+                  <div style="flex:1"></div>
+                  <button class="btn btn-sm btn-outline" onclick="moveM0PerfBonusItem(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
+                  <button class="btn btn-sm btn-outline" onclick="moveM0PerfBonusItem(${i}, 1)" ${i === bonus.length - 1 ? 'disabled' : ''}>↓</button>
+                  <button class="btn btn-sm btn-danger" onclick="deleteM0PerfBonusItem(${i})">删除</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px">
+                  <div class="form-group" style="margin-bottom:0"><label>加分项名称</label><textarea class="form-control" rows="2" onchange="updateM0PerfBonusItem(${i}, 'name', this.value)" style="resize:vertical;min-height:38px">${esc(b.name)}</textarea></div>
+                  <div class="form-group" style="margin-bottom:0"><label>分值</label><input type="number" class="form-control" value="${b.points}" onchange="updateM0PerfBonusItem(${i}, 'points', parseFloat(this.value) || 0)"></div>
+                  <div class="form-group" style="margin-bottom:0"><label>文字描述</label><input type="text" class="form-control" value="${esc(b.text || '')}" onchange="updateM0PerfBonusItem(${i}, 'text', this.value)" placeholder="可选"></div>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${!b.capAt100 ? 'checked' : ''} onchange="updateM0PerfBonusItem(${i}, 'capAt100', !this.checked)"> 该项得分可超100（不勾选则封顶100）</label>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn btn-outline" style="width:100%;padding:10px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addM0PerfBonusItem()">添加加分项</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>M0 职级绩效基数</h4><span style="font-size:12px;color:var(--gray-500)">最终基数 = 配置值 × 当月在职天数 / 30；读取自「M0评级」中的级别名称</span></div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:14px">
+            ${levels.map((lv, i) => `
+              <div class="form-group" style="margin-bottom:0">
+                <label>${esc(lv)}</label>
+                <input type="number" class="form-control" value="${baseMap[lv] || 0}" onchange='updatePerfBase(${JSON.stringify(lv)}, parseFloat(this.value) || 0)' placeholder="0">
+              </div>
+            `).join('')}
+          </div>
+          <div style="font-size:12px;color:var(--gray-500);margin-top:10px">若新增/修改了 M0 级别名称，请先保存「M0评级」再刷新本页。</div>
+        </div>
+      </div>`;
+    return;
+  }
   // ===== 日报/周报配置 tab =====
   const channels = getChannels(configTab);
   c.innerHTML = channels.map((ch, idx) => {
@@ -5049,6 +5201,90 @@ function deletePerfBonusItem(i) {
   const cfg = cloudData.formConfig.performanceConfig;
   if (!cfg || !cfg.bonus) return;
   if (!confirm('确定删除此加分项吗？已有绩效数据中的该项得分将不再计入（需点击保存才会写入云端）。')) return;
+  cfg.bonus.splice(i, 1);
+  renderConfigContent();
+}
+
+// ===== M0 评级配置 编辑助手 =====
+function updateM0GradeLevel(i, field, value) {
+  if (!cloudData.formConfig.m0GradeConfig) cloudData.formConfig.m0GradeConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0GradeConfig));
+  if (cloudData.formConfig.m0GradeConfig[i]) cloudData.formConfig.m0GradeConfig[i][field] = value;
+}
+function addM0GradeLevel() {
+  if (!cloudData.formConfig.m0GradeConfig) cloudData.formConfig.m0GradeConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0GradeConfig));
+  cloudData.formConfig.m0GradeConfig.push({ name: '新级别' });
+  renderConfigContent();
+}
+function deleteM0GradeLevel(i) {
+  if (!confirm('确定删除此 M0 级别吗？')) return;
+  if (cloudData.formConfig.m0GradeConfig) cloudData.formConfig.m0GradeConfig.splice(i, 1);
+  renderConfigContent();
+}
+// ===== M0 绩效配置 编辑助手 =====
+function getM0PerfConfig() {
+  return normalizePerfConfig((cloudData.formConfig && cloudData.formConfig.m0PerformanceConfig) || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0PerformanceConfig)));
+}
+function updateM0PerfTotalCap(v) {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (cfg) cfg.totalCapAt100 = v;
+}
+function updateM0PerfItem(i, field, value) {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (cfg && cfg.items && cfg.items[i]) cfg.items[i][field] = value;
+}
+function toggleM0PerfItemEnabled(i) {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (cfg && cfg.items && cfg.items[i]) { cfg.items[i].enabled = !cfg.items[i].enabled; renderConfigContent(); }
+}
+function moveM0PerfItem(i, dir) {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (!cfg || !cfg.items) return;
+  const j = i + dir;
+  if (j < 0 || j >= cfg.items.length) return;
+  const tmp = cfg.items[i]; cfg.items[i] = cfg.items[j]; cfg.items[j] = tmp;
+  renderConfigContent();
+}
+function addM0PerfItem() {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (!cfg) return;
+  if (!cfg.items) cfg.items = [];
+  cfg.items.push({ key: 'm0item_' + Date.now(), name: '新考核项', type: 'manual', enabled: true, weight: 0, standard: 0, text: '', capAt100: true });
+  renderConfigContent();
+}
+function deleteM0PerfItem(i) {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (!cfg || !cfg.items) return;
+  if (!confirm('确定删除此考核项吗？已有 M0 绩效数据中的该项得分将不再计入（需点击保存才会写入云端）。')) return;
+  cfg.items.splice(i, 1);
+  renderConfigContent();
+}
+function updateM0PerfBonusItem(i, field, value) {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (cfg && cfg.bonus && cfg.bonus[i]) cfg.bonus[i][field] = value;
+}
+function toggleM0PerfBonusEnabled(i) {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (cfg && cfg.bonus && cfg.bonus[i]) { cfg.bonus[i].enabled = !cfg.bonus[i].enabled; renderConfigContent(); }
+}
+function moveM0PerfBonusItem(i, dir) {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (!cfg || !cfg.bonus) return;
+  const j = i + dir;
+  if (j < 0 || j >= cfg.bonus.length) return;
+  const tmp = cfg.bonus[i]; cfg.bonus[i] = cfg.bonus[j]; cfg.bonus[j] = tmp;
+  renderConfigContent();
+}
+function addM0PerfBonusItem() {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (!cfg) return;
+  if (!cfg.bonus) cfg.bonus = [];
+  cfg.bonus.push({ key: 'm0bonus_' + Date.now(), name: '新加分项', points: 0, text: '', enabled: true, capAt100: false });
+  renderConfigContent();
+}
+function deleteM0PerfBonusItem(i) {
+  const cfg = cloudData.formConfig.m0PerformanceConfig;
+  if (!cfg || !cfg.bonus) return;
+  if (!confirm('确定删除此加分项吗？已有 M0 绩效数据中的该项得分将不再计入（需点击保存才会写入云端）。')) return;
   cfg.bonus.splice(i, 1);
   renderConfigContent();
 }
@@ -8541,6 +8777,24 @@ function saveM0ByKey(key, patch) {
   cloudData.m0Records[key] = Object.assign({}, cloudData.m0Records[key] || {}, patch);
   apiUpdate('m0Records', key, cloudData.m0Records[key]).catch(e => showToast('保存失败: ' + e.message, 'error'));
 }
+// M0 升降级自动判断：对比当月职级与上月职级（m0GradeConfig 顺序即职级高低）
+function m0ChgAuto(year, m0, m, grade) {
+  const cfg = (cloudData.formConfig && cloudData.formConfig.m0GradeConfig) || [];
+  if (!grade) return '持平';
+  const curIdx = cfg.findIndex(l => l && l.name === grade);
+  if (curIdx < 0) return '持平';
+  let prev = '';
+  if (m > 1) {
+    const prevRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, m - 1)]) || {};
+    prev = prevRec.grade || '';
+  }
+  if (!prev) return '持平';
+  const prevIdx = cfg.findIndex(l => l && l.name === prev);
+  if (prevIdx < 0) return '持平';
+  if (curIdx > prevIdx) return '升级';
+  if (curIdx < prevIdx) return '降级';
+  return '持平';
+}
 function m0CfgLabel() {
   const src = (m0ConfigPanelOpen && m0ConfigDraft) ? m0ConfigDraft : (cloudData.formConfig.m0Config || { groups: [] });
   const n = (src.groups || []).length;
@@ -8714,7 +8968,7 @@ function sgNoteText() {
   if (salesGradeTab === 'single') return '说明：单月评级看板为「升降级矩阵」的表格视图，数据与矩阵<b>联动</b>（评级/备注修改即时同步）。纵向仅显示在册<b>在职</b>销售，横向为：评级业绩（滚动3月）/ 评级 / 升降级 / 备注。<b>升降级为实时</b>按当月职级对比上月职级自动计算（修改评级即时刷新）。';
   if (salesGradeTab === 'm0matrix' || salesGradeTab === 'm0single') {
     const cnt = ((cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || []).length;
-    return '说明：M0 看板考核业绩 = <b>M0 人员当月业绩</b> + 所选<b>累加人员当月业绩</b>之和（仅取当月，不滚动 3 月）。评级 / 升降级均为<b>手动填写</b>（下拉选择），不与上月联动。' + (cnt ? '' : ' <b style="color:#dc2626">当前未配置 M0 计算范围，请在上方「⚙️ M0 计算范围」中设置。</b>');
+    return '说明：M0 看板考核业绩 = <b>M0 人员当月业绩</b> + 所选<b>累加人员当月业绩</b>之和（仅取当月，不滚动 3 月）。<b>评级</b>为下拉选择（取值「表单配置-M0评级」）；<b>升降级</b>为<b>自动</b>按当月评级对比上月评级得出（升级 / 降级 / 持平），不与手动输入联动。' + (cnt ? '' : ' <b style="color:#dc2626">当前未配置 M0 计算范围，请在上方「⚙️ M0 计算范围」中设置。</b>');
   }
   return '说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为<b>实时</b>按当月职级对比上月职级自动计算（修改评级后即时刷新，含手动改动的职级）。';
 }
@@ -8725,9 +8979,8 @@ function refreshM0Grade() {
   const { base } = buildAllSalesBase(year);
   const statusMap = buildUserStatusMap();
   const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  const gradeConfig = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
-  const m0GradeOpts = [''].concat(gradeConfig.length ? gradeConfig.map(l => l.name) : ['初级','中级','高级']);
-  const m0ChgOpts = ['', '升级', '降级', '持平'];
+  const m0GradeCfg = (cloudData.formConfig && cloudData.formConfig.m0GradeConfig) || [];
+  const m0GradeOpts = [''].concat(m0GradeCfg.length ? m0GradeCfg.map(l => l.name) : ['初级M0','中级M0','高级M0']);
   const rows = groups.map(g => {
     const amts = {}; let total = 0;
     months.forEach(m => { const v = m0GroupAmount(base, g, m); amts[m] = v; total += v; });
@@ -8749,14 +9002,14 @@ function refreshM0Grade() {
       colTot[m] += v;
       const rec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, m)]) || {};
       const grade = rec.grade || '';
-      const chg = rec.chg || '';
       const note = rec.note || '';
       const gradeOpts = m0GradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===grade)?'selected':''}>${o?o:'（未评级）'}</option>`).join('');
-      const chgOpts = m0ChgOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===chg)?'selected':''}>${o?o:'（未填）'}</option>`).join('');
+      const chgAuto = m0ChgAuto(year, m0, m, grade);
+      const chgColor = chgAuto === '升级' ? '#16a34a' : (chgAuto === '降级' ? '#dc2626' : 'var(--gray-500)');
       const k = m0Key(year, m0, m);
       h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div>`
-         + `<div style="margin-top:4px"><input type="text" class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" placeholder="评级" value="${grade.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {grade:this.value})"></div>`
-         + `<div style="margin-top:3px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveM0ByKey('${k}', {chg:this.value})">${chgOpts}</select></div></td>`;
+         + `<div style="margin-top:4px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveM0ByKey('${k}', {grade:this.value})">${gradeOpts}</select></div>`
+         + `<div style="margin-top:3px;text-align:center;font-size:11px;font-weight:700;color:${chgColor}">${chgAuto || '—'}</div></td>`;
     });
     totalAll += row.total;
     h += `<td class="num" style="font-weight:700">${fmtSalesMoney(row.total)}</td></tr>`;
@@ -8775,9 +9028,8 @@ function refreshM0GradeSingle() {
   const groups = (cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || [];
   const { base } = buildAllSalesBase(year);
   const statusMap = buildUserStatusMap();
-  const gradeConfig = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
-  const m0GradeOpts = [''].concat(gradeConfig.length ? gradeConfig.map(l => l.name) : ['初级','中级','高级']);
-  const m0ChgOpts = ['', '升级', '降级', '持平'];
+  const m0GradeCfg = (cloudData.formConfig && cloudData.formConfig.m0GradeConfig) || [];
+  const m0GradeOpts = [''].concat(m0GradeCfg.length ? m0GradeCfg.map(l => l.name) : ['初级M0','中级M0','高级M0']);
   const rows = groups.map(g => ({ g, v: m0GroupAmount(base, g, month) })).sort((a, b) => b.v - a.v);
   let h = `<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（M0）</span></th><th>上月职级</th><th class="num">${month}月 M0 考核业绩</th><th>评级</th><th style="text-align:center">升降级</th><th>备注</th></tr></thead><tbody>`;
   if (!rows.length) h += `<tr><td colspan="6" style="text-align:center;color:var(--gray-400);padding:24px">尚未配置 M0 计算范围，请点击上方「⚙️ M0 计算范围」设置分组。</td></tr>`;
@@ -8794,13 +9046,14 @@ function refreshM0GradeSingle() {
       prevGrade = prevRec.grade || '—';
     }
     const gradeOpts = m0GradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===grade)?'selected':''}>${o?o:'（未评级）'}</option>`).join('');
-    const chgOpts = m0ChgOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===chg)?'selected':''}>${o?o:'（未填）'}</option>`).join('');
+    const chgAuto = m0ChgAuto(year, m0, month, grade);
+    const chgColor = chgAuto === '升级' ? '#16a34a' : (chgAuto === '降级' ? '#dc2626' : 'var(--gray-500)');
     const k = m0Key(year, m0, month);
     h += `<tr><td>${esc(m0)}${userStatusBadge(m0, statusMap)}<div style="font-size:10px;color:var(--gray-400)">含 ${members.length} 人累加</div></td>`
        + `<td style="text-align:center">${esc(prevGrade)}</td>`
        + `<td class="num" style="font-weight:600">${fmtSalesMoney(row.v)}</td>`
-       + `<td><input type="text" class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" placeholder="评级" value="${grade.replace(/"/g,'&quot;')}" onchange="saveM0ByKey('${k}', {grade:this.value})"></td>`
-       + `<td style="text-align:center"><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveM0ByKey('${k}', {chg:this.value})">${chgOpts}</select></td>`
+       + `<td><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveM0ByKey('${k}', {grade:this.value})">${gradeOpts}</select></td>`
+       + `<td style="text-align:center;font-weight:700;color:${chgColor}">${chgAuto || '—'}</td>`
        + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:12px;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="saveM0ByKey('${k}', {note:this.value})">${esc(note)}</textarea></td></tr>`;
   });
   h += '</tbody>';
@@ -9150,6 +9403,17 @@ let perfSpFilter = [];          // 绩效看板：选中的销售名单（空数
 let perfSpFilterLoaded = false; // 是否已从 localStorage 载入默认
 let perfTeamFilter = '';        // 绩效看板：按团队筛选（空=全部）
 let perfSortBy = 'name';        // 绩效看板排序：'name' 按姓名 / 'team' 按团队+姓名 / 'score' 按绩效评分降序
+
+// ===== M0 绩效看板状态 =====
+let m0PerfTab = 'matrix';
+let m0PerfYear = '';
+let m0PerfMonthFrom = 1;
+let m0PerfMonthTo = 12;
+let m0PerfSingleMonth = (new Date().getMonth() + 1);
+let m0PerfSpFilter = [];          // M0 绩效看板：选中的 M0 人员（空=全部）
+let m0PerfSpFilterLoaded = false;
+let m0PerfTeamFilter = '';
+let m0PerfSortBy = 'name';
 
 function perfKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
 
@@ -9504,6 +9768,8 @@ function renderSalesPerf() {
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === perfYear ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${perfYear}">${perfYear}</option>`;
   // 最终保存快照信息
   const isMatrix = perfTab === 'matrix';
+  const isM0 = perfTab === 'm0matrix' || perfTab === 'm0single';
+  const isM0Matrix = perfTab === 'm0matrix';
   let snapInfo = '', snapExists = false;
   if (!isMatrix && perfViewSnapshot) {
     const y = perfYear, mo = perfSingleMonth;
@@ -9521,11 +9787,14 @@ function renderSalesPerf() {
           <h4>销售绩效统计</h4>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-sm ${isMatrix?'btn-primary':'btn-outline'}" onclick="perfTab='matrix';renderSalesPerf()">绩效看板矩阵</button>
-            <button class="btn btn-sm ${!isMatrix?'btn-primary':'btn-outline'}" onclick="perfTab='single';renderSalesPerf()">销售单月绩效看板</button>
+            <button class="btn btn-sm ${perfTab==='single'?'btn-primary':'btn-outline'}" onclick="perfTab='single';renderSalesPerf()">销售单月绩效看板</button>
+            <button class="btn btn-sm ${perfTab==='m0matrix'?'btn-primary':'btn-outline'}" onclick="perfTab='m0matrix';renderSalesPerf()">M0绩效看板</button>
+            <button class="btn btn-sm ${perfTab==='m0single'?'btn-primary':'btn-outline'}" onclick="perfTab='m0single';renderSalesPerf()">M0单月绩效看板</button>
           </div>
         </div>
       </div>
       <div class="card-body">
+        ${isM0 ? '<div id="m0PerfMount"></div>' : `
         <div class="filter-bar">
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="perfYear" onchange="perfYear=this.value;renderSalesPerf()">${yearOpts}</select></div>
           <div class="form-group" style="position:relative">
@@ -9574,10 +9843,17 @@ function renderSalesPerf() {
         <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：矩阵展示每位在职销售每月的销售职级（联动销售评级看板）与绩效评分，评分按区间着色（<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>）。' : '说明：单月绩效看板中，演示考核项的「完成情况」默认自动取自拜访数据「自拓演示」归类汇总（显示「自动」，手动修改后点 ↺ 可重置回自动值）；每行描述文字、考核要求、完成情况、加分次数、在职天数、总评均可单独编辑保存；【绩效评分】可手动修改（点 ↺ 重置为公式自动值）；绩效评分（含各项封顶/总分封顶规则）与绩效基数由公式实时计算。「最终保存」可生成冻结快照，不受后续表单配置修改影响。'}</div>
         ${!isMatrix && perfViewSnapshot ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">📌 当前查看「最终保存」冻结快照${snapInfo}${snapExists ? '，不受表单配置修改影响；编辑已停用。' : '，但本月暂无快照数据，已回退为实时计算。'}点击「📷 返回实时」回到实时计算。</div>` : ''}
         <div class="table-wrap"><table id="perfTable"></table></div>
+        `}
       </div>
     </div>`;
-  if (document.getElementById('perfYear')) document.getElementById('perfYear').value = perfYear;
-  perfRefresh();
+  if (isM0) {
+    m0PerfTab = isM0Matrix ? 'matrix' : 'single';
+    const mount = document.getElementById('m0PerfMount');
+    if (mount) renderM0Perf(mount);
+  } else {
+    if (document.getElementById('perfYear')) document.getElementById('perfYear').value = perfYear;
+    perfRefresh();
+  }
 }
 
 function perfRefresh() {
@@ -9809,6 +10085,383 @@ function exportPerfSingleXlsx() {
   XLSX.utils.book_append_sheet(wb, ws, '单月绩效');
   XLSX.writeFile(wb, `销售单月绩效看板_${year}年${month}月.xlsx`);
   showToast('已导出 Excel（' + (aoa.length - 1) + ' 行）', 'success');
+}
+
+// ================= M0 绩效看板（参考绩效看板矩阵 / 销售单月绩效看板）=================
+function m0SpActiveList() {
+  const groups = (cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || [];
+  const set = [];
+  groups.forEach(g => { const m0 = (g && g.m0 || '').trim(); if (m0 && set.indexOf(m0) < 0) set.push(m0); });
+  return set;
+}
+function getM0PerfConfig() {
+  return normalizePerfConfig((cloudData.formConfig && cloudData.formConfig.m0PerformanceConfig) || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0PerformanceConfig)));
+}
+function getM0PerfRecord(year, m0, m) {
+  const cfg = getM0PerfConfig();
+  const k = m0Key(year, m0, m);
+  const stored = (cloudData.m0PerformanceRecords && cloudData.m0PerformanceRecords[k]) || {};
+  const defaults = { workingDays: 30, comment: '', finalScore: null };
+  (cfg.items || []).forEach(it => {
+    defaults['actual_' + it.key] = 0;
+    defaults['manual_' + it.key] = false;
+    defaults['text_' + it.key] = it.text || '';
+  });
+  (cfg.bonus || []).forEach(b => { defaults['bonus_' + b.key] = 0; });
+  return Object.assign({}, defaults, stored);
+}
+function m0PerfRowDisplay(year, m0, month, cfg) {
+  const rec = getM0PerfRecord(year, m0, month);
+  const scores = computePerfScore(rec, cfg, year, m0, month);
+  const gradeRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, month)]) || {};
+  const level = gradeRec.grade || '';
+  const base = getPerfBase(level) * (rec.workingDays || 30) / 30;
+  const items = (cfg.items || []).filter(it => it.enabled).map(it => {
+    const ik = it.key;
+    const manual = rec['manual_' + ik];
+    const actual = parseFloat(rec['actual_' + ik]) || 0;
+    const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
+    const stdRaw = manualStd ? rec['standard_' + ik] : (it.standard || 0);
+    const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
+    const txt = (rec['text_' + ik] !== undefined && rec['text_' + ik] !== '') ? rec['text_' + ik] : (it.text || '');
+    return { it, actual, standard: std, score: (scores.itemScores[ik] || {}).raw || 0, text: txt, frozen: false, isAuto: false, manual };
+  });
+  const bonus = (cfg.bonus || []).filter(b => b.enabled).map(b => ({ b, cnt: parseFloat(rec['bonus_' + b.key]) || 0, frozen: false }));
+  return { level, base, workingDays: rec.workingDays || 30, comment: rec.comment || '', finalScore: getFinalScore(rec, cfg, year, m0, month), computedScore: scores.score, items, bonus, frozen: false };
+}
+function saveM0PerfByKey(key, patch) {
+  if (!cloudData.m0PerformanceRecords) cloudData.m0PerformanceRecords = {};
+  cloudData.m0PerformanceRecords[key] = Object.assign({}, cloudData.m0PerformanceRecords[key] || {}, patch);
+  if (m0PerfTab === 'single') refreshM0PerfSingle();
+  apiUpdate('m0PerformanceRecords', key, cloudData.m0PerformanceRecords[key]).catch(e => showToast('保存 M0 绩效数据失败: ' + e.message, 'error'));
+}
+function m0PerfYearOptions() {
+  const years = new Set();
+  Object.keys(cloudData.m0PerformanceRecords || {}).forEach(k => { const y = k.split('_')[0]; if (y) years.add(y); });
+  years.add(new Date().getFullYear().toString());
+  const arr = [...years].sort();
+  return arr.map(y => `<option value="${y}" ${y === m0PerfYear ? 'selected' : ''}>${y}</option>`).join('');
+}
+let m0PerfMount = null;
+function renderM0Perf(mount) {
+  if (mount) m0PerfMount = mount;
+  const target = (typeof m0PerfMount === 'string') ? document.getElementById(m0PerfMount) : m0PerfMount;
+  if (!target) return;
+  if (!m0PerfSpFilterLoaded) {
+    try { const s = localStorage.getItem('sop_m0perf_sp_filter'); m0PerfSpFilter = s ? JSON.parse(s) : []; } catch (e) { m0PerfSpFilter = []; }
+    m0PerfSpFilterLoaded = true;
+  }
+  const curYear = new Date().getFullYear().toString();
+  if (!m0PerfYear || m0PerfYearOptions().indexOf('value="' + m0PerfYear + '"') < 0) m0PerfYear = curYear;
+  const isMatrix = m0PerfTab === 'matrix';
+  target.innerHTML = `
+        <div class="filter-bar">
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="m0PerfYear" onchange="m0PerfYear=this.value;renderM0Perf()">${m0PerfYearOptions()}</select></div>
+          <div class="form-group" style="position:relative">
+            <label style="font-size:12px;color:var(--gray-500)">M0人员</label>
+            <button type="button" class="form-control" id="m0PerfSpBtn" onclick="toggleM0PerfSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${m0PerfSpLabel()}</button>
+            <div id="m0PerfSpPanel" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
+              <div style="display:flex;gap:6px;margin-bottom:8px">
+                <input type="text" class="form-control form-control-sm" id="m0PerfSpSearch" placeholder="搜索 M0 姓名" oninput="renderM0PerfSpPanel()" style="flex:1;min-width:0">
+                <button type="button" class="btn btn-sm btn-outline" onclick="m0PerfSpSelectAll()">全选</button>
+                <button type="button" class="btn btn-sm btn-outline" onclick="m0PerfSpClear()">清空</button>
+              </div>
+              <div id="m0PerfSpList"></div>
+              <div style="display:flex;gap:6px;margin-top:10px;border-top:1px solid var(--gray-100);padding-top:10px">
+                <button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="saveM0PerfSpDefault()">💾 保存为默认视图</button>
+                <button type="button" class="btn btn-sm btn-outline" onclick="toggleM0PerfSpPanel(false)">关闭</button>
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label style="font-size:12px;color:var(--gray-500)">团队</label>
+            <select class="form-control" id="m0PerfTeamFilter" onchange="m0PerfTeamFilterChange(this.value)">
+              <option value="">全部团队</option>
+              ${m0PerfTeamOptions()}
+            </select>
+          </div>
+          <div class="form-group">
+            <label style="font-size:12px;color:var(--gray-500)">排序</label>
+            <select class="form-control" id="m0PerfSortBy" onchange="m0PerfSortChange(this.value)">
+              <option value="name" ${m0PerfSortBy==='name'?'selected':''}>按姓名</option>
+              <option value="team" ${m0PerfSortBy==='team'?'selected':''}>按团队+姓名</option>
+              <option value="score" ${m0PerfSortBy==='score'?'selected':''}>按绩效评分降序</option>
+            </select>
+          </div>
+          ${isMatrix ? `
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="m0PerfMFrom" onchange="m0PerfMonthFrom=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="m0PerfMTo" onchange="m0PerfMonthTo=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfMonthTo?'selected':''}>${m}月</option>`).join('')}</select></div>
+          ` : `
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="m0PerfMonth" onchange="m0PerfSingleMonth=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <button class="btn btn-outline btn-sm" onclick="refreshM0PerfSingle()">刷新计算</button>
+          <button class="btn btn-outline btn-sm" onclick="openM0PerfBatchStandard()">📝 批量设置要求</button>
+          <button class="btn btn-success btn-sm" onclick="exportM0PerfSingleXlsx()">📥 导出Excel</button>
+          `}
+        </div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：M0 绩效看板矩阵展示每位 M0 人员每月的 M0 职级（联动 M0 评级看板）与绩效评分，评分按区间着色（<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>）。' : '说明：M0 单月绩效看板参考「销售单月绩效看板」，考核项均为<b>手动录入</b>（不自动带入自拓演示）。每行描述文字、考核要求、完成情况、加分次数、在职天数、总评均可单独编辑保存；【绩效评分】可手动修改（点 ↺ 重置为公式自动值）；绩效基数、奖金由公式实时计算。'}</div>
+        ${!m0SpActiveList().length ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">⚠️ 尚未在「销售评级看板 → M0 计算范围」中配置任何 M0 分组，M0 绩效看板无数据可显示。</div>` : ''}
+        <div class="table-wrap"><table id="m0PerfTable"></table></div>`;
+  if (document.getElementById('m0PerfYear')) document.getElementById('m0PerfYear').value = m0PerfYear;
+  m0PerfRefresh();
+}
+function m0PerfRefresh() {
+  if (m0PerfTab === 'single') refreshM0PerfSingle();
+  else refreshM0PerfMatrix();
+}
+function refreshM0PerfMatrix() {
+  const year = document.getElementById('m0PerfYear') ? document.getElementById('m0PerfYear').value : m0PerfYear;
+  m0PerfYear = year;
+  if (m0PerfMonthFrom > m0PerfMonthTo) m0PerfMonthFrom = m0PerfMonthTo;
+  const statusMap = buildUserStatusMap();
+  const m0List = m0SpActiveList();
+  const months = [];
+  for (let m = m0PerfMonthFrom; m <= m0PerfMonthTo; m++) months.push(m);
+  const cfg = getM0PerfConfig();
+  const lastM = months.length ? months[months.length - 1] : m0PerfMonthTo;
+  const rows = m0List.filter(m0PerfFilterSp).map(m0 => {
+    const rec = getM0PerfRecord(year, m0, lastM);
+    const gradeRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, lastM)]) || {};
+    return { m0, team: getSalesTeam(m0) || '', lastScore: getFinalScore(rec, cfg, year, m0, lastM) };
+  });
+  if (m0PerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.m0.localeCompare(b.m0, 'zh'));
+  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.m0.localeCompare(b.m0, 'zh'));
+  else rows.sort((a, b) => a.m0.localeCompare(b.m0, 'zh'));
+
+  let h = '<thead><tr><th>M0人员</th><th>团队</th>';
+  months.forEach(m => { h += `<th class="num">${m}月</th>`; });
+  h += '</tr></thead><tbody>';
+  rows.forEach(row => {
+    h += `<tr><td>${esc(row.m0)}${userStatusBadge(row.m0, statusMap)}</td><td>${esc(row.team) || '-'}</td>`;
+    months.forEach(m => {
+      const gradeRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, row.m0, m)]) || {};
+      const level = gradeRec.grade || '—';
+      const rec = getM0PerfRecord(year, row.m0, m);
+      const score = getFinalScore(rec, cfg, year, row.m0, m);
+      h += `<td class="num" style="text-align:center"><div>${level || '—'}</div><div style="color:${scoreColor(score)};font-weight:700">${score.toFixed(2)}</div></td>`;
+    });
+    h += '</tr>';
+  });
+  if (!rows.length) h += `<tr><td colspan="${months.length + 2}" style="text-align:center;color:var(--gray-400);padding:24px">本年度暂无 M0 人员的绩效数据（请先在「销售评级看板 → M0 计算范围」配置 M0 分组）</td></tr>`;
+  h += '</tbody>';
+  const tbl = document.getElementById('m0PerfTable');
+  if (tbl) tbl.innerHTML = h;
+}
+function refreshM0PerfSingle() {
+  const year = document.getElementById('m0PerfYear') ? document.getElementById('m0PerfYear').value : m0PerfYear;
+  m0PerfYear = year;
+  const month = document.getElementById('m0PerfMonth') ? parseInt(document.getElementById('m0PerfMonth').value, 10) : m0PerfSingleMonth;
+  m0PerfSingleMonth = month;
+  const statusMap = buildUserStatusMap();
+  const m0List = m0SpActiveList();
+  const cfg = getM0PerfConfig();
+  const items = (cfg.items || []).filter(it => it.enabled);
+  const bonusList = (cfg.bonus || []).filter(b => b.enabled);
+  const rows = m0List.filter(m0PerfFilterSp).map(m0 => {
+    const rec = getM0PerfRecord(year, m0, month);
+    return { m0, team: getSalesTeam(m0) || '', score: getFinalScore(rec, cfg, year, m0, month) };
+  });
+  if (m0PerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.m0.localeCompare(b.m0, 'zh'));
+  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.m0.localeCompare(b.m0, 'zh'));
+  else rows.sort((a, b) => a.m0.localeCompare(b.m0, 'zh'));
+
+  let h = '<thead><tr>';
+  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:120px;white-space:nowrap">M0人员</th>';
+  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:120px;z-index:3;background:#fff;text-align:left;width:140px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">团队</th>';
+  items.forEach(it => {
+    h += `<th colspan="3" style="text-align:center;background:#FAEEDA">${esc(it.name)}（${it.weight || 0}%）</th>`;
+  });
+  if (bonusList.length) h += `<th colspan="${bonusList.length}" style="text-align:center;background:#EAF3DE">加分项</th>`;
+  h += '<th rowspan="2" style="text-align:center;width:70px">当月在职天数</th>';
+  h += '<th rowspan="2" style="text-align:center;width:80px">当月M0职级</th>';
+  h += '<th rowspan="2" style="text-align:center;min-width:150px">总评</th>';
+  h += '<th rowspan="2" style="text-align:center;width:100px">绩效评分</th>';
+  h += '<th rowspan="2" style="text-align:center;width:80px">绩效基数</th>';
+  h += '<th rowspan="2" style="text-align:center;width:90px">绩效奖金</th>';
+  h += '</tr><tr>';
+  items.forEach(it => {
+    h += '<th style="background:#FAEEDA">要求</th>';
+    h += `<th style="background:#FAEEDA">完成</th>`;
+    h += '<th style="background:#FAEEDA">得分</th>';
+  });
+  bonusList.forEach(b => { h += `<th style="background:#EAF3DE;white-space:pre-wrap">${esc(b.name)}</th>`; });
+  h += '</tr></thead><tbody>';
+
+  rows.forEach(row => {
+    const d = m0PerfRowDisplay(year, row.m0, month, cfg);
+    const k = m0Key(year, row.m0, month);
+    const rec0 = cloudData.m0PerformanceRecords[k] || {};
+    const isManualScore = (rec0.finalScore !== undefined && rec0.finalScore !== null && rec0.finalScore !== '');
+    h += `<tr>`;
+    h += `<td class="perf-freeze" style="position:sticky;left:0;z-index:2;background:#fff;white-space:nowrap;width:120px">${esc(row.m0)}${userStatusBadge(row.m0, statusMap)}</td>`;
+    h += `<td class="perf-freeze" style="position:sticky;left:120px;z-index:2;background:#fff;white-space:nowrap;width:140px;box-shadow:2px 0 0 0 var(--gray-200)">${esc(row.team)}</td>`;
+    d.items.forEach(x => {
+      const it = x.it, ik = it.key;
+      const stdCell = `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="saveM0PerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="saveM0PerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+      const actCell = `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveM0PerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+      h += `<td style="background:#FFF8EE">${stdCell}</td>`;
+      h += `<td style="background:#FFF8EE">${actCell}</td>`;
+      h += `<td style="text-align:center;font-weight:600">${Number(x.score).toFixed(2)}</td>`;
+    });
+    d.bonus.forEach(x => {
+      const bk = 'bonus_' + x.b.key;
+      h += `<td><input type="number" class="form-control form-control-sm" value="${x.cnt}" onchange="saveM0PerfByKey('${k}', {'${bk}':parseFloat(this.value)||0})" style="width:60px"></td>`;
+    });
+    h += `<td><input type="number" class="form-control form-control-sm" value="${d.workingDays}" onchange="saveM0PerfByKey('${k}', {workingDays:parseInt(this.value,10)||30})" style="width:70px"></td>`;
+    h += `<td style="text-align:center">${d.level || '—'}</td>`;
+    h += `<td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;min-height:40px;font-size:12px;width:100%" onchange="saveM0PerfByKey('${k}', {comment:this.value})" placeholder="评语">${esc(d.comment || '')}</textarea></td>`;
+    const resetBtn = isManualScore ? `<button class="btn btn-xs btn-outline" title="重置为公式自动值" onclick="saveM0PerfByKey('${k}', {finalScore:null})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
+    h += `<td style="text-align:center">${resetBtn}<input type="number" class="form-control form-control-sm" value="${Number(d.finalScore).toFixed(2)}" onchange="saveM0PerfByKey('${k}', {finalScore:this.value===''||this.value===null?null:parseFloat(this.value)})" style="width:90px;margin-top:2px;color:${scoreColor(d.finalScore)};font-weight:700"></td>`;
+    h += `<td style="text-align:center">${fmtSalesMoney(d.base)}</td>`;
+    const bonusMoney = (d.base || 0) * (d.finalScore || 0) / 100;
+    h += `<td style="text-align:center;font-weight:700">${fmtSalesMoney(bonusMoney)}</td>`;
+    h += `</tr>`;
+  });
+  const colCount = 8 + items.length * 3 + bonusList.length;
+  if (!rows.length) h += `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无 M0 人员（请先在「销售评级看板 → M0 计算范围」配置 M0 分组）</td></tr>`;
+  h += '</tbody>';
+  const tbl = document.getElementById('m0PerfTable');
+  if (tbl) tbl.innerHTML = h;
+}
+function exportM0PerfSingleXlsx() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面后重试', 'error'); return; }
+  const year = document.getElementById('m0PerfYear') ? document.getElementById('m0PerfYear').value : m0PerfYear;
+  const month = document.getElementById('m0PerfMonth') ? parseInt(document.getElementById('m0PerfMonth').value, 10) : m0PerfSingleMonth;
+  const m0List = m0SpActiveList();
+  const cfg = getM0PerfConfig();
+  const items = (cfg.items || []).filter(it => it.enabled);
+  const bonusList = (cfg.bonus || []).filter(b => b.enabled);
+  const rows = m0List.filter(m0PerfFilterSp).map(m0 => {
+    const rec = getM0PerfRecord(year, m0, month);
+    return { m0, team: getSalesTeam(m0) || '', score: getFinalScore(rec, cfg, year, m0, month) };
+  });
+  if (m0PerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.m0.localeCompare(b.m0, 'zh'));
+  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.m0.localeCompare(b.m0, 'zh'));
+  else rows.sort((a, b) => a.m0.localeCompare(b.m0, 'zh'));
+  const header = ['M0人员', '团队'];
+  items.forEach(it => { header.push(it.name + '(要求)', it.name + '(完成)', it.name + '(得分)'); });
+  bonusList.forEach(b => header.push(b.name));
+  header.push('当月在职天数', '当月M0职级', '总评', '绩效评分', '绩效基数', '绩效奖金');
+  const aoa = [header];
+  rows.forEach(row => {
+    const d = m0PerfRowDisplay(year, row.m0, month, cfg);
+    const line = [row.m0, row.team];
+    d.items.forEach(x => { line.push(x.standard, x.actual, Number(x.score).toFixed(2)); });
+    d.bonus.forEach(x => line.push(x.cnt));
+    const bonusMoney = (d.base || 0) * (d.finalScore || 0) / 100;
+    line.push(d.workingDays, d.level || '—', d.comment || '', Number(d.finalScore).toFixed(2), fmtSalesMoney(d.base), fmtSalesMoney(bonusMoney));
+    aoa.push(line);
+  });
+  if (aoa.length <= 1) { showToast('当前无可导出的 M0 数据', 'warning'); return; }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'M0单月绩效');
+  XLSX.writeFile(wb, `M0单月绩效看板_${year}年${month}月.xlsx`);
+  showToast('已导出 Excel（' + (aoa.length - 1) + ' 行）', 'success');
+}
+function m0PerfSpLabel() {
+  if (!m0PerfSpFilter.length) return '全部 M0 人员';
+  const lbl = '已选 ' + m0PerfSpFilter.length + ' 名';
+  return m0PerfSpFilter.length <= 3 ? lbl + '：' + m0PerfSpFilter.join('、') : lbl;
+}
+function toggleM0PerfSpPanel(force) {
+  const p = document.getElementById('m0PerfSpPanel');
+  if (!p) return;
+  if (typeof force === 'boolean') p.style.display = force ? 'block' : 'none';
+  else p.style.display = p.style.display === 'block' ? 'none' : 'block';
+  if (p.style.display === 'block') { renderM0PerfSpPanel(); const s = document.getElementById('m0PerfSpSearch'); if (s) s.value = ''; }
+}
+function renderM0PerfSpPanel() {
+  const list = m0SpActiveList();
+  const q = (document.getElementById('m0PerfSpSearch') ? document.getElementById('m0PerfSpSearch').value : '').trim();
+  const box = document.getElementById('m0PerfSpList');
+  if (!box) return;
+  const filtered = q ? list.filter(n => n.indexOf(q) >= 0) : list;
+  if (!filtered.length) { box.innerHTML = '<div style="padding:8px;color:var(--gray-400);font-size:12px">无匹配 M0 人员</div>'; return; }
+  box.innerHTML = filtered.map(n => {
+    const chk = m0PerfSpFilter.indexOf(n) >= 0 ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:4px;font-size:13px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background='transparent'"><input type="checkbox" ${chk} onchange='m0PerfSpToggle(${JSON.stringify(n)})'> ${esc(n)}</label>`;
+  }).join('');
+}
+function m0PerfSpToggle(name) {
+  const i = m0PerfSpFilter.indexOf(name);
+  if (i >= 0) m0PerfSpFilter.splice(i, 1); else m0PerfSpFilter.push(name);
+  const btn = document.getElementById('m0PerfSpBtn'); if (btn) btn.textContent = m0PerfSpLabel();
+  m0PerfRefresh();
+}
+function m0PerfSpSelectAll() {
+  m0PerfSpFilter = m0SpActiveList().slice();
+  renderM0PerfSpPanel();
+  const btn = document.getElementById('m0PerfSpBtn'); if (btn) btn.textContent = m0PerfSpLabel();
+  m0PerfRefresh();
+}
+function m0PerfSpClear() {
+  m0PerfSpFilter = [];
+  renderM0PerfSpPanel();
+  const btn = document.getElementById('m0PerfSpBtn'); if (btn) btn.textContent = m0PerfSpLabel();
+  m0PerfRefresh();
+}
+function saveM0PerfSpDefault() {
+  try { localStorage.setItem('sop_m0perf_sp_filter', JSON.stringify(m0PerfSpFilter)); showToast('已保存为默认视图（' + m0PerfSpFilter.length + ' 名）', 'success'); }
+  catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+  toggleM0PerfSpPanel(false);
+}
+function m0PerfTeamOptions() {
+  const teams = new Set();
+  m0SpActiveList().forEach(m0 => { const t = getSalesTeam(m0); if (t) teams.add(t); });
+  (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
+  return [...teams].sort((a, b) => a.localeCompare(b, 'zh')).map(t => `<option value="${esc(t)}" ${t === m0PerfTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
+}
+function m0PerfTeamFilterChange(val) { m0PerfTeamFilter = val; m0PerfRefresh(); }
+function m0PerfSortChange(val) { m0PerfSortBy = val; m0PerfRefresh(); }
+function m0PerfPassTeamFilter(m0) {
+  if (!m0PerfTeamFilter) return true;
+  return (getSalesTeam(m0) || '') === m0PerfTeamFilter;
+}
+function m0PerfFilterSp(m0) {
+  return (!m0PerfSpFilter.length || m0PerfSpFilter.indexOf(m0) >= 0) && m0PerfPassTeamFilter(m0);
+}
+function openM0PerfBatchStandard() {
+  const cfg = getM0PerfConfig();
+  const items = (cfg.items || []).filter(it => it.enabled);
+  if (!items.length) { showToast('当前无启用的考核项', 'warning'); return; }
+  const year = m0PerfYear, month = m0PerfSingleMonth;
+  const rowsHtml = items.map(it => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div style="flex:1;font-size:13px">${esc(it.name)}<span style="color:var(--gray-400);font-size:11px">（配置默认 ${it.standard || 0}）</span></div>
+      <input type="number" class="form-control form-control-sm" id="m0pbStd_${it.key}" placeholder="留空=不修改" style="width:130px">
+    </div>`).join('');
+  showModal('批量设置 M0 考核要求（' + year + '年' + month + '月）', `
+    <div style="font-size:12px;color:var(--gray-500);margin-bottom:14px">为下方各考核项填写「要求」值，点击应用后写入<b>当前筛选范围内所有 M0 人员</b>该月的要求（留空的项不改动）。</div>
+    ${rowsHtml}
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="applyM0PerfBatchStandard()">应用到全部</button>
+    </div>`, false);
+}
+function applyM0PerfBatchStandard() {
+  const cfg = getM0PerfConfig();
+  const items = (cfg.items || []).filter(it => it.enabled);
+  const year = m0PerfYear, month = m0PerfSingleMonth;
+  const patch = {};
+  items.forEach(it => {
+    const el = document.getElementById('m0pbStd_' + it.key);
+    if (!el) return;
+    const v = el.value;
+    if (v === '' || v === null) return;
+    patch['standard_' + it.key] = parseFloat(v) || 0;
+  });
+  if (!Object.keys(patch).length) { showToast('未填写任何要求值', 'warning'); closeModal(); return; }
+  const targets = m0SpActiveList().filter(m0PerfFilterSp);
+  if (!targets.length) { showToast('当前筛选范围内无 M0 人员', 'warning'); closeModal(); return; }
+  if (!cloudData.m0PerformanceRecords) cloudData.m0PerformanceRecords = {};
+  targets.forEach(m0 => {
+    const k = m0Key(year, m0, month);
+    cloudData.m0PerformanceRecords[k] = Object.assign({}, cloudData.m0PerformanceRecords[k] || {}, patch);
+    apiUpdate('m0PerformanceRecords', k, cloudData.m0PerformanceRecords[k]).catch(e => showToast('保存失败: ' + e.message, 'error'));
+  });
+  closeModal();
+  refreshM0PerfSingle();
+  showToast('已批量设置 ' + targets.length + ' 名 M0 人员的考核要求', 'success');
 }
 
 // 批量设置考核要求：为当前筛选范围内所有在职销售统一写入某月各考核项的「要求」值
