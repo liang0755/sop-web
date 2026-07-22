@@ -506,6 +506,7 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
       <div class="nav-item" data-page="visitStats" onclick="navTo('visitStats')" id="navVisitStats"><span class="icon">📊</span> 拜访统计</div>
       <div class="nav-item" data-page="salesBoard" onclick="navTo('salesBoard')" id="navSalesBoard"><span class="icon">📺</span> 业绩看板</div>
       <div class="nav-item" data-page="salesGrade" onclick="navTo('salesGrade')" id="navSalesGrade"><span class="icon">🎯</span> 销售评级看板</div>
+      <div class="nav-item" data-page="salesPerf" onclick="navTo('salesPerf')" id="navSalesPerf"><span class="icon">🏅</span> 销售绩效统计</div>
       <div class="nav-section-title">管理</div>
       <div class="nav-item" data-page="userManagement" onclick="navTo('userManagement')" id="navUserMgmt"><span class="icon">👤</span> 用户管理</div>
       <div class="nav-item" data-page="roleConfig" onclick="navTo('roleConfig')" id="navRoleConfig"><span class="icon">🛡️</span> 角色权限</div>
@@ -575,7 +576,7 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes, m0Res] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes, grRes, m0Res, prRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
@@ -583,7 +584,8 @@ async function loadCoreData() {
       fetch(FB_BASE + '/roleConfig.json'),
       fetch(FB_BASE + '/visitConfig.json'),
       fetch(FB_BASE + '/gradeRecords.json'),
-      fetch(FB_BASE + '/m0Records.json')
+      fetch(FB_BASE + '/m0Records.json'),
+      fetch(FB_BASE + '/performanceRecords.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -603,6 +605,10 @@ async function loadCoreData() {
     }
     if (typeof cloudData.formConfig.customerSummaryNote !== 'string') cloudData.formConfig.customerSummaryNote = '';
     if (!cloudData.formConfig.teamTargets || typeof cloudData.formConfig.teamTargets !== 'object') cloudData.formConfig.teamTargets = {};
+    if (!cloudData.formConfig.performanceConfig || typeof cloudData.formConfig.performanceConfig !== 'object') {
+      cloudData.formConfig.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
+    }
+    if (!cloudData.formConfig.performanceBase || typeof cloudData.formConfig.performanceBase !== 'object') cloudData.formConfig.performanceBase = {};
     if (!fcData) {
       try { await fetch(FB_BASE + '/formConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.formConfig)}); } catch(e) {}
     }
@@ -651,6 +657,11 @@ async function loadCoreData() {
           role.permissions.salesGrade = role.permissions.salesBoard === true;
           roleChanged = true;
         }
+        // Ensure salesPerf exists (new module) — default to same access as salesGrade
+        if (role.permissions && role.permissions.salesPerf === undefined) {
+          role.permissions.salesPerf = role.permissions.salesGrade === true;
+          roleChanged = true;
+        }
       });
       // Ensure super admin (key='admin') ALWAYS has every permission, regardless of stored data
       const superAdmin = cloudData.roleConfig.roles.find(r => r.key === 'admin');
@@ -680,6 +691,9 @@ async function loadCoreData() {
     // Load M0 records (manual overrides for M0 board)
     const m0Data = m0Res.ok ? await m0Res.json() : null;
     cloudData.m0Records = (m0Data && typeof m0Data === 'object') ? m0Data : {};
+    // Load performance records (sales performance scoring data)
+    const prData = prRes.ok ? await prRes.json() : null;
+    cloudData.performanceRecords = (prData && typeof prData === 'object') ? prData : {};
     // Ensure m0Config exists (team-shared M0 calculation scope)
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
@@ -695,9 +709,14 @@ async function loadCoreData() {
     cloudData.visitConfig = JSON.parse(JSON.stringify(DEFAULT_VISIT_CONFIG));
     cloudData.gradeRecords = {};
     cloudData.m0Records = {};
+    cloudData.performanceRecords = {};
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
     }
+    if (!cloudData.formConfig.performanceConfig || typeof cloudData.formConfig.performanceConfig !== 'object') {
+      cloudData.formConfig.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
+    }
+    if (!cloudData.formConfig.performanceBase || typeof cloudData.formConfig.performanceBase !== 'object') cloudData.formConfig.performanceBase = {};
   }
 }
 
@@ -988,7 +1007,7 @@ function navTo(page) {
   const cb = document.getElementById('contentBody');
   cb.className = 'content-body';
   // Check page permission (dashboard and settings are always allowed)
-  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade'];
+  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf'];
   if (restrictedPages.includes(page) && !hasPermission(page)) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面，请联系管理员。</div>';
     closeSidebar();
@@ -996,9 +1015,9 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板'};
+  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
-  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade}[page]||(()=>{}))();
+  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf}[page]||(()=>{}))();
   closeSidebar();
   // Background refresh: silently fetch latest data (non-blocking, only for read-only pages)
   silentRefresh(page);
@@ -1009,7 +1028,7 @@ async function silentRefresh(page) {
   if (bgRefreshInFlight) return;
   if (Date.now() - lastRefreshTime < REFRESH_INTERVAL) return;
   // Only background-refresh read-only pages (not forms with user input)
-  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard','salesGrade'].includes(page)) return;
+  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard','salesGrade','salesPerf'].includes(page)) return;
   bgRefreshInFlight = true;
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
@@ -1036,7 +1055,7 @@ async function silentRefresh(page) {
       cloudData.salesRecords = newSales;
       const activePage = document.querySelector('.nav-item.active')?.dataset.page;
       if (activePage === page) {
-        ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade}[page]||(()=>{}))();
+        ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf}[page]||(()=>{}))();
       }
     }
   } catch(e) { /* silent fail */ }
@@ -1097,7 +1116,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: true, deleteOthers: true, exportData: true,
         brandConfig: true, aiConfig: true,
         visitData: true, visitStats: true, mgrReport: true,
-        salesDetail: true, salesBoard: true, salesGrade: true
+        salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true
       }
     },
     {
@@ -1110,7 +1129,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: true, deleteOthers: false, exportData: true,
         brandConfig: false, aiConfig: false,
         visitData: true, visitStats: true, mgrReport: true,
-        salesDetail: true, salesBoard: true, salesGrade: true
+        salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true
       }
     },
     {
@@ -1123,7 +1142,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
         visitData: false, visitStats: false, mgrReport: false,
-        salesDetail: true, salesBoard: true, salesGrade: true
+        salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true
       }
     },
     {
@@ -1136,7 +1155,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
         visitData: false, visitStats: false, mgrReport: false,
-        salesDetail: false, salesBoard: true, salesGrade: true
+        salesDetail: false, salesBoard: true, salesGrade: true, salesPerf: true
       }
     }
   ]
@@ -1150,11 +1169,11 @@ const PERMISSION_LABELS = {
   roleConfig: '角色权限配置', settings: '设置',
   editOthers: '编辑他人数据', deleteOthers: '删除他人数据', exportData: '导出数据',
   brandConfig: '品牌配置', aiConfig: 'AI模型配置',
-  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报', salesDetail: '业绩明细', salesBoard: '业绩看板', salesGrade: '销售评级看板'
+  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报', salesDetail: '业绩明细', salesBoard: '业绩看板', salesGrade: '销售评级看板', salesPerf: '销售绩效统计'
 };
 
 const PERMISSION_GROUPS = [
-  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade'] },
+  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf'] },
   { title: '管理功能', keys: ['userManagement','formConfig','aiChat','roleConfig','settings','brandConfig','aiConfig'] },
   { title: '数据操作', keys: ['editOthers','deleteOthers','exportData'] }
 ];
@@ -1278,7 +1297,21 @@ const DEFAULT_FORM_CONFIG = {
     { name: '高级销售', promote: 600000, demote: 400000 }
   ],
   // 团队月目标：{ [年份]: { [团队/门店]: { '01'..'12': 目标金额 } } }。用于报表看板2·团队业绩统计的月目标完成率计算，支持报表导入。
-  teamTargets: {}
+  teamTargets: {},
+  // 销售绩效统计配置
+  performanceConfig: {
+    // 考核项权重（总和应为100）
+    weights: { demo: 70, effective: 10, channel: 10, newMedia: 10 },
+    // 默认目标值（可被单月看板中每行覆盖）
+    targets: { demo: 10, effective: 75, channel: 1, newMedia: 8 },
+    // 加分项：name=显示名，points=单项分值
+    bonusList: [
+      { key: 'roleModelAward', name: '个人获奖', points: 10 },
+      { key: 'roleModelNominee', name: '参评', points: 2 }
+    ]
+  },
+  // 绩效基数：按销售职级（gradeConfig.name）设置，最终基数 = 配置值 × 当月在职天数/30
+  performanceBase: {}
 };
 
 function getChannels(type) {
@@ -4485,6 +4518,7 @@ function renderFormConfig() {
       <div class="summary-tab ${configTab==='signinEvents'?'active':''}" onclick="switchConfigTab('signinEvents')">签到事件配置</div>
       <div class="summary-tab ${configTab==='customerTags'?'active':''}" onclick="switchConfigTab('customerTags')">客户标签配置</div>
       <div class="summary-tab ${configTab==='gradeConfig'?'active':''}" onclick="switchConfigTab('gradeConfig')">评级标准配置</div>
+      <div class="summary-tab ${configTab==='performance'?'active':''}" onclick="switchConfigTab('performance')">绩效配置</div>
     </div>
     <div id="configContent"></div>
     <div style="margin-top:12px;font-size:12px;color:var(--gray-500)">
@@ -4671,6 +4705,67 @@ function renderConfigContent() {
     `;
     return;
   }
+  // ===== 绩效配置 tab（销售绩效统计）=====
+  if (configTab === 'performance') {
+    const cfg = cloudData.formConfig.performanceConfig || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
+    const w = cfg.weights || DEFAULT_FORM_CONFIG.performanceConfig.weights;
+    const t = cfg.targets || DEFAULT_FORM_CONFIG.performanceConfig.targets;
+    const bl = cfg.bonusList || DEFAULT_FORM_CONFIG.performanceConfig.bonusList;
+    const levels = (cloudData.formConfig.gradeConfig || DEFAULT_FORM_CONFIG.gradeConfig).map(l => l.name);
+    const baseMap = cloudData.formConfig.performanceBase || {};
+    c.innerHTML = `
+      <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
+        配置销售绩效统计的<b>权重、默认目标、加分项</b>以及<b>各职级的绩效基数</b>。保存后立即生效；单月看板中每行的目标值可在此基础上单独覆盖。
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>考核项权重与默认目标</h4><span style="font-size:12px;color:var(--gray-500)">权重总和建议为100；目标值可在单月看板按行覆盖</span></div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:14px;margin-bottom:14px">
+            <div class="form-group" style="margin-bottom:0"><label>演示考核权重(%)</label><input type="number" class="form-control" value="${w.demo}" onchange="updatePerfConfig('weights','demo',parseFloat(this.value)||0)" placeholder="70"></div>
+            <div class="form-group" style="margin-bottom:0"><label>有效建联权重(%)</label><input type="number" class="form-control" value="${w.effective}" onchange="updatePerfConfig('weights','effective',parseFloat(this.value)||0)" placeholder="10"></div>
+            <div class="form-group" style="margin-bottom:0"><label>渠道权重(%)</label><input type="number" class="form-control" value="${w.channel}" onchange="updatePerfConfig('weights','channel',parseFloat(this.value)||0)" placeholder="10"></div>
+            <div class="form-group" style="margin-bottom:0"><label>新媒体权重(%)</label><input type="number" class="form-control" value="${w.newMedia}" onchange="updatePerfConfig('weights','newMedia',parseFloat(this.value)||0)" placeholder="10"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:14px">
+            <div class="form-group" style="margin-bottom:0"><label>演示默认目标</label><input type="number" class="form-control" value="${t.demo}" onchange="updatePerfConfig('targets','demo',parseFloat(this.value)||0)" placeholder="10"></div>
+            <div class="form-group" style="margin-bottom:0"><label>有效建联默认目标</label><input type="number" class="form-control" value="${t.effective}" onchange="updatePerfConfig('targets','effective',parseFloat(this.value)||0)" placeholder="75"></div>
+            <div class="form-group" style="margin-bottom:0"><label>渠道默认目标</label><input type="number" class="form-control" value="${t.channel}" onchange="updatePerfConfig('targets','channel',parseFloat(this.value)||0)" placeholder="1"></div>
+            <div class="form-group" style="margin-bottom:0"><label>新媒体默认目标</label><input type="number" class="form-control" value="${t.newMedia}" onchange="updatePerfConfig('targets','newMedia',parseFloat(this.value)||0)" placeholder="8"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>加分项配置</h4><span style="font-size:12px;color:var(--gray-500)">在单月绩效看板中可勾选/输入次数，自动累加对应分值</span></div>
+        <div class="card-body">
+          <div id="perfBonusList">
+            ${bl.map((b, i) => `
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                <span class="badge badge-gray" style="font-size:12px">${i + 1}</span>
+                <input type="text" class="form-control" value="${b.name.replace(/"/g,'&quot;')}" onchange="updatePerfBonus(${i}, 'name', this.value)" style="flex:1;min-width:120px;max-width:200px" placeholder="如：个人获奖">
+                <input type="number" class="form-control" value="${b.points}" onchange="updatePerfBonus(${i}, 'points', parseFloat(this.value)||0)" style="width:110px" placeholder="分值">
+                <button class="btn btn-danger btn-sm" onclick="deletePerfBonus(${i})">删除</button>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn btn-outline" style="width:100%;padding:10px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addPerfBonus()">添加加分项</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>职级绩效基数</h4><span style="font-size:12px;color:var(--gray-500)">最终基数 = 配置值 × 当月在职天数 / 30；读取自「评级标准配置」中的级别名称</span></div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:14px">
+            ${levels.map((lv, i) => `
+              <div class="form-group" style="margin-bottom:0">
+                <label>${lv}</label>
+                <input type="number" class="form-control" value="${baseMap[lv] || 0}" onchange="updatePerfBase(${JSON.stringify(lv)}, parseFloat(this.value)||0)" placeholder="0">
+              </div>
+            `).join('')}
+          </div>
+          <div style="font-size:12px;color:var(--gray-500);margin-top:10px">若新增/修改了级别名称，请先保存「评级标准配置」再刷新本页。</div>
+        </div>
+      </div>`;
+    return;
+  }
   // ===== 日报/周报配置 tab =====
   const channels = getChannels(configTab);
   c.innerHTML = channels.map((ch, idx) => {
@@ -4823,6 +4918,35 @@ function addGradeLevel() {
 function deleteGradeLevel(i) {
   if (!confirm('确定删除此级别吗？')) return;
   if (cloudData.formConfig.gradeConfig) cloudData.formConfig.gradeConfig.splice(i, 1);
+  renderConfigContent();
+}
+
+// ===== 绩效配置 编辑助手 =====
+function updatePerfConfig(section, key, value) {
+  if (!cloudData.formConfig.performanceConfig) cloudData.formConfig.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
+  if (!cloudData.formConfig.performanceConfig[section]) cloudData.formConfig.performanceConfig[section] = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig[section]));
+  cloudData.formConfig.performanceConfig[section][key] = value;
+}
+function updatePerfBase(levelName, value) {
+  if (!cloudData.formConfig.performanceBase) cloudData.formConfig.performanceBase = {};
+  cloudData.formConfig.performanceBase[levelName] = value;
+}
+function updatePerfBonus(i, field, value) {
+  if (!cloudData.formConfig.performanceConfig) cloudData.formConfig.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
+  const list = cloudData.formConfig.performanceConfig.bonusList || DEFAULT_FORM_CONFIG.performanceConfig.bonusList;
+  if (list[i]) list[i][field] = value;
+}
+function addPerfBonus() {
+  if (!cloudData.formConfig.performanceConfig) cloudData.formConfig.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
+  if (!cloudData.formConfig.performanceConfig.bonusList) cloudData.formConfig.performanceConfig.bonusList = [];
+  cloudData.formConfig.performanceConfig.bonusList.push({ key: 'bonus_' + Date.now(), name: '新加分项', points: 0 });
+  renderConfigContent();
+}
+function deletePerfBonus(i) {
+  if (!confirm('确定删除此加分项吗？')) return;
+  if (cloudData.formConfig.performanceConfig && cloudData.formConfig.performanceConfig.bonusList) {
+    cloudData.formConfig.performanceConfig.bonusList.splice(i, 1);
+  }
   renderConfigContent();
 }
 
@@ -8813,6 +8937,270 @@ function exportSalesGradeSingle() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '单月评级');
   XLSX.writeFile(wb, `单月评级看板_${year}_${month}月.xlsx`);
+}
+
+
+// ===== 销售绩效统计 =====
+let perfTab = 'matrix';
+let perfYear = '';
+let perfMonthFrom = 1;
+let perfMonthTo = 12;
+let perfSingleMonth = (new Date().getMonth() + 1);
+
+function perfKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
+
+function getPerfConfig() {
+  return (cloudData.formConfig && cloudData.formConfig.performanceConfig) || DEFAULT_FORM_CONFIG.performanceConfig;
+}
+
+function getPerfBase(level) {
+  const map = (cloudData.formConfig && cloudData.formConfig.performanceBase) || {};
+  return map[level] || 0;
+}
+
+function buildSalesBaseForYear(year) {
+  const base = {};
+  (cloudData.salesRecords || []).forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== String(year)) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    const m = parseInt(dm.slice(5, 7), 10);
+    if (!(m >= 1 && m <= 12)) return;
+    if (!base[sp]) base[sp] = {};
+    base[sp][m] = (base[sp][m] || 0) + toNum(r.amount);
+  });
+  return base;
+}
+
+function getSalesLevel(year, sp, m, baseMap) {
+  const bm = baseMap || buildSalesBaseForYear(year);
+  const b = bm[sp] || {};
+  let roll = 0;
+  for (let k = Math.max(1, m - 2); k <= m; k++) roll += (b[k] || 0);
+  const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+  const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, sp, m)]) || {};
+  return rec.grade || autoGrade(roll, levels);
+}
+
+function getSalesTeam(sp) {
+  const u = (cloudData.users || []).find(x => x.name === sp);
+  if (u && u.department) return u.department;
+  const teams = (cloudData.salesRecords || []).filter(r => (r.salesperson || '').trim() === sp).map(r => r.team).filter(Boolean);
+  return teams[0] || '';
+}
+
+function countSelfDemo(year, month, sp) {
+  const cats = (cloudData.formConfig.signinCategories || []).filter(c => c.name && (c.name.indexOf('自拓') >= 0 || c.name.indexOf('演示') >= 0));
+  const events = new Set();
+  cats.forEach(c => (c.events || []).forEach(e => events.add(e)));
+  if (!events.size) {
+    (cloudData.formConfig.signinEvents || []).forEach(e => {
+      if (e && (e.indexOf('自拓') >= 0 || e.indexOf('演示') >= 0)) events.add(e);
+    });
+  }
+  let count = 0;
+  (cloudData.visitRecords || []).forEach(r => {
+    if ((r.salesperson || '').trim() !== sp) return;
+    const vd = r.visitDate || '';
+    if (!vd || vd.slice(0, 4) !== String(year) || parseInt(vd.slice(5, 7), 10) !== month) return;
+    if (events.has(r.signinEvent)) count++;
+  });
+  return count;
+}
+
+function getPerfRecord(year, sp, m) {
+  const cfg = getPerfConfig();
+  const k = perfKey(year, sp, m);
+  const stored = (cloudData.performanceRecords && cloudData.performanceRecords[k]) || {};
+  const defaults = {
+    demoTarget: (cfg.targets && cfg.targets.demo) || 0,
+    demoActual: countSelfDemo(year, m, sp),
+    effectiveActual: 0,
+    channelActual: 0,
+    newMediaActual: 0,
+    workingDays: 30,
+    comment: ''
+  };
+  (cfg.bonusList || []).forEach(b => { defaults['bonus_' + b.key] = 0; });
+  return Object.assign({}, defaults, stored);
+}
+
+function computePerfScore(rec, cfg) {
+  const w = cfg.weights || {};
+  const t = cfg.targets || {};
+  const demoScore = t.demo ? Math.min(100, (rec.demoActual / t.demo) * 100) : 0;
+  const effScore = t.effective ? Math.min(100, (rec.effectiveActual / t.effective) * 100) : 0;
+  const chScore = t.channel ? Math.min(100, (rec.channelActual / t.channel) * 100) : 0;
+  const nmScore = t.newMedia ? Math.min(100, (rec.newMediaActual / t.newMedia) * 100) : 0;
+  let bonus = 0;
+  (cfg.bonusList || []).forEach(b => {
+    bonus += (parseFloat(rec['bonus_' + b.key]) || 0) * (b.points || 0);
+  });
+  const score = demoScore * (w.demo || 0) / 100 + effScore * (w.effective || 0) / 100 + chScore * (w.channel || 0) / 100 + nmScore * (w.newMedia || 0) / 100 + bonus;
+  return { demoScore, effScore, chScore, nmScore, bonus, score };
+}
+
+function savePerfByKey(key, patch) {
+  if (!cloudData.performanceRecords) cloudData.performanceRecords = {};
+  cloudData.performanceRecords[key] = Object.assign({}, cloudData.performanceRecords[key] || {}, patch);
+  apiUpdate('performanceRecords', key, cloudData.performanceRecords[key]).catch(e => showToast('保存绩效数据失败: ' + e.message, 'error'));
+}
+
+function renderSalesPerf() {
+  const records = cloudData.salesRecords || [];
+  const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  if (!perfYear) perfYear = year;
+  const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === perfYear ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${perfYear}">${perfYear}</option>`;
+  const isMatrix = perfTab === 'matrix';
+  document.getElementById('contentBody').innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <h4>销售绩效统计</h4>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm ${isMatrix?'btn-primary':'btn-outline'}" onclick="perfTab='matrix';renderSalesPerf()">绩效看板矩阵</button>
+            <button class="btn btn-sm ${!isMatrix?'btn-primary':'btn-outline'}" onclick="perfTab='single';renderSalesPerf()">销售单月绩效看板</button>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="filter-bar">
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="perfYear" onchange="perfYear=this.value;perfRefresh()">${yearOpts}</select></div>
+          ${isMatrix ? `
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="perfMFrom" onchange="perfMonthFrom=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="perfMTo" onchange="perfMonthTo=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfMonthTo?'selected':''}>${m}月</option>`).join('')}</select></div>
+          ` : `
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="perfMonth" onchange="perfSingleMonth=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <button class="btn btn-outline btn-sm" onclick="refreshPerfSingle()">刷新计算</button>
+          `}
+        </div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：矩阵展示每位在职销售每月的销售职级（联动销售评级看板）与绩效评分。' : '说明：单月绩效看板中可编辑考核要求、完成情况、其他考核项、加分项、在职天数、总评；完成情况默认取自拜访数据「自拓演示」归类统计，可手动修正；绩效评分与绩效基数由公式实时计算（点击「刷新计算」更新）。'}</div>
+        <div class="table-wrap"><table id="perfTable"></table></div>
+      </div>
+    </div>`;
+  if (document.getElementById('perfYear')) document.getElementById('perfYear').value = perfYear;
+  perfRefresh();
+}
+
+function perfRefresh() {
+  if (perfTab === 'single') refreshPerfSingle();
+  else refreshPerfMatrix();
+}
+
+function refreshPerfMatrix() {
+  const year = document.getElementById('perfYear') ? document.getElementById('perfYear').value : perfYear;
+  perfYear = year;
+  if (perfMonthFrom > perfMonthTo) perfMonthFrom = perfMonthTo;
+  const statusMap = buildUserStatusMap();
+  const records = cloudData.salesRecords || [];
+  const spSet = new Set();
+  records.forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    if (statusMap[sp] !== '在职') return;
+    spSet.add(sp);
+  });
+  const months = [];
+  for (let m = perfMonthFrom; m <= perfMonthTo; m++) months.push(m);
+  const rows = [...spSet].sort((a, b) => a.localeCompare(b, 'zh')).map(sp => ({ sp }));
+  const cfg = getPerfConfig();
+  const baseMap = buildSalesBaseForYear(year);
+
+  let h = '<thead><tr><th>销售</th>';
+  months.forEach(m => { h += `<th class="num">${m}月</th>`; });
+  h += '</tr></thead><tbody>';
+  rows.forEach(row => {
+    h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
+    months.forEach(m => {
+      const level = getSalesLevel(year, row.sp, m, baseMap);
+      const rec = getPerfRecord(year, row.sp, m);
+      const score = computePerfScore(rec, cfg).score;
+      h += `<td class="num" style="text-align:center"><div>${level || '—'}</div><div style="color:var(--primary);font-weight:600">${score.toFixed(2)}</div></td>`;
+    });
+    h += '</tr>';
+  });
+  if (!rows.length) h += `<tr><td colspan="${months.length + 1}" style="text-align:center;color:var(--gray-400);padding:24px">本年度暂无在职销售的绩效数据</td></tr>`;
+  h += '</tbody>';
+  const tbl = document.getElementById('perfTable');
+  if (tbl) tbl.innerHTML = h;
+}
+
+function refreshPerfSingle() {
+  const year = document.getElementById('perfYear') ? document.getElementById('perfYear').value : perfYear;
+  perfYear = year;
+  const month = document.getElementById('perfMonth') ? parseInt(document.getElementById('perfMonth').value, 10) : perfSingleMonth;
+  perfSingleMonth = month;
+  const statusMap = buildUserStatusMap();
+  const records = cloudData.salesRecords || [];
+  const spSet = new Set();
+  records.forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    if (statusMap[sp] !== '在职') return;
+    spSet.add(sp);
+  });
+  const rows = [...spSet].sort((a, b) => a.localeCompare(b, 'zh')).map(sp => ({ sp, team: getSalesTeam(sp) }));
+  const cfg = getPerfConfig();
+  const bonusList = cfg.bonusList || [];
+  const baseMap = buildSalesBaseForYear(year);
+  const otherWeight = (cfg.weights.effective || 0) + (cfg.weights.channel || 0) + (cfg.weights.newMedia || 0);
+
+  let h = '<thead><tr>';
+  h += '<th rowspan="2" style="text-align:left;width:100px">销售</th>';
+  h += '<th rowspan="2" style="text-align:left;width:120px">团队</th>';
+  h += `<th colspan="3" style="text-align:center;background:#FAEEDA">演示考核（占${cfg.weights.demo || 0}%）</th>`;
+  h += `<th colspan="3" style="text-align:center;background:#E6F1FB">其他考核项（占${otherWeight}%）</th>`;
+  h += `<th colspan="${bonusList.length}" style="text-align:center;background:#EAF3DE">加分项</th>`;
+  h += '<th rowspan="2" style="text-align:center;width:70px">当月在职天数</th>';
+  h += '<th rowspan="2" style="text-align:center;width:80px">当月销售职级</th>';
+  h += '<th rowspan="2" style="text-align:center;width:70px">绩效评分</th>';
+  h += '<th rowspan="2" style="text-align:center;min-width:160px">总评</th>';
+  h += '<th rowspan="2" style="text-align:center;width:80px">绩效基数</th>';
+  h += '</tr><tr>';
+  h += '<th style="background:#FAEEDA">考核要求</th><th style="background:#FAEEDA">完成情况</th><th style="background:#FAEEDA">得分</th>';
+  h += `<th style="background:#E6F1FB">有效建联${cfg.weights.effective || 0}%</th>`;
+  h += `<th style="background:#E6F1FB">渠道${cfg.weights.channel || 0}%</th>`;
+  h += `<th style="background:#E6F1FB">新媒体${cfg.weights.newMedia || 0}%</th>`;
+  bonusList.forEach(b => { h += `<th style="background:#EAF3DE">${esc(b.name)}</th>`; });
+  h += '</tr></thead><tbody>';
+
+  rows.forEach(row => {
+    const rec = getPerfRecord(year, row.sp, month);
+    const scores = computePerfScore(rec, cfg);
+    const level = getSalesLevel(year, row.sp, month, baseMap);
+    const base = getPerfBase(level) * (rec.workingDays || 30) / 30;
+    const k = perfKey(year, row.sp, month);
+    h += `<tr>`;
+    h += `<td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`;
+    h += `<td>${esc(row.team)}</td>`;
+    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.demoTarget}" onchange="savePerfByKey('${k}', {demoTarget:parseFloat(this.value)||0})" style="width:70px"></td>`;
+    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.demoActual}" onchange="savePerfByKey('${k}', {demoActual:parseFloat(this.value)||0})" style="width:70px"></td>`;
+    h += `<td style="text-align:center;font-weight:600">${scores.demoScore.toFixed(1)}</td>`;
+    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.effectiveActual}" onchange="savePerfByKey('${k}', {effectiveActual:parseFloat(this.value)||0})" style="width:70px"></td>`;
+    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.channelActual}" onchange="savePerfByKey('${k}', {channelActual:parseFloat(this.value)||0})" style="width:70px"></td>`;
+    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.newMediaActual}" onchange="savePerfByKey('${k}', {newMediaActual:parseFloat(this.value)||0})" style="width:70px"></td>`;
+    bonusList.forEach(b => {
+      const bk = 'bonus_' + b.key;
+      h += `<td><input type="number" class="form-control form-control-sm" value="${rec[bk] || 0}" onchange="savePerfByKey('${k}', {${JSON.stringify(bk)}:parseFloat(this.value)||0})" style="width:60px"></td>`;
+    });
+    h += `<td><input type="number" class="form-control form-control-sm" value="${rec.workingDays}" onchange="savePerfByKey('${k}', {workingDays:parseInt(this.value,10)||30})" style="width:70px"></td>`;
+    h += `<td style="text-align:center">${level || '—'}</td>`;
+    h += `<td style="text-align:center;color:var(--primary);font-weight:600">${scores.score.toFixed(2)}</td>`;
+    h += `<td><input type="text" class="form-control form-control-sm" value="${(rec.comment || '').replace(/"/g,'&quot;')}" onchange="savePerfByKey('${k}', {comment:this.value})" placeholder="评语"></td>`;
+    h += `<td style="text-align:center">${fmtSalesMoney(base)}</td>`;
+    h += `</tr>`;
+  });
+  if (!rows.length) h += `<tr><td colspan="${9 + bonusList.length}" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售</td></tr>`;
+  h += '</tbody>';
+  const tbl = document.getElementById('perfTable');
+  if (tbl) tbl.innerHTML = h;
 }
 
 
