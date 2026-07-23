@@ -432,6 +432,11 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 .dyoy-th{width:140px;min-width:140px}
 .dyoy-cell{white-space:normal}
 .dyoy-sub{font-size:11px;color:var(--gray-500);line-height:1.4;margin-top:1px}
+/* 动态同比口径切换（分段按钮） */
+.seg-toggle{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;height:34px}
+.seg-toggle .seg-btn{background:var(--gray-50);border:none;padding:0 14px;font-size:12px;cursor:pointer;color:var(--gray-600);white-space:nowrap}
+.seg-toggle .seg-btn:hover{background:var(--gray-100)}
+.seg-toggle .seg-btn.active{background:var(--primary);color:#fff;font-weight:600}
 #sbBoard2 td,#sbBoard2 th{padding-left:8px;padding-right:8px}
 .sort-th{cursor:pointer;user-select:none;white-space:nowrap}
 .sort-th:hover{background:var(--gray-100)}
@@ -7854,6 +7859,7 @@ let salesDetailFilters = { start:'', end:'', team:'', salesperson:'', customer:'
 const selectedSalesIds = new Set();
 let sbSortState = {};          // 各看板独立排序状态：{ [tid]: { col: 'total'|'YYYY-MM', dir: 'asc'|'desc' } }，避免看板间排序联动
 let sbLastYearTeamMap = {};    // 团队 -> { 'YYYY-MM': 金额 }（上一年，用于同比）
+let sbDynMode = 'year';        // 动态同比口径：'year'=年初(01)累计到结束月；'range'=仅当前显示区间(起始月→结束月)
 let sbTargetDraft = {};        // 团队月目标编辑草稿：{ 团队: { '01'..'12': 金额 } }
 let sbTargetDraftYear = '';    // 当前草稿所属年份
 let sbTargetTeams = [];        // 目标编辑表的团队顺序（用于按行索引更新）
@@ -8343,6 +8349,14 @@ async function batchDeleteSales() {
 function monthOpts() { let s = ''; for (let m = 1; m <= 12; m++) { const v = String(m).padStart(2, '0'); s += `<option value="${v}">${v}月</option>`; } return s; }
 function sbSyncTo() { const f = document.getElementById('sbMFrom'), t = document.getElementById('sbMTo'); if (+f.value > +t.value) t.value = f.value; }
 function sbReset() { document.getElementById('sbMFrom').value = '01'; document.getElementById('sbMTo').value = '12'; renderSalesBoards(); }
+function sbSetDynMode(mode) {
+  if (sbDynMode === mode) return;
+  sbDynMode = mode;
+  const yb = document.getElementById('segDynYear'), rb = document.getElementById('segDynRange');
+  if (yb) yb.classList.toggle('active', mode === 'year');
+  if (rb) rb.classList.toggle('active', mode === 'range');
+  refreshSalesBoardStats();
+}
 function sbMonthList() { const y = document.getElementById('sbYear').value; const mf = document.getElementById('sbMFrom').value, mt = document.getElementById('sbMTo').value; const out = []; for (let m = +mf; m <= +mt; m++) out.push(y + '-' + String(m).padStart(2, '0')); return out; }
 
 let salesBoardTab = 'stats';
@@ -8392,6 +8406,12 @@ function renderSalesBoardStats() {
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="sbYear" onchange="refreshSalesBoardStats()">${yearOpts}</select></div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="sbMFrom" onchange="sbSyncTo();refreshSalesBoardStats()">${monthOpts()}</select></div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="sbMTo" onchange="refreshSalesBoardStats()">${monthOpts()}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">动态同比口径</label>
+          <div class="seg-toggle">
+            <button type="button" id="segDynYear" class="seg-btn ${sbDynMode==='year'?'active':''}" onclick="sbSetDynMode('year')">年初累计</button>
+            <button type="button" id="segDynRange" class="seg-btn ${sbDynMode==='range'?'active':''}" onclick="sbSetDynMode('range')">区间累计</button>
+          </div>
+        </div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="sbReset()">重置为全年</button></div>
       </div></div>
     </div>
@@ -9153,14 +9173,15 @@ function renderSalesBoardTable(tid, key) {
     return row;
   });
   const sbYearVal = document.getElementById('sbYear') ? document.getElementById('sbYear').value : '';
-  // 动态同比：年初(01) → 当前显示范围的结束月（sbMTo），今年累计 vs 去年同区间累计
+  // 动态同比口径：'year'=年初(01)累计到结束月；'range'=仅当前显示区间(起始月→结束月)
   const sbEndM = parseInt((document.getElementById('sbMTo') ? document.getElementById('sbMTo').value : '12'), 10) || 12;
+  const sbStartM = sbDynMode === 'year' ? 1 : (parseInt((document.getElementById('sbMFrom') ? document.getElementById('sbMFrom').value : '1'), 10) || 1);
   const sbCumThis = {};
   cloudData.salesRecords.forEach(r => {
     const dm = r.docMonth || '';
     if (dm.slice(0, 4) !== sbYearVal) return;
     const mm = parseInt(dm.slice(5), 10);
-    if (!(mm >= 1 && mm <= sbEndM)) return;
+    if (!(mm >= sbStartM && mm <= sbEndM)) return;
     const k = r[key] || '(未分类)';
     sbCumThis[k] = (sbCumThis[k] || 0) + toNum(r.amount);
   });
@@ -9168,7 +9189,7 @@ function renderSalesBoardTable(tid, key) {
   const sbCumLast = {};
   Object.keys(sbLastYearTeamMap).forEach(k => {
     let s = 0;
-    for (let mm = 1; mm <= sbEndM; mm++) s += (sbLastYearTeamMap[k][sbLy + '-' + String(mm).padStart(2, '0')] || 0);
+    for (let mm = sbStartM; mm <= sbEndM; mm++) s += (sbLastYearTeamMap[k][sbLy + '-' + String(mm).padStart(2, '0')] || 0);
     sbCumLast[k] = s;
   });
   rowsArr.forEach(row => {
@@ -9200,7 +9221,7 @@ function renderSalesBoardTable(tid, key) {
   h += `<th class="num sort-th${totAct}" onclick="sbSortBy('total', '${tid}')">合计<span class="sort-ind${totAct}">${totInd}</span></th>`;
   const dynInd = sbSortCol === 'dynyoy' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
   const dynAct = sbSortCol === 'dynyoy' ? ' active' : '';
-  h += `<th class="dyoy-th num sort-th${dynAct}" onclick="sbSortBy('dynyoy', '${tid}')">动态同比<span style="font-size:10px;font-weight:400;color:var(--gray-400)"> 年初→${sbEndM}月</span><span class="sort-ind${dynAct}">${dynInd}</span></th></tr></thead><tbody>`;
+  h += `<th class="dyoy-th num sort-th${dynAct}" onclick="sbSortBy('dynyoy', '${tid}')">动态同比<span style="font-size:10px;font-weight:400;color:var(--gray-400)"> ${sbDynMode === 'year' ? '年初' : '区间'}→${sbStartM}–${sbEndM}月</span><span class="sort-ind${dynAct}">${dynInd}</span></th></tr></thead><tbody>`;
   const colTot = {};
   rowsArr.forEach(row => {
     const label = key === 'team' ? `<span class="badge badge-team">${esc(row.k)}</span>` : (esc(row.k) + userStatusBadge(row.k, userMap));
@@ -9433,15 +9454,16 @@ function exportSalesBoard2() {
   const year = document.getElementById('sbYear') ? document.getElementById('sbYear').value : new Date().getFullYear().toString();
   const months = sbMonthList();
   const sbEndM = parseInt((document.getElementById('sbMTo') ? document.getElementById('sbMTo').value : '12'), 10) || 12;
+  const sbStartM = sbDynMode === 'year' ? 1 : (parseInt((document.getElementById('sbMFrom') ? document.getElementById('sbMFrom').value : '1'), 10) || 1);
   const targets = (cloudData.formConfig.teamTargets && cloudData.formConfig.teamTargets[year]) || {};
   const map = {};
   cloudData.salesRecords.forEach(r => { const dm = r.docMonth || ''; if (!months.includes(dm)) return; const k = r.team || '(未分类)'; if (!map[k]) map[k] = {}; map[k][dm] = (map[k][dm] || 0) + toNum(r.amount); });
-  // 动态同比累计（年初→sbEndM）
+  // 动态同比累计（按 sbDynMode 口径：year=年初01→sbEndM；range=sbStartM→sbEndM）
   const sbCumThis = {};
-  cloudData.salesRecords.forEach(r => { const dm = r.docMonth || ''; if (dm.slice(0, 4) !== year) return; const mm = parseInt(dm.slice(5), 10); if (!(mm >= 1 && mm <= sbEndM)) return; const k = r.team || '(未分类)'; sbCumThis[k] = (sbCumThis[k] || 0) + toNum(r.amount); });
+  cloudData.salesRecords.forEach(r => { const dm = r.docMonth || ''; if (dm.slice(0, 4) !== year) return; const mm = parseInt(dm.slice(5), 10); if (!(mm >= sbStartM && mm <= sbEndM)) return; const k = r.team || '(未分类)'; sbCumThis[k] = (sbCumThis[k] || 0) + toNum(r.amount); });
   const sbLy = String(parseInt(year, 10) - 1);
   const sbCumLast = {};
-  Object.keys(sbLastYearTeamMap).forEach(k => { let s = 0; for (let mm = 1; mm <= sbEndM; mm++) s += (sbLastYearTeamMap[k][sbLy + '-' + String(mm).padStart(2, '0')] || 0); sbCumLast[k] = s; });
+  Object.keys(sbLastYearTeamMap).forEach(k => { let s = 0; for (let mm = sbStartM; mm <= sbEndM; mm++) s += (sbLastYearTeamMap[k][sbLy + '-' + String(mm).padStart(2, '0')] || 0); sbCumLast[k] = s; });
   const rows = Object.keys(map).map(k => {
     let t = 0; months.forEach(m => t += (map[k][m] || 0));
     const dt = sbCumThis[k] || 0, dl = sbCumLast[k] || 0;
@@ -9451,7 +9473,8 @@ function exportSalesBoard2() {
   if (!rows.length) { showToast('当前无数据可导出', 'error'); return; }
   const pct = (a, b) => b > 0 ? (Math.round(a / b * 1000) / 10 + '%') : '—';
   const dyPct = dy => dy == null ? '—' : (Math.round(dy * 10) / 10 + '%');
-  const header1 = ['团队/门店']; months.forEach(m => { header1.push(parseInt(m.slice(5), 10) + '月'); header1.push(''); header1.push(''); }); header1.push('合计'); header1.push(''); header1.push(''); header1.push('动态同比(年初→' + sbEndM + '月)'); header1.push(''); header1.push('');
+  const dyLabel = sbDynMode === 'year' ? ('动态同比(年初→' + sbEndM + '月)') : ('动态同比(区间' + sbStartM + '–' + sbEndM + '月)');
+  const header1 = ['团队/门店']; months.forEach(m => { header1.push(parseInt(m.slice(5), 10) + '月'); header1.push(''); header1.push(''); }); header1.push('合计'); header1.push(''); header1.push(''); header1.push(dyLabel); header1.push(''); header1.push('');
   const header2 = ['']; months.forEach(() => { header2.push('业绩'); header2.push('目标'); header2.push('完成率'); }); header2.push('业绩'); header2.push('目标'); header2.push('完成率'); header2.push('今年累计'); header2.push('去年累计'); header2.push('同比');
   const aoa = [header1, header2];
   const colAct = {}, colTgt = {};
