@@ -457,6 +457,25 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
 .source-summary-table tbody td:first-child{background:var(--gray-50);font-weight:600}
 .month-chip-all { border-style: dashed; }
 .month-chip-all.active { background: var(--gray-500); border-color: var(--gray-500); }
+/* Dashboard new cards (当月漏交日历 / 上月销冠 / 上周拜访冠军) */
+.dash-new-grid{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:16px;margin-bottom:20px}
+.dash-new-card{background:#fff;border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:240px}
+.dash-new-card-title{font-size:14px;font-weight:600;color:var(--gray-700);margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.missed-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.missed-cal-h{text-align:center;font-size:11px;color:var(--gray-500);font-weight:600;padding:4px 0}
+.missed-cal-cell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:13px;border-radius:6px;background:#f9fafb;color:var(--gray-700);font-weight:500;position:relative}
+.missed-cal-cell.empty{background:transparent;box-shadow:none}
+.missed-cal-cell.missed{background:#fee2e2;color:#dc2626;font-weight:700;box-shadow:inset 0 0 0 1px #fecaca}
+.missed-cal-cell.missed::after{content:"!";font-size:10px;margin-left:2px;color:#dc2626}
+.missed-cal-cell.today{box-shadow:inset 0 0 0 2px #3b82f6}
+.missed-cal-cell.future{color:var(--gray-300);background:transparent}
+.champion-card-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:8px 0;gap:2px}
+.champion-trophy{font-size:42px;line-height:1;margin-bottom:6px}
+.champion-name{font-size:18px;font-weight:700;color:var(--gray-800)}
+.champion-meta{font-size:12px;color:var(--gray-500)}
+.champion-value{font-size:22px;font-weight:700;color:#dc2626;margin:2px 0}
+.champion-empty{color:var(--gray-400);font-size:13px}
+@media (max-width: 900px){.dash-new-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -1473,6 +1492,80 @@ function getFieldRule(channel, fieldKey) {
 }
 
 // ============ Dashboard ============
+function _dashAddDays(ymd, days) {
+  const p = ymd.split('-').map(Number);
+  const dt = new Date(p[0], p[1] - 1, p[2]);
+  dt.setDate(dt.getDate() + days);
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+}
+
+function renderMissedDailyCard() {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const todayStr = localYMD();
+  const ymPrefix = y + '-' + String(m + 1).padStart(2, '0');
+  const myDates = new Set((cloudData.dailyReports || []).filter(r => r.userId === currentUser.id && r.reportDate && r.reportDate.startsWith(ymPrefix)).map(r => r.reportDate));
+  const firstDay = new Date(y, m, 1);
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const startCol = (firstDay.getDay() + 6) % 7;
+  const headers = ['一','二','三','四','五','六','日'];
+  let cells = headers.map(h => '<div class="missed-cal-h">' + h + '</div>').join('');
+  for (let i = 0; i < startCol; i++) cells += '<div class="missed-cal-cell empty"></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    const isFuture = ds > todayStr;
+    const isMissed = !isFuture && !myDates.has(ds);
+    const isToday = ds === todayStr;
+    const cls = ['missed-cal-cell'];
+    if (isMissed) cls.push('missed');
+    if (isToday) cls.push('today');
+    if (isFuture) cls.push('future');
+    cells += '<div class="' + cls.join(' ') + '" title="' + ds + (isMissed ? ' · 漏交日报' : '') + '">' + d + '</div>';
+  }
+  return '<div class="dash-new-card"><div class="dash-new-card-title">📅 当月漏交日报（' + (m + 1) + '月）</div><div class="missed-cal-grid">' + cells + '</div></div>';
+}
+
+function renderLastMonthSalesChampion() {
+  const now = new Date();
+  let lastM = now.getMonth() - 1, lastY = now.getFullYear();
+  if (lastM < 0) { lastM = 11; lastY--; }
+  const ym = lastY + '-' + String(lastM + 1).padStart(2, '0');
+  const bySp = {};
+  (cloudData.salesRecords || []).forEach(r => {
+    if (!r.docMonth || !r.docMonth.startsWith(ym)) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    if (!bySp[sp]) bySp[sp] = { name: sp, team: r.team || '', total: 0 };
+    bySp[sp].total += toNum(r.amount);
+  });
+  const arr = Object.values(bySp).sort((a, b) => b.total - a.total);
+  const champ = arr[0];
+  if (!champ || champ.total <= 0) {
+    return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上个月销冠</div><div class="champion-card-body"><div class="champion-empty">' + lastY + '年' + (lastM + 1) + '月暂无销售数据</div></div></div>';
+  }
+  return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上个月销冠</div><div class="champion-card-body"><div class="champion-trophy">🥇</div><div class="champion-name">' + esc(champ.name) + '</div><div class="champion-meta">' + esc(champ.team || '—') + '</div><div class="champion-value">' + fmtSalesMoney(champ.total) + '</div><div class="champion-meta">' + lastY + '年' + (lastM + 1) + '月业绩</div></div></div>';
+}
+
+function renderLastWeekVisitChampion() {
+  const thisMon = getWeekStart();
+  const lastMonStr = _dashAddDays(thisMon, -7);
+  const lastSunStr = _dashAddDays(thisMon, -1);
+  const bySp = {};
+  (cloudData.visitRecords || []).forEach(r => {
+    if (!r.date || r.date < lastMonStr || r.date > lastSunStr) return;
+    const sp = (r.employee || '').trim();
+    if (!sp) return;
+    bySp[sp] = (bySp[sp] || 0) + 1;
+  });
+  let champ = null, max = 0;
+  Object.keys(bySp).forEach(sp => { if (bySp[sp] > max) { max = bySp[sp]; champ = sp; } });
+  if (!champ) {
+    return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上周拜访冠军</div><div class="champion-card-body"><div class="champion-empty">' + lastMonStr + ' ~ ' + lastSunStr + ' 暂无拜访数据</div></div></div>';
+  }
+  const dept = ((cloudData.users || []).find(u => u.name === champ) || {}).department || '';
+  return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上周拜访冠军</div><div class="champion-card-body"><div class="champion-trophy">🥇</div><div class="champion-name">' + esc(champ) + '</div><div class="champion-meta">' + esc(dept) + '</div><div class="champion-value">' + max + ' 次</div><div class="champion-meta">' + lastMonStr + ' ~ ' + lastSunStr + ' 拜访</div></div></div>';
+}
+
 function renderDashboard() {
   const myDaily = cloudData.dailyReports.filter(r => r.userId === currentUser.id);
   const myWeekly = cloudData.weeklyReports.filter(r => r.userId === currentUser.id);
@@ -1491,17 +1584,10 @@ function renderDashboard() {
     const thisWeekEnd = getWeekEnd(thisWeekStart);
     const todayDaily = myDaily.find(r => r.reportDate === today);
     const myWeek = myWeekly.find(r => r.weekStart === thisWeekStart);
-    const ym2 = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0');
-    const monthD = myDaily.filter(r => r.reportDate && r.reportDate.startsWith(ym2)).length;
-    const monthW = myWeekly.filter(r => r.weekStart && r.weekStart.startsWith(ym2)).length;
-    const statCard = (icon, bg, fg, val, label) => `<div class="stat-card"><div class="stat-icon" style="background:${bg};color:${fg}">${icon}</div><div class="stat-value">${val}</div><div class="stat-label">${label}</div></div>`;
-    const memberStats = `<div class="stat-grid">
-      ${statCard('📝', todayDaily ? '#dcfce7' : '#fef3c7', todayDaily ? '#16a34a' : '#f59e0b', todayDaily ? '✅' : '⚠️', '今日日报')}
-      ${statCard('📋', myWeek ? '#ede9fe' : '#fef3c7', myWeek ? '#7c3aed' : '#f59e0b', myWeek ? '✅' : '⚠️', '本周周报')}
-      ${statCard('📝', '#dbeafe', '#2563eb', myDaily.length, '我的日报总数')}
-      ${statCard('📋', '#ede9fe', '#7c3aed', myWeekly.length, '我的周报总数')}
-      ${statCard('📅', '#dbeafe', '#2563eb', monthD, '本月日报')}
-      ${statCard('📅', '#ede9fe', '#7c3aed', monthW, '本月周报')}
+    const dashNewGrid = `<div class="dash-new-grid">
+      ${renderMissedDailyCard()}
+      ${renderLastMonthSalesChampion()}
+      ${renderLastWeekVisitChampion()}
     </div>`;
     const memberPanel = `<div class="card" style="margin-bottom:20px"><div class="card-header"><h4>📌 我的提交情况</h4></div><div class="card-body">
       <div class="member-submit-row">
@@ -1515,7 +1601,7 @@ function renderDashboard() {
       <div class="entry-grid">
         <div class="entry-card daily" onclick="navTo('dailyForm')"><div class="entry-icon">📝</div><h4>日报填写</h4><p>记录每日渠道执行数据</p></div>
         <div class="entry-card weekly" onclick="navTo('weeklyForm')"><div class="entry-icon">📋</div><h4>周报填写</h4><p>记录每周渠道汇总数据</p></div>
-      </div>` + memberStats + memberPanel;
+      </div>` + dashNewGrid + memberPanel;
     return;
   }
 
@@ -1626,13 +1712,10 @@ function renderDashboard() {
       <div class="entry-card daily" onclick="navTo('dailyForm')"><div class="entry-icon">📝</div><h4>日报填写</h4><p>记录每日渠道执行数据</p></div>
       <div class="entry-card weekly" onclick="navTo('weeklyForm')"><div class="entry-icon">📋</div><h4>周报填写</h4><p>记录每周渠道汇总数据</p></div>
     </div>
-    <div class="stat-grid">
-      <div class="stat-card"><div class="stat-icon" style="background:#dbeafe;color:#2563eb">📝</div><div class="stat-value">${myDaily.filter(r=>r.reportDate===today).length}</div><div class="stat-label">今日已填日报</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:#dcfce7;color:#16a34a">📊</div><div class="stat-value">${myDaily.length}</div><div class="stat-label">我的日报总数</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:#ede9fe;color:#7c3aed">📋</div><div class="stat-value">${myWeekly.length}</div><div class="stat-label">我的周报总数</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:#fef3c7;color:#f59e0b">👥</div><div class="stat-value">${cloudData.users.filter(u=>u.active).length}</div><div class="stat-label">团队成员数</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:#fee2e2;color:#dc2626">📈</div><div class="stat-value">${cloudData.dailyReports.length}</div><div class="stat-label">日报总记录数</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;color:#4f46e5">🗂️</div><div class="stat-value">${cloudData.weeklyReports.length}</div><div class="stat-label">周报总记录数</div></div>
+    <div class="dash-new-grid">
+      ${renderMissedDailyCard()}
+      ${renderLastMonthSalesChampion()}
+      ${renderLastWeekVisitChampion()}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
       ${dailyKanban}
