@@ -412,9 +412,9 @@ tr:hover td{background:var(--gray-50)}
 .year-summary-row:first-child{padding-top:0}
 .year-summary-row:last-child{border-bottom:none}
 .year-label{font-size:19px;font-weight:800;color:var(--primary);min-width:52px;display:flex;align-items:center;justify-content:center;letter-spacing:1px}
-.year-stats{display:flex;gap:12px;flex:1 1 340px;flex-wrap:wrap}
-.year-stats .stat-box{flex:1 1 110px;margin:0}
-.year-teams{flex:2 1 360px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:8px 12px}
+.year-stats{display:flex;gap:12px;flex:2 1 400px;flex-wrap:nowrap}
+.year-stats .stat-box{flex:1 1 0;margin:0;min-width:0}
+.year-teams{flex:3 1 480px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:8px 12px}
 .stat-box{flex:1;min-width:160px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:10px 14px}
 .stat-box .v{font-size:18px;font-weight:700;color:var(--primary)}
 .stat-box .l{font-size:12px;color:var(--gray-500);margin-top:4px}
@@ -485,6 +485,14 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 .champion-meta{font-size:12px;color:var(--gray-500)}
 .champion-value{font-size:22px;font-weight:700;color:#dc2626;margin:2px 0}
 .champion-empty{color:var(--gray-400);font-size:13px}
+/* 荣誉激励卡片 */
+.honor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;flex:1;align-content:start}
+.honor-col{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;display:flex;flex-direction:column}
+.honor-col-head{padding:10px 12px;background:#fff;border-bottom:1px solid var(--gray-200);font-size:14px;font-weight:700;color:var(--gray-800);text-align:center}
+.honor-col-body{padding:10px 12px;display:flex;flex-direction:column;gap:6px;flex:1}
+.honor-row{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:var(--gray-800);padding:4px 6px;border-radius:6px}
+.honor-row:hover{background:#fff}
+.honor-bonus{color:#dc2626;font-weight:700;font-variant-numeric:tabular-nums;margin-left:12px;white-space:nowrap}
 /* 拜访数据-卡点说明多行输入框 + 展开 */
 .blocker-note-cell{position:relative;vertical-align:top}
 .blocker-note-input{width:100%;resize:vertical;min-height:32px;max-height:120px;font-size:12px;line-height:1.4;font-family:inherit}
@@ -588,7 +596,7 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}, honorRecords:{}};
 let currentUser = null;
 let isCloudAvailable = false;
 let dataLoaded = false;
@@ -629,13 +637,14 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
 async function loadCoreData() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes, hRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
       fetch(FB_BASE + '/aiConfig.json'),
       fetch(FB_BASE + '/roleConfig.json'),
-      fetch(FB_BASE + '/visitConfig.json')
+      fetch(FB_BASE + '/visitConfig.json'),
+      fetch(FB_BASE + '/honorRecords.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -763,6 +772,9 @@ async function loadCoreData() {
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
     }
+    // Load honorRecords (荣誉激励，所有角色均需查看首页上月荣誉卡片)
+    const hrData = hRes.ok ? await hRes.json() : null;
+    cloudData.honorRecords = hrData || {};
     isCloudAvailable = true;
   } catch(e) {
     console.warn('Core config fetch failed:', e.message);
@@ -780,6 +792,7 @@ async function loadCoreData() {
     cloudData.m0PerformanceSnapshots = {};
     cloudData.mgrPerformanceRecords = {};
     cloudData.mgrPerformanceSnapshots = {};
+    cloudData.honorRecords = {};
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
     }
@@ -1184,6 +1197,7 @@ async function silentRefresh(page) {
       iM0Snap = fetches.length; fetches.push(fetch(FB_BASE + '/m0PerformanceSnapshots.json'));
     }
     if (needMgrPerf) { iMgrSnap = fetches.length; fetches.push(fetch(FB_BASE + '/mgrPerformanceSnapshots.json')); }
+    const iHonor = fetches.length; fetches.push(fetch(FB_BASE + '/honorRecords.json'));
     const results = await Promise.all(fetches);
     const newDaily = results[0].ok ? Object.values(await results[0].json() || {}) : [];
     const newWeekly = results[1].ok ? Object.values(await results[1].json() || {}) : [];
@@ -1196,6 +1210,9 @@ async function silentRefresh(page) {
     if (newM0Snap && typeof newM0Snap === 'object') cloudData.m0PerformanceSnapshots = newM0Snap;
     const newMgrSnap = (iMgrSnap >= 0 && results[iMgrSnap] && results[iMgrSnap].ok) ? await results[iMgrSnap].json() : null;
     if (newMgrSnap && typeof newMgrSnap === 'object') cloudData.mgrPerformanceSnapshots = newMgrSnap;
+    // 荣誉激励后台刷新
+    const newHonor = (iHonor >= 0 && results[iHonor] && results[iHonor].ok) ? await results[iHonor].json() : null;
+    if (newHonor && typeof newHonor === 'object') cloudData.honorRecords = newHonor;
     // Only update + re-render if data count changed (new records added by others)
     if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length || newSales.length !== cloudData.salesRecords.length) {
       cloudData.dailyReports = newDaily;
@@ -1598,6 +1615,39 @@ function renderLastMonthSalesChampion() {
   return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上个月销冠</div><div class="champion-card-body"><div class="champion-trophy">🥇</div><div class="champion-name">' + esc(champ.name) + '</div><div class="champion-meta">' + esc(champ.team || '—') + '</div><div class="champion-value">' + fmtSalesMoney(champ.total) + '</div><div class="champion-meta">' + lastY + '年' + (lastM + 1) + '月业绩</div></div></div>';
 }
 
+// 上月荣誉激励看板：按奖项分组展示获奖人+奖金，无数据则"虚位以待"
+function renderLastMonthHonor() {
+  const now = new Date();
+  let lastM = now.getMonth() - 1, lastY = now.getFullYear();
+  if (lastM < 0) { lastM = 11; lastY--; }
+  const ym = lastY + '-' + String(lastM + 1).padStart(2, '0');
+  const arr = (cloudData.honorRecords && cloudData.honorRecords[ym]) || [];
+  const monthLabel = lastY + '年' + (lastM + 1) + '月';
+  const title = '🏆 上月荣誉激励（' + monthLabel + '）';
+  if (!arr.length) {
+    return '<div class="dash-new-card"><div class="dash-new-card-title">' + title + '</div><div class="champion-card-body"><div class="champion-empty" style="font-size:18px;font-weight:600;color:#dc2626">虚位以待</div><div class="champion-meta">本月暂无奖项配置，前往「表单配置→荣誉激励」添加</div></div></div>';
+  }
+  // 按奖项名分组：同奖项下，多个获奖人叠在一起
+  const byAward = {};
+  arr.forEach(it => {
+    const aw = (it.awardName || '未命名奖项').trim();
+    if (!byAward[aw]) byAward[aw] = [];
+    byAward[aw].push(it);
+  });
+  const awardNames = Object.keys(byAward);
+  const colsHtml = awardNames.map(aw => {
+    const items = byAward[aw];
+    const rowsHtml = items.map(it => {
+      const name = (it.salesperson || '').trim() || '—';
+      const bonus = toNum(it.bonus);
+      const bonusTxt = bonus > 0 ? '<span class="honor-bonus">' + fmtSalesMoney(bonus) + '</span>' : '';
+      return '<div class="honor-row">' + esc(name) + bonusTxt + '</div>';
+    }).join('');
+    return '<div class="honor-col"><div class="honor-col-head">' + esc(aw) + '</div><div class="honor-col-body">' + rowsHtml + '</div></div>';
+  }).join('');
+  return '<div class="dash-new-card"><div class="dash-new-card-title">' + title + '</div><div class="honor-grid">' + colsHtml + '</div></div>';
+}
+
 function renderLastWeekVisitChampion() {
   const thisMon = getWeekStart();
   const lastMonStr = _dashAddDays(thisMon, -7);
@@ -1734,6 +1784,7 @@ function renderDashboard() {
       ${renderLastMonthSalesChampion()}
       ${renderLastWeekVisitChampion()}
     </div>`;
+    const honorCard = `<div class="dash-new-grid dash-honor-row" style="grid-template-columns:1fr">${renderLastMonthHonor()}</div>`;
     const memberPanel = `<div class="card" style="margin-bottom:20px"><div class="card-header"><h4>📌 我的提交情况</h4></div><div class="card-body">
       <div class="member-submit-row">
         <div style="font-size:14px">今日日报：${todayDaily ? '<span class="badge badge-success">已提交</span>' : '<span class="badge badge-warning">未提交</span>'}</div>
@@ -1746,7 +1797,7 @@ function renderDashboard() {
       <div class="entry-grid">
         <div class="entry-card daily" onclick="navTo('dailyForm')"><div class="entry-icon">📝</div><h4>日报填写</h4><p>记录每日渠道执行数据</p></div>
         <div class="entry-card weekly" onclick="navTo('weeklyForm')"><div class="entry-icon">📋</div><h4>周报填写</h4><p>记录每周渠道汇总数据</p></div>
-      </div>` + dashNewGrid + memberPanel;
+      </div>` + dashNewGrid + honorCard + memberPanel;
     return;
   }
 
@@ -1828,6 +1879,9 @@ function renderDashboard() {
       ${renderMissedWeeklyCard()}
       ${renderLastMonthSalesChampion()}
       ${renderLastWeekVisitChampion()}
+    </div>
+    <div class="dash-new-grid dash-honor-row" style="grid-template-columns:1fr;margin-bottom:20px">
+      ${renderLastMonthHonor()}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
       ${dailyKanban}
@@ -4458,6 +4512,21 @@ function buildAIContext() {
   const mgrPerfRecords = cloudData.mgrPerformanceRecords || {};
   const mgrPerfBase = fc.mgrPerformanceBase;
 
+  // 荣誉激励（按月保存奖项与获奖人/奖金；首页"上月荣誉激励"卡片数据源）
+  const honorRecordsRaw = cloudData.honorRecords || {};
+  const honorRecords = {};
+  Object.keys(honorRecordsRaw).sort().forEach(ym => {
+    if (!/^\d{4}-\d{2}$/.test(ym)) return;
+    honorRecords[ym] = (honorRecordsRaw[ym] || []).map(it => ({
+      awardName: (it.awardName || '').trim(),
+      salesperson: (it.salesperson || '').trim(),
+      team: (it.team || '').trim(),
+      bonus: toNum(it.bonus),
+      achievement: (it.achievement || '').trim(),
+      note: (it.note || '').trim()
+    }));
+  });
+
   const activeUsers = cloudData.users.filter(u => u.active);
   const _now = new Date();
   const _y = _now.getFullYear(), _m = _now.getMonth() + 1;
@@ -4494,7 +4563,9 @@ function buildAIContext() {
       m0RecordCount: Object.keys(m0Records).length,
       performanceRecordCount: Object.keys(perfRecords).length,
       m0PerformanceRecordCount: Object.keys(m0PerfRecords).length,
-      mgrPerformanceRecordCount: Object.keys(mgrPerfRecords).length
+      mgrPerformanceRecordCount: Object.keys(mgrPerfRecords).length,
+      honorRecordCount: Object.values(honorRecords).reduce((s, arr) => s + (Array.isArray(arr) ? arr.length : 0), 0),
+      honorMonthCount: Object.keys(honorRecords).length
     },
     users: activeUsers.map(u => ({name: u.name, department: u.department, role: u.role})),
     dailyChannels: (fc.daily || []).map(c => ({name: c.name, reference: c.reference})),
@@ -4523,14 +4594,15 @@ function buildAIContext() {
     m0Config: m0Cfg,
     mgrPerformanceConfig: mgrPerfCfg,
     mgrPerformanceRecords: mgrPerfRecords,
-    mgrPerformanceBase: mgrPerfBase
+    mgrPerformanceBase: mgrPerfBase,
+    honorRecords: honorRecords
   };
   return JSON.stringify(context, null, 2);
 }
 
 function buildAISystemMessage() {
   const dataContext = buildAIContext();
-  return '你是团队SOP数据管理系统的AI数据分析助手。你可以读取系统的全部数据，包括用户信息、日报数据、周报数据、拜访数据、业绩数据、管理周报（含拜访汇总快照）、客户汇总数据（客户来源/客户画像/品类）、渠道配置；以及团队月目标与团队人数、团队业绩统计（目标/完成率/人效）、销售绩效统计（考核项得分/绩效评分）、销售评级看板（升降级/评级）、M0绩效与M0评级看板、管理绩效统计（管理者绩效得分）。\n\n'
+  return '你是团队SOP数据管理系统的AI数据分析助手。你可以读取系统的全部数据，包括用户信息、日报数据、周报数据、拜访数据、业绩数据、管理周报（含拜访汇总快照）、客户汇总数据（客户来源/客户画像/品类）、渠道配置；以及团队月目标与团队人数、团队业绩统计（目标/完成率/人效）、销售绩效统计（考核项得分/绩效评分）、销售评级看板（升降级/评级）、M0绩效与M0评级看板、管理绩效统计（管理者绩效得分）、荣誉激励（按月奖项与获奖人/奖金）。\n\n'
     + '你的职责：\n'
     + '1. 根据用户的问题，对系统数据进行分析、汇总和对比\n'
     + '2. 提供数据洞察、趋势分析和改进建议\n'
@@ -4597,6 +4669,7 @@ function buildAISystemMessage() {
     + '- 当用户的问题涉及「销售评级 / 升降级 / 评级 / 职级」时，必须使用 gradeRecords（key=年_销售_月）与 gradeConfig 回答。\n'
     + '- 当用户的问题涉及「M0 绩效 / M0 考核 / M0 得分」时，必须使用 m0PerformanceRecords 与 m0PerformanceConfig 回答；涉及「M0 评级 / M0 升降级」时使用 m0Records 与 m0Config 回答。\n'
     + '- 当用户的问题涉及「管理绩效 / 管理者绩效 / 主管绩效得分」时，必须使用 mgrPerformanceRecords 与 mgrPerformanceConfig 回答（管理者角色用户，无职级之分，绩效基数默认 5000，最终基数=基数×在职天数/30）。\n'
+    + '- 当用户的问题涉及「荣誉激励 / 奖项 / 获奖人 / 奖金 / 销冠 / 攻坚奖 / 营销端冠军 / 团队冠军」时，必须使用 honorRecords 回答（按月份聚合的奖项与获奖人员/奖金/成就/备注）。\n'
     + '- 团队业绩统计(teamPerformanceSummary)字段:\n'
     + '  - byMonth[月份]: { target(月目标金额), amount(实际业绩金额), grossProfit(毛利), completionRate(完成率%, 目标为0时为null), headcount(团队人数), efficiency(人效=业绩÷人数, 人数为0时为null) }\n'
     + '- 销售绩效(performanceRecords)字段: key=年_销售_月，含 workingDays(在职天数)/comment(总评)/base(基数)/items(各考核项:{actual完成,standard要求,score得分,text描述})/bonus(加分项次数)\n'
@@ -4604,6 +4677,7 @@ function buildAISystemMessage() {
     + '- M0绩效(m0PerformanceRecords)字段: key=年_M0_月，结构同销售绩效但全为手动考核项，无自拓演示自动计数\n'
     + '- M0评级(m0Records)字段: key=年_M0_月，含 grade/prevGrade/promote/note\n'
     + '- 管理绩效(mgrPerformanceRecords)字段: key=年_管理者_月，结构同绩效(含 items/bonus/workingDays/comment/base)，管理者无职级列\n'
+    + '- 荣誉激励(honorRecords)字段: 顶层 key=YYYY-MM 月份（如 "2026-06"），value 为该月奖项数组，每项含 awardName(奖项名称，如 外部攻坚奖/新媒体突破奖/营销端销冠)、salesperson(获奖人姓名)、team(所属团队/部门，自动匹配)、bonus(奖金, 元)、achievement(成就描述)、note(备注)。回答时按月份归类、按奖项分组展示获奖人与奖金，可用于回答「上个月谁拿了什么奖 / 某月某奖项的获奖人是谁 / 奖金合计是多少」等问题。\n'
     + '以下是当前系统的完整数据（JSON格式）：\n' + dataContext;
 }
 
@@ -5114,6 +5188,7 @@ function renderFormConfig() {
       <div class="summary-tab ${configTab==='m0GradeConfig'?'active':''}" onclick="switchConfigTab('m0GradeConfig')">M0评级</div>
       <div class="summary-tab ${configTab==='m0PerfConfig'?'active':''}" onclick="switchConfigTab('m0PerfConfig')">M0绩效配置</div>
       <div class="summary-tab ${configTab==='mgrPerfConfig'?'active':''}" onclick="switchConfigTab('mgrPerfConfig')">管理绩效配置</div>
+      <div class="summary-tab ${configTab==='honorConfig'?'active':''}" onclick="switchConfigTab('honorConfig')">🏆 荣誉激励</div>
     </div>
     <div id="configContent"></div>
     <div style="margin-top:12px;font-size:12px;color:var(--gray-500)">
@@ -5128,11 +5203,22 @@ function renderFormConfig() {
   renderConfigContent();
 }
 
-function switchConfigTab(tab) {
+function switchConfigTab(tab, evt) {
   configTab = tab;
   document.querySelectorAll('.summary-tab').forEach(t => t.classList.remove('active'));
-  event.target.classList.add('active');
-  renderConfigContent();
+  var tgt = (evt || (typeof event !== 'undefined' ? event : null) || window.event || {});
+  if (tgt.target) tgt.target.classList.add('active');
+  else {
+    var tabs = document.querySelectorAll('.summary-tab');
+    for (var i = 0; i < tabs.length; i++) { if (tabs[i].textContent.indexOf(tab) >= 0 || tabs[i].getAttribute('onclick') === "switchConfigTab('" + tab + "')") { tabs[i].classList.add('active'); break; } }
+  }
+  try {
+    renderConfigContent();
+  } catch(e) {
+    var c = document.getElementById('configContent');
+    if (c) c.innerHTML = '<div class="alert alert-danger" style="white-space:pre-wrap;font-size:13px;max-height:400px;overflow:auto">⚠️ 渲染出错: ' + e.message + '\n\n' + (e.stack||'') + '</div>';
+    console.error('switchConfigTab renderConfigContent error:', e);
+  }
 }
 
 function renderConfigContent() {
@@ -5597,6 +5683,72 @@ function renderConfigContent() {
       </div>`;
     return;
   }
+  // ===== 荣誉激励配置 tab（按月管理奖项与获奖人/奖金，会展示到首页「上月荣誉激励」卡片）=====
+  if (configTab === 'honorConfig') {
+    const now = new Date();
+    const curM = honorCfgMonth || (function(){ let lm = now.getMonth() - 1, ly = now.getFullYear(); if (lm < 0) { lm = 11; ly--; } return ly + '-' + String(lm + 1).padStart(2,'0'); })();
+    const allMonths = Object.keys(cloudData.honorRecords || {}).filter(k => /^\d{4}-\d{2}$/.test(k)).sort().reverse();
+    if (curM && !allMonths.includes(curM)) allMonths.unshift(curM);
+    const list = (cloudData.honorRecords && cloudData.honorRecords[curM]) || [];
+    const activeUsers = cloudData.users.filter(u => u.active);
+    const userOpts = activeUsers.map(u => '<option value="' + esc(u.name) + '">' + esc(u.name) + '（' + esc(u.department || '未分配') + '）</option>').join('');
+    const monthOpts = allMonths.map(m => '<option value="' + m + '" ' + (m === curM ? 'selected' : '') + '>' + m + '</option>').join('');
+    // 唯一奖项列表（用于下拉建议）
+    const allAwards = [...new Set(Object.keys(cloudData.honorRecords || {}).flatMap(k => (cloudData.honorRecords[k] || []).map(i => (i.awardName||'').trim()).filter(Boolean)))];
+    const awardOpts = allAwards.map(a => '<option value="' + esc(a) + '">').join('');
+    c.innerHTML = `
+      <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
+        配置每个月的<b>奖项与获奖人员/奖金</b>，保存后<b>首页「上月荣誉激励」卡片</b>会立即展示；空月份卡片显示「虚位以待」。奖项名称支持自由填写；姓名选择用户后<b>团队自动匹配</b>该用户所属部门。
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>当前月份</h4></div>
+        <div class="card-body" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="margin-bottom:0;min-width:200px">
+            <label>获奖月份</label>
+            <select class="form-control" id="honorCfgMonthSel" onchange="onHonorCfgMonthChange(this.value)">${monthOpts}</select>
+          </div>
+          <div class="form-group" style="margin-bottom:0;min-width:200px">
+            <label>或输入新月份</label>
+            <input type="month" class="form-control" id="honorCfgNewMonth" placeholder="YYYY-MM" onchange="onHonorCfgMonthChange(this.value)">
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="addHonorMonthItem()">➕ 为该月份新增一条奖项</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h4>${curM} 奖项列表（${list.length} 条）</h4><span style="font-size:12px;color:var(--gray-500)">保存配置后写入云端（Firebase /honorRecords）</span></div>
+        <div class="card-body">
+          ${list.length === 0 ? '<div class="empty-state" style="padding:20px"><div class="icon" style="font-size:32px">🏆</div>该月份暂无奖项，点击上方「新增一条奖项」开始添加</div>' : `
+          <div style="overflow-x:auto"><table class="data-table" style="min-width:920px">
+            <thead><tr style="background:var(--gray-50)">
+              <th style="width:140px">奖项名称</th>
+              <th style="width:140px">姓名</th>
+              <th style="width:120px">团队</th>
+              <th style="width:100px">奖金</th>
+              <th>成就</th>
+              <th>备注</th>
+              <th style="width:120px">操作</th>
+            </tr></thead>
+            <tbody id="honorCfgTbody">
+              ${list.map((it, i) => `
+                <tr>
+                  <td><input type="text" class="form-control form-control-sm" list="honorAwardDl" value="${esc(it.awardName || '')}" onchange="updateHonorCfgItem(${i}, 'awardName', this.value)" placeholder="如：外部攻坚奖"></td>
+                  <td><select class="form-control form-control-sm" onchange="onHonorCfgNameChange(${i}, this.value)"><option value="">-- 选择用户 --</option>${userOpts.replace('value="' + esc(it.salesperson||'') + '"', 'value="' + esc(it.salesperson||'') + '" selected')}</select></td>
+                  <td><input type="text" class="form-control form-control-sm" id="honorTeam_${i}" value="${esc(it.team || '')}" readonly style="background:var(--gray-100)"></td>
+                  <td><input type="number" class="form-control form-control-sm" value="${it.bonus != null && it.bonus !== '' ? it.bonus : 0}" onchange="updateHonorCfgItem(${i}, 'bonus', parseFloat(this.value) || 0)"></td>
+                  <td><input type="text" class="form-control form-control-sm" value="${esc(it.achievement || '')}" onchange="updateHonorCfgItem(${i}, 'achievement', this.value)" placeholder="选填"></td>
+                  <td><input type="text" class="form-control form-control-sm" value="${esc(it.note || '')}" onchange="updateHonorCfgItem(${i}, 'note', this.value)" placeholder="选填"></td>
+                  <td><button class="btn btn-sm btn-danger" onclick="deleteHonorCfgItem(${i})">🗑 删除</button></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <datalist id="honorAwardDl">${awardOpts}</datalist>
+          </div>`}
+        </div>
+      </div>
+    `;
+    return;
+  }
   // ===== 日报/周报配置 tab =====
   const channels = getChannels(configTab);
   c.innerHTML = channels.map((ch, idx) => {
@@ -5982,6 +6134,56 @@ function updateMgrPerfBase(value) {
   cloudData.formConfig.mgrPerformanceBase = value;
 }
 
+// ===== 荣誉激励配置助手（formConfig tab 内编辑 honorRecords）=====
+let honorCfgMonth = null;
+function _ensureHonorBucket(ym) {
+  if (!cloudData.honorRecords) cloudData.honorRecords = {};
+  if (!Array.isArray(cloudData.honorRecords[ym])) cloudData.honorRecords[ym] = [];
+  return cloudData.honorRecords[ym];
+}
+function onHonorCfgMonthChange(ym) {
+  if (!/^\d{4}-\d{2}$/.test(ym || '')) return;
+  honorCfgMonth = ym;
+  renderConfigContent();
+}
+function addHonorMonthItem() {
+  const ym = honorCfgMonth || document.getElementById('honorCfgMonthSel')?.value;
+  if (!/^\d{4}-\d{2}$/.test(ym || '')) { alert('请先选择/填写有效的月份（YYYY-MM）'); return; }
+  honorCfgMonth = ym;
+  const arr = _ensureHonorBucket(ym);
+  arr.push({ id: genId(), awardName: '', salesperson: '', team: '', bonus: 0, achievement: '', note: '', createdAt: new Date().toISOString() });
+  renderConfigContent();
+}
+function updateHonorCfgItem(i, field, value) {
+  const ym = honorCfgMonth;
+  if (!ym) return;
+  const arr = _ensureHonorBucket(ym);
+  if (!arr[i]) return;
+  arr[i][field] = value;
+  if (field === 'awardName' || field === 'bonus') arr[i].updatedAt = new Date().toISOString();
+}
+function deleteHonorCfgItem(i) {
+  const ym = honorCfgMonth;
+  if (!ym) return;
+  const arr = _ensureHonorBucket(ym);
+  if (!arr[i]) return;
+  if (!confirm('确定删除这条奖项配置吗？')) return;
+  arr.splice(i, 1);
+  if (!arr.length) delete cloudData.honorRecords[ym];
+  renderConfigContent();
+}
+function onHonorCfgNameChange(i, name) {
+  const ym = honorCfgMonth;
+  if (!ym) return;
+  const arr = _ensureHonorBucket(ym);
+  if (!arr[i]) return;
+  arr[i].salesperson = name;
+  const u = cloudData.users.find(u => u.name === name);
+  arr[i].team = u ? (u.department || '') : '';
+  arr[i].updatedAt = new Date().toISOString();
+  renderConfigContent();
+}
+
 // 下载评级标准配置 Excel 模板
 function downloadGradeTemplate() {
   try {
@@ -6071,8 +6273,18 @@ async function saveFormConfig() {
       method:'PUT', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(cloudData.visitConfig || DEFAULT_VISIT_CONFIG)
     });
+    // 也保存荣誉激励（荣誉激励 tab 修改的是 honorRecords，独立节点，不在 formConfig 内）
+    if (configTab === 'honorConfig' || honorCfgMonth) {
+      await fetch(FB_BASE + '/honorRecords.json', {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(cloudData.honorRecords || {})
+      });
+    }
     showToast('配置已保存并生效！', 'success');
     syncOpenReports();
+    // 如果当前页是首页，重渲染以反映荣誉卡片最新内容
+    const activePage = document.querySelector('.nav-item.active')?.dataset.page;
+    if (activePage === 'dashboard') renderDashboard();
     if (alertEl) alertEl.innerHTML = '';
   } catch(e) {
     showToast('保存失败: ' + e.message, 'error', 4000);
@@ -8197,8 +8409,13 @@ async function renderSalesDetail() {
   const yearBlocks = selYears.map(y => {
     const recsY = byYear[y];
     const amtY = recsY.reduce((s, r) => s + toNum(r.amount), 0);
-    const custY = new Set(recsY.map(r => r.customer).filter(Boolean)).size;
-    const avgY = custY ? amtY / custY : 0;
+    // 客户数统计：仅付费金额高于6000的客户
+    const custAmtMap = {};
+    recsY.forEach(r => { const c = (r.customer || '').trim(); if (c) custAmtMap[c] = (custAmtMap[c] || 0) + toNum(r.amount); });
+    const paidCustNames = Object.keys(custAmtMap).filter(c => custAmtMap[c] > 6000);
+    const custY = paidCustNames.length;
+    const paidAmtY = paidCustNames.reduce((s, c) => s + custAmtMap[c], 0);
+    const avgY = custY ? paidAmtY / custY : 0;
     const tm = {};
     recsY.forEach(r => { const t = r.team || '未分配'; tm[t] = (tm[t] || 0) + toNum(r.amount); });
     const pills = Object.keys(tm).sort((a,b)=>_teamOrderRank(a)-_teamOrderRank(b)).map(t => `<div class="team-pill"><div class="t">${esc(t)}</div><div class="a">${fmtSalesMoney(tm[t])}</div></div>`).join('');
