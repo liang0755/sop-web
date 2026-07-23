@@ -7008,33 +7008,66 @@ function renderMgrReportList() {
     container.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无管理周报记录</div>';
     return;
   }
-  // 按周横排：每周一列，列内「拜访汇总」在上、「周报内容」正下方
-  container.innerHTML = `<div style="display:flex;gap:16px;overflow-x:auto;padding-bottom:10px">
+
+  // 部门列集合：取自全部已加载的周报（不去周次筛选），保证列布局稳定；按首次出现顺序
+  const allDepts = [];
+  const _dseen = new Set();
+  myReports.forEach(r => {
+    const d = (r.department || '').trim();
+    if (d && !_dseen.has(d)) { _dseen.add(d); allDepts.push(d); }
+  });
+  if (!allDepts.length) {
+    filtered.forEach(r => {
+      const d = (r.department || '').trim();
+      if (d && !_dseen.has(d)) { _dseen.add(d); allDepts.push(d); }
+    });
+  }
+  if (!allDepts.length) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">📭</div>所选周次暂无部门数据</div>';
+    return;
+  }
+
+  // 排版：每周一行（周标签做行头），行内按部门横排；缺失部门显示空占位卡
+  const _renderCard = (r) => {
+    const snap = r.visitSnapshot || {};
+    const snapCard = renderSnapshotCardHTML(snap);
+    const canEdit = r.userId === currentUser.id || hasPermission('editOthers');
+    const canDelete = r.userId === currentUser.id || hasPermission('deleteOthers');
+    return `<div class="mgr-report-card" style="flex:1 1 0;min-width:280px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px">
+        <span style="background:var(--gray-100);padding:2px 10px;border-radius:10px;font-size:12px;color:var(--gray-600)">${r.department}</span>
+        <span style="font-size:12px;color:var(--gray-500)">${r.userName || '未知'}</span>
+        <div style="display:flex;gap:4px">
+          ${canEdit ? `<button class="btn btn-xs btn-outline" onclick="editMgrReport('${r.id}')" title="编辑">✏️</button>` : ''}
+          ${canEdit ? `<button class="btn btn-xs btn-outline" onclick="regenerateMgrSnapshot('${r.id}')" title="重算快照">🔄</button>` : ''}
+          ${canDelete ? `<button class="btn btn-xs btn-outline" style="color:var(--danger)" onclick="deleteMgrReport('${r.id}')" title="删除">🗑️</button>` : ''}
+        </div>
+      </div>
+      <div class="mgr-report-col snapshot">${snapCard}</div>
+      <div class="mgr-report-col content" style="margin-top:8px">${(r.content || '').replace(/</g,'&lt;')}</div>
+      <div style="margin-top:8px;font-size:11px;color:var(--gray-400)">${r.createdAt ? '创建：' + r.createdAt.replace('T',' ').slice(0,16) : ''}${r.updatedAt && r.updatedAt !== r.createdAt ? ' · 更新：' + r.updatedAt.replace('T',' ').slice(0,16) : ''}</div>
+    </div>`;
+  };
+  const _renderEmpty = (dept) => {
+    return `<div class="mgr-report-card empty" style="flex:1 1 0;min-width:280px;border-style:dashed;background:var(--gray-50);display:flex;flex-direction:column">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px">
+        <span style="background:var(--gray-100);padding:2px 10px;border-radius:10px;font-size:12px;color:var(--gray-600)">${dept}</span>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--gray-400);font-size:13px;padding:30px 8px">📭 本周未提交</div>
+    </div>`;
+  };
+
+  container.innerHTML = `<div class="mgr-report-list-rows">
     ${weeksToShow.map(ws => {
       const wkReports = filtered.filter(r => r.weekStart === ws);
+      const wkByDept = {};
+      wkReports.forEach(r => { if (r.department) wkByDept[r.department] = r; });
       const label = weekLabelMap[ws] || ws;
-      return `<div style="flex:0 0 340px;min-width:340px;display:flex;flex-direction:column;gap:10px">
-        <div style="font-weight:600;font-size:13px;color:var(--gray-700);border-bottom:2px solid var(--primary);padding-bottom:6px">${label}</div>
-        ${wkReports.map(r => {
-          const snap = r.visitSnapshot || {};
-          const snapCard = renderSnapshotCardHTML(snap);
-          const canEdit = r.userId === currentUser.id || hasPermission('editOthers');
-          const canDelete = r.userId === currentUser.id || hasPermission('deleteOthers');
-          return `<div class="mgr-report-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px">
-              <span style="background:var(--gray-100);padding:2px 10px;border-radius:10px;font-size:12px;color:var(--gray-600)">${r.department}</span>
-              <span style="font-size:12px;color:var(--gray-500)">${r.userName || '未知'}</span>
-              <div style="display:flex;gap:4px">
-                ${canEdit ? `<button class="btn btn-xs btn-outline" onclick="editMgrReport('${r.id}')" title="编辑">✏️</button>` : ''}
-                ${canEdit ? `<button class="btn btn-xs btn-outline" onclick="regenerateMgrSnapshot('${r.id}')" title="重算快照">🔄</button>` : ''}
-                ${canDelete ? `<button class="btn btn-xs btn-outline" style="color:var(--danger)" onclick="deleteMgrReport('${r.id}')" title="删除">🗑️</button>` : ''}
-              </div>
-            </div>
-            <div class="mgr-report-col snapshot">${snapCard}</div>
-            <div class="mgr-report-col content" style="margin-top:8px">${(r.content || '').replace(/</g,'&lt;')}</div>
-            <div style="margin-top:6px;font-size:11px;color:var(--gray-400)">${r.createdAt ? '创建：' + r.createdAt.replace('T',' ').slice(0,16) : ''}${r.updatedAt && r.updatedAt !== r.createdAt ? ' · 更新：' + r.updatedAt.replace('T',' ').slice(0,16) : ''}</div>
-          </div>`;
-        }).join('')}
+      return `<div class="mgr-report-week-row" style="margin-bottom:24px">
+        <div class="mgr-report-week-label" style="font-weight:600;font-size:14px;color:var(--gray-700);border-bottom:2px solid var(--primary);padding-bottom:6px;margin-bottom:12px">📅 ${label}</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch">
+          ${allDepts.map(dept => wkByDept[dept] ? _renderCard(wkByDept[dept]) : _renderEmpty(dept)).join('')}
+        </div>
       </div>`;
     }).join('')}
   </div>`;
