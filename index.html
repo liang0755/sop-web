@@ -427,6 +427,11 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
 .yoy-pos{color:var(--danger);font-size:11px;margin-top:2px;font-weight:600;white-space:nowrap}
 .yoy-neg{color:var(--success);font-size:11px;margin-top:2px;font-weight:600;white-space:nowrap}
 .yoy-none{color:var(--gray-400);font-size:11px;margin-top:2px;white-space:nowrap}
+/* 动态同比列：固定列宽 + 内容居中 */
+th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
+.dyoy-th{width:140px;min-width:140px}
+.dyoy-cell{white-space:normal}
+.dyoy-sub{font-size:11px;color:var(--gray-500);line-height:1.4;margin-top:1px}
 #sbBoard2 td,#sbBoard2 th{padding-left:8px;padding-right:8px}
 .sort-th{cursor:pointer;user-select:none;white-space:nowrap}
 .sort-th:hover{background:var(--gray-100)}
@@ -9119,11 +9124,12 @@ function sbSortBy(col, tid) {
 
 // 团队/销售员业绩「动态同比」单元格：年初(01)→显示范围结束月的今年累计 vs 去年同区间累计
 function dynYoyCellHTML(row) {
-  if (row.dynYoy == null) return `<td class="num"><div class="yoy-none" style="white-space:nowrap">— 同比</div></td>`;
+  if (row.dynYoy == null) return `<td class="dyoy-cell"><span class="yoy-none">— 同比</span></td>`;
   const g = row.dynYoy;
-  return `<td class="num"><div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${g >= 0 ? '+' : ''}${g.toFixed(1)}%</div>` +
-    `<div style="font-size:11px;color:var(--gray-500);white-space:nowrap">今年 ${fmtSalesMoney(row.dynThis)}</div>` +
-    `<div style="font-size:11px;color:var(--gray-400);white-space:nowrap">去年 ${fmtSalesMoney(row.dynLast)}</div></td>`;
+  return `<td class="dyoy-cell">` +
+    `<div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}">${g >= 0 ? '+' : ''}${g.toFixed(1)}%</div>` +
+    `<div class="dyoy-sub">今年 ${fmtSalesMoney(row.dynThis)}</div>` +
+    `<div class="dyoy-sub">去年 ${fmtSalesMoney(row.dynLast)}</div></td>`;
 }
 
 function renderSalesBoardTable(tid, key) {
@@ -9194,7 +9200,7 @@ function renderSalesBoardTable(tid, key) {
   h += `<th class="num sort-th${totAct}" onclick="sbSortBy('total', '${tid}')">合计<span class="sort-ind${totAct}">${totInd}</span></th>`;
   const dynInd = sbSortCol === 'dynyoy' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
   const dynAct = sbSortCol === 'dynyoy' ? ' active' : '';
-  h += `<th class="num sort-th${dynAct}" onclick="sbSortBy('dynyoy', '${tid}')">动态同比<span style="font-size:10px;font-weight:400;color:var(--gray-400)"> 年初→${sbEndM}月</span><span class="sort-ind${dynAct}">${dynInd}</span></th></tr></thead><tbody>`;
+  h += `<th class="dyoy-th num sort-th${dynAct}" onclick="sbSortBy('dynyoy', '${tid}')">动态同比<span style="font-size:10px;font-weight:400;color:var(--gray-400)"> 年初→${sbEndM}月</span><span class="sort-ind${dynAct}">${dynInd}</span></th></tr></thead><tbody>`;
   const colTot = {};
   rowsArr.forEach(row => {
     const label = key === 'team' ? `<span class="badge badge-team">${esc(row.k)}</span>` : (esc(row.k) + userStatusBadge(row.k, userMap));
@@ -9228,7 +9234,7 @@ function renderSalesBoardTable(tid, key) {
       let totCell = fmtSalesMoney(row.t);
       if (rowTgt > 0) {
         const rr = row.t / rowTgt * 100;
-        totCell += `<div style="font-size:11px;margin-top:2px;font-weight:600;color:${rr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(rowTgt)} · 完成 ${rr.toFixed(1)}%</div>`;
+        totCell += `<div style="font-size:11px;margin-top:3px;font-weight:600;color:${rr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(rowTgt)}</div><div style="font-size:11px;font-weight:600;color:${rr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">完成 ${rr.toFixed(1)}%</div>`;
       } else {
         totCell += `<div class="yoy-none">目标未设</div>`;
       }
@@ -9248,16 +9254,16 @@ function renderSalesBoardTable(tid, key) {
   let gtCell = fmtSalesMoney(gt);
   if (key === 'team' && gTgt > 0) {
     const gr = gt / gTgt * 100;
-    gtCell += `<div style="font-size:11px;margin-top:2px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(gTgt)} · 完成 ${gr.toFixed(1)}%</div>`;
+    gtCell += `<div style="font-size:11px;margin-top:3px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(gTgt)}</div><div style="font-size:11px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">完成 ${gr.toFixed(1)}%</div>`;
   }
   let gtDyn = '';
   const gDynThis = rowsArr.reduce((s, r) => s + (r.dynThis || 0), 0);
   const gDynLast = rowsArr.reduce((s, r) => s + (r.dynLast || 0), 0);
   if (gDynLast > 0) {
     const gg = (gDynThis - gDynLast) / gDynLast * 100;
-    gtDyn = `<td class="num"><div class="${gg >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}%</div><div style="font-size:11px;color:var(--gray-500);white-space:nowrap">今年 ${fmtSalesMoney(gDynThis)}</div><div style="font-size:11px;color:var(--gray-400);white-space:nowrap">去年 ${fmtSalesMoney(gDynLast)}</div></td>`;
+    gtDyn = `<td class="dyoy-cell"><div class="${gg >= 0 ? 'yoy-pos' : 'yoy-neg'}">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}%</div><div class="dyoy-sub">今年 ${fmtSalesMoney(gDynThis)}</div><div class="dyoy-sub">去年 ${fmtSalesMoney(gDynLast)}</div></td>`;
   } else {
-    gtDyn = `<td class="num"><div class="yoy-none" style="white-space:nowrap">— 同比</div></td>`;
+    gtDyn = `<td class="dyoy-cell"><span class="yoy-none">— 同比</span></td>`;
   }
   h += `<td class="num">${gtCell}</td>${gtDyn}</tr></tfoot>`;
   document.getElementById(tid).innerHTML = h;
