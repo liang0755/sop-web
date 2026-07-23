@@ -6063,6 +6063,7 @@ async function renderVisitData() {
           <input type="file" id="visitFileInput" accept=".csv" style="display:none" onchange="handleVisitUpload(this)">
           <button class="btn btn-success" onclick="document.getElementById('visitFileInput').click()">📤 上传CSV</button>
           <button class="btn btn-outline" onclick="downloadVisitTemplate()">📥 下载模板</button>
+          <button class="btn btn-outline" id="visitCleanupBtn" onclick="cleanupVisitDuplicates()" title="按相同 key（联系时间+客户+联系人+手机号+签到事件+员工+部门+签到地址+备注）清理重复，每组仅保留第一条">🧹 清理重复</button>
         </div>
         <div class="form-group"><label>部门</label><select class="form-control" id="visitFDept" onchange="resetVisitPage()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}">${d}</option>`).join('')}</select></div>
         <div class="form-group"><label>销售</label><select class="form-control" id="visitFPerson" onchange="resetVisitPage()"><option value="">全部人员</option>${persons.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div>
@@ -6476,6 +6477,52 @@ function parseVisitCSV(text) {
   }
   if (field || row.length) { row.push(field); rows.push(row); }
   return rows;
+}
+
+// 拜访数据·查重 key（与导入查重逻辑一致）：联系时间(到分钟)+客户+联系人+手机号+签到事件+员工+部门+签到地址+备注，空白归一
+function buildVisitDupKey(o) {
+  const _normCell = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  const _normTimeMin = s => { const t = normContactTime(s || ''); return t ? t.slice(0, 16) : ''; };
+  return [_normTimeMin(o.contactTime), _normCell(o.customer), _normCell(o.contactPerson), _normCell(o.phone), _normCell(o.signinEvent), _normCell(o.employee), canonDept(o.department||''), _normCell(o.signinAddress), _normCell(o.remark)].join('|');
+}
+
+// 拜访数据·按相同 key 清理重复：每组相同 key 仅保留第一条，删除其余（先弹窗确认，逐条删除并同步内存）
+async function cleanupVisitDuplicates() {
+  if (!hasPermission('visitData')) { showToast('无权限执行清理', 'warning'); return; }
+  // 清理前确保内存中的拜访数据是最新的（避免登录后未刷新/缓存为空而漏清）
+  if ((cloudData.visitRecords || []).length === 0) {
+    await ensureVisitDataLoaded();
+  }
+  const records = cloudData.visitRecords || [];
+  if (!records.length) { showToast('没有可清理的拜访数据', 'warning'); return; }
+  const seen = new Map();      // key -> first record (保留)
+  const dupIds = [];
+  for (const r of records) {
+    const key = buildVisitDupKey(r);
+    if (!key) continue;
+    if (seen.has(key)) dupIds.push(r.id);
+    else seen.set(key, r);
+  }
+  if (!dupIds.length) {
+    const alertEl0 = document.getElementById('visitAlert');
+    if (alertEl0) alertEl0.innerHTML = '<div class="alert alert-success">✅ 未检测到重复拜访数据</div>';
+    showToast('未检测到重复记录 👍', 'success'); return;
+  }
+  if (!confirm('即将删除 ' + dupIds.length + ' 条重复拜访数据（每组相同 key 仅保留第一条）。此操作不可撤销，确认继续？')) return;
+  const btn = document.getElementById('visitCleanupBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 清理中...'; }
+  let ok = 0, fail = 0;
+  for (const id of dupIds) {
+    try { await apiDelete('visitRecords', id); ok++; }
+    catch (e) { fail++; console.error('删除拜访记录失败', id, e); }
+  }
+  // 本地同步移除，避免下次查重仍把它们算作"已有"
+  cloudData.visitRecords = records.filter(r => !dupIds.includes(r.id));
+  if (btn) { btn.disabled = false; btn.textContent = '🧹 清理重复'; }
+  const alertEl = document.getElementById('visitAlert');
+  if (alertEl) alertEl.innerHTML = '<div class="alert alert-success">✅ 已清理 ' + ok + ' 条重复拜访数据' + (fail ? '，' + fail + ' 条删除失败' : '') + '</div>';
+  renderVisitTable();
+  showToast('清理完成：删除 ' + ok + ' 条' + (fail ? '，失败 ' + fail + ' 条' : ''));
 }
 
 async function handleVisitUpload(input) {
