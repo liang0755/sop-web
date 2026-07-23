@@ -9117,6 +9117,15 @@ function sbSortBy(col, tid) {
   renderSalesBoards();
 }
 
+// 团队/销售员业绩「动态同比」单元格：年初(01)→显示范围结束月的今年累计 vs 去年同区间累计
+function dynYoyCellHTML(row) {
+  if (row.dynYoy == null) return `<td class="num"><div class="yoy-none" style="white-space:nowrap">— 同比</div></td>`;
+  const g = row.dynYoy;
+  return `<td class="num"><div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${g >= 0 ? '+' : ''}${g.toFixed(1)}%</div>` +
+    `<div style="font-size:11px;color:var(--gray-500);white-space:nowrap">今年 ${fmtSalesMoney(row.dynThis)}</div>` +
+    `<div style="font-size:11px;color:var(--gray-400);white-space:nowrap">去年 ${fmtSalesMoney(row.dynLast)}</div></td>`;
+}
+
 function renderSalesBoardTable(tid, key) {
   const st = sbSortState[tid] || {};
   const sbSortCol = st.col || null;
@@ -9137,17 +9146,42 @@ function renderSalesBoardTable(tid, key) {
     row.t = t;
     return row;
   });
+  const sbYearVal = document.getElementById('sbYear') ? document.getElementById('sbYear').value : '';
+  // 动态同比：年初(01) → 当前显示范围的结束月（sbMTo），今年累计 vs 去年同区间累计
+  const sbEndM = parseInt((document.getElementById('sbMTo') ? document.getElementById('sbMTo').value : '12'), 10) || 12;
+  const sbCumThis = {};
+  cloudData.salesRecords.forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== sbYearVal) return;
+    const mm = parseInt(dm.slice(5), 10);
+    if (!(mm >= 1 && mm <= sbEndM)) return;
+    const k = r[key] || '(未分类)';
+    sbCumThis[k] = (sbCumThis[k] || 0) + toNum(r.amount);
+  });
+  const sbLy = String(parseInt(sbYearVal, 10) - 1);
+  const sbCumLast = {};
+  Object.keys(sbLastYearTeamMap).forEach(k => {
+    let s = 0;
+    for (let mm = 1; mm <= sbEndM; mm++) s += (sbLastYearTeamMap[k][sbLy + '-' + String(mm).padStart(2, '0')] || 0);
+    sbCumLast[k] = s;
+  });
+  rowsArr.forEach(row => {
+    row.dynThis = sbCumThis[row.k] || 0;
+    row.dynLast = sbCumLast[row.k] || 0;
+    row.dynYoy = row.dynLast > 0 ? (row.dynThis - row.dynLast) / row.dynLast * 100 : null;
+  });
   if (sbSortCol) {
     rowsArr.sort((a, b) => {
-      const va = sbSortCol === 'total' ? a.t : (a[sbSortCol] || 0);
-      const vb = sbSortCol === 'total' ? b.t : (b[sbSortCol] || 0);
+      let va, vb;
+      if (sbSortCol === 'total') { va = a.t; vb = b.t; }
+      else if (sbSortCol === 'dynyoy') { va = (a.dynYoy == null ? -1e15 : a.dynYoy); vb = (b.dynYoy == null ? -1e15 : b.dynYoy); }
+      else { va = a[sbSortCol] || 0; vb = b[sbSortCol] || 0; }
       return sbSortDir === 'asc' ? va - vb : vb - va;
     });
   } else {
     rowsArr.sort((a, b) => b.t - a.t);
   }
   const userMap = key === 'salesperson' ? buildUserStatusMap() : null;
-  const sbYearVal = document.getElementById('sbYear') ? document.getElementById('sbYear').value : '';
   const teamTargets = (key === 'team' && cloudData.formConfig.teamTargets && cloudData.formConfig.teamTargets[sbYearVal]) || {};
   let h = '<thead><tr><th>' + (key === 'salesperson' ? '销售员' : '团队/门店') + '</th>';
   months.forEach(m => {
@@ -9157,7 +9191,10 @@ function renderSalesBoardTable(tid, key) {
   });
   const totInd = sbSortCol === 'total' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
   const totAct = sbSortCol === 'total' ? ' active' : '';
-  h += `<th class="num sort-th${totAct}" onclick="sbSortBy('total', '${tid}')">合计<span class="sort-ind${totAct}">${totInd}</span></th></tr></thead><tbody>`;
+  h += `<th class="num sort-th${totAct}" onclick="sbSortBy('total', '${tid}')">合计<span class="sort-ind${totAct}">${totInd}</span></th>`;
+  const dynInd = sbSortCol === 'dynyoy' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
+  const dynAct = sbSortCol === 'dynyoy' ? ' active' : '';
+  h += `<th class="num sort-th${dynAct}" onclick="sbSortBy('dynyoy', '${tid}')">动态同比<span style="font-size:10px;font-weight:400;color:var(--gray-400)"> 年初→${sbEndM}月</span><span class="sort-ind${dynAct}">${dynInd}</span></th></tr></thead><tbody>`;
   const colTot = {};
   rowsArr.forEach(row => {
     const label = key === 'team' ? `<span class="badge badge-team">${esc(row.k)}</span>` : (esc(row.k) + userStatusBadge(row.k, userMap));
@@ -9195,9 +9232,13 @@ function renderSalesBoardTable(tid, key) {
       } else {
         totCell += `<div class="yoy-none">目标未设</div>`;
       }
-      h += `<td class="num">${totCell}</td></tr>`;
+      h += `<td class="num">${totCell}</td>`;
+      h += dynYoyCellHTML(row);
+      h += `</tr>`;
     } else {
-      h += `<td class="num">${fmtSalesMoney(row.t)}</td></tr>`;
+      h += `<td class="num">${fmtSalesMoney(row.t)}</td>`;
+      h += dynYoyCellHTML(row);
+      h += `</tr>`;
     }
   });
   h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
@@ -9209,7 +9250,16 @@ function renderSalesBoardTable(tid, key) {
     const gr = gt / gTgt * 100;
     gtCell += `<div style="font-size:11px;margin-top:2px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(gTgt)} · 完成 ${gr.toFixed(1)}%</div>`;
   }
-  h += `<td class="num">${gtCell}</td></tr></tfoot>`;
+  let gtDyn = '';
+  const gDynThis = rowsArr.reduce((s, r) => s + (r.dynThis || 0), 0);
+  const gDynLast = rowsArr.reduce((s, r) => s + (r.dynLast || 0), 0);
+  if (gDynLast > 0) {
+    const gg = (gDynThis - gDynLast) / gDynLast * 100;
+    gtDyn = `<td class="num"><div class="${gg >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}%</div><div style="font-size:11px;color:var(--gray-500);white-space:nowrap">今年 ${fmtSalesMoney(gDynThis)}</div><div style="font-size:11px;color:var(--gray-400);white-space:nowrap">去年 ${fmtSalesMoney(gDynLast)}</div></td>`;
+  } else {
+    gtDyn = `<td class="num"><div class="yoy-none" style="white-space:nowrap">— 同比</div></td>`;
+  }
+  h += `<td class="num">${gtCell}</td>${gtDyn}</tr></tfoot>`;
   document.getElementById(tid).innerHTML = h;
 }
 
@@ -9376,26 +9426,44 @@ function exportSalesBoard2() {
   if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
   const year = document.getElementById('sbYear') ? document.getElementById('sbYear').value : new Date().getFullYear().toString();
   const months = sbMonthList();
+  const sbEndM = parseInt((document.getElementById('sbMTo') ? document.getElementById('sbMTo').value : '12'), 10) || 12;
   const targets = (cloudData.formConfig.teamTargets && cloudData.formConfig.teamTargets[year]) || {};
   const map = {};
   cloudData.salesRecords.forEach(r => { const dm = r.docMonth || ''; if (!months.includes(dm)) return; const k = r.team || '(未分类)'; if (!map[k]) map[k] = {}; map[k][dm] = (map[k][dm] || 0) + toNum(r.amount); });
-  const rows = Object.keys(map).map(k => { let t = 0; months.forEach(m => t += (map[k][m] || 0)); return { k, t }; }).sort((a, b) => b.t - a.t);
+  // 动态同比累计（年初→sbEndM）
+  const sbCumThis = {};
+  cloudData.salesRecords.forEach(r => { const dm = r.docMonth || ''; if (dm.slice(0, 4) !== year) return; const mm = parseInt(dm.slice(5), 10); if (!(mm >= 1 && mm <= sbEndM)) return; const k = r.team || '(未分类)'; sbCumThis[k] = (sbCumThis[k] || 0) + toNum(r.amount); });
+  const sbLy = String(parseInt(year, 10) - 1);
+  const sbCumLast = {};
+  Object.keys(sbLastYearTeamMap).forEach(k => { let s = 0; for (let mm = 1; mm <= sbEndM; mm++) s += (sbLastYearTeamMap[k][sbLy + '-' + String(mm).padStart(2, '0')] || 0); sbCumLast[k] = s; });
+  const rows = Object.keys(map).map(k => {
+    let t = 0; months.forEach(m => t += (map[k][m] || 0));
+    const dt = sbCumThis[k] || 0, dl = sbCumLast[k] || 0;
+    const dy = dl > 0 ? (dt - dl) / dl * 100 : null;
+    return { k, t, dt, dl, dy };
+  }).sort((a, b) => b.t - a.t);
   if (!rows.length) { showToast('当前无数据可导出', 'error'); return; }
   const pct = (a, b) => b > 0 ? (Math.round(a / b * 1000) / 10 + '%') : '—';
-  const header1 = ['团队/门店']; months.forEach(m => { header1.push(parseInt(m.slice(5), 10) + '月'); header1.push(''); header1.push(''); }); header1.push('合计'); header1.push(''); header1.push('');
-  const header2 = ['']; months.forEach(() => { header2.push('业绩'); header2.push('目标'); header2.push('完成率'); }); header2.push('业绩'); header2.push('目标'); header2.push('完成率');
+  const dyPct = dy => dy == null ? '—' : (Math.round(dy * 10) / 10 + '%');
+  const header1 = ['团队/门店']; months.forEach(m => { header1.push(parseInt(m.slice(5), 10) + '月'); header1.push(''); header1.push(''); }); header1.push('合计'); header1.push(''); header1.push(''); header1.push('动态同比(年初→' + sbEndM + '月)'); header1.push(''); header1.push('');
+  const header2 = ['']; months.forEach(() => { header2.push('业绩'); header2.push('目标'); header2.push('完成率'); }); header2.push('业绩'); header2.push('目标'); header2.push('完成率'); header2.push('今年累计'); header2.push('去年累计'); header2.push('同比');
   const aoa = [header1, header2];
   const colAct = {}, colTgt = {};
   rows.forEach(row => {
     const arr = [row.k]; let rowTgt = 0;
     months.forEach(m => { const v = map[row.k][m] || 0; const tg = (targets[row.k] && targets[row.k][m.slice(5)]) || 0; colAct[m] = (colAct[m] || 0) + v; colTgt[m] = (colTgt[m] || 0) + tg; rowTgt += tg; arr.push(v); arr.push(tg); arr.push(pct(v, tg)); });
-    arr.push(row.t); arr.push(rowTgt); arr.push(pct(row.t, rowTgt)); aoa.push(arr);
+    arr.push(row.t); arr.push(rowTgt); arr.push(pct(row.t, rowTgt));
+    arr.push(row.dt); arr.push(row.dl); arr.push(dyPct(row.dy));
+    aoa.push(arr);
   });
   const totalRow = ['合计']; let gAct = 0, gTgt = 0;
   months.forEach(m => { const a = colAct[m] || 0, tg = colTgt[m] || 0; gAct += a; gTgt += tg; totalRow.push(a); totalRow.push(tg); totalRow.push(pct(a, tg)); });
-  totalRow.push(gAct); totalRow.push(gTgt); totalRow.push(pct(gAct, gTgt)); aoa.push(totalRow);
+  totalRow.push(gAct); totalRow.push(gTgt); totalRow.push(pct(gAct, gTgt));
+  let gDt = 0, gDl = 0; rows.forEach(r => { gDt += r.dt; gDl += r.dl; });
+  totalRow.push(gDt); totalRow.push(gDl); totalRow.push(dyPct(gDl > 0 ? (gDt - gDl) / gDl * 100 : null));
+  aoa.push(totalRow);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const merges = []; let ci = 1; months.forEach(() => { merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ci += 3; }); merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ws['!merges'] = merges;
+  const merges = []; let ci = 1; months.forEach(() => { merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ci += 3; }); merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ci += 3; merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ws['!merges'] = merges;
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '团队业绩统计');
   XLSX.writeFile(wb, `团队业绩统计_${year}_${months[0].slice(5)}-${months[months.length - 1].slice(5)}月.xlsx`);
   showToast('已导出团队业绩统计', 'success');
