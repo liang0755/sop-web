@@ -399,8 +399,8 @@ tr:hover td{background:var(--gray-50)}
 /* ===== 业绩明细 / 业绩看板 专用样式 ===== */
 .badge-team{background:var(--primary-light);color:var(--primary)}
 .team-summary{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}
-.team-pill{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:10px 14px;flex:1 1 160px;min-width:160px;text-align:center}
-.ts-title{font-size:13px;font-weight:600;color:var(--gray-600);margin:14px 0 8px}
+.team-pill{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:7px 12px;flex:1 1 160px;min-width:160px;text-align:center}
+.ts-title{font-size:13px;font-weight:600;color:var(--gray-600);margin:9px 0 5px}
 .ts-pills{display:flex;gap:12px;flex-wrap:wrap;margin-top:4px}
 .stat-box.primary{background:linear-gradient(135deg,var(--primary),#1d4ed8);border-color:transparent}
 .stat-box.primary .v{color:#fff}
@@ -408,15 +408,15 @@ tr:hover td{background:var(--gray-50)}
 .team-pill .t{font-size:12px;color:var(--gray-500)}
 .team-pill .a{font-size:17px;font-weight:700;color:var(--primary)}
 .stat-row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px}
-.year-summary-row{display:flex;align-items:stretch;gap:16px;flex-wrap:wrap;padding:16px 0;border-bottom:1px solid var(--gray-200)}
+.year-summary-row{display:flex;align-items:stretch;gap:16px;flex-wrap:wrap;padding:9px 0;border-bottom:1px solid var(--gray-200)}
 .year-summary-row:first-child{padding-top:0}
 .year-summary-row:last-child{border-bottom:none}
-.year-label{font-size:22px;font-weight:800;color:var(--primary);min-width:58px;display:flex;align-items:center;justify-content:center;letter-spacing:1px}
+.year-label{font-size:19px;font-weight:800;color:var(--primary);min-width:52px;display:flex;align-items:center;justify-content:center;letter-spacing:1px}
 .year-stats{display:flex;gap:12px;flex:1 1 340px;flex-wrap:wrap}
 .year-stats .stat-box{flex:1 1 110px;margin:0}
-.year-teams{flex:2 1 360px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:12px 14px}
-.stat-box{flex:1;min-width:160px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:14px 16px}
-.stat-box .v{font-size:20px;font-weight:700;color:var(--primary)}
+.year-teams{flex:2 1 360px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:8px 12px}
+.stat-box{flex:1;min-width:160px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:10px 14px}
+.stat-box .v{font-size:18px;font-weight:700;color:var(--primary)}
 .stat-box .l{font-size:12px;color:var(--gray-500);margin-top:4px}
 .import-note{background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:14px 16px;font-size:13px;line-height:1.9}
 .import-note .ok{color:var(--success);font-weight:600}
@@ -457,8 +457,8 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
 .source-summary-table tbody td:first-child{background:var(--gray-50);font-weight:600}
 .month-chip-all { border-style: dashed; }
 .month-chip-all.active { background: var(--gray-500); border-color: var(--gray-500); }
-/* Dashboard new cards (当月漏交日历 / 上月销冠 / 上周拜访冠军) */
-.dash-new-grid{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:16px;margin-bottom:20px}
+/* Dashboard new cards (当月漏交日报 / 当月漏交周报 / 上月销冠 / 上周拜访冠军) */
+.dash-new-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px}
 .dash-new-card{background:#fff;border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:240px}
 .dash-new-card-title{font-size:14px;font-weight:600;color:var(--gray-700);margin-bottom:12px;display:flex;align-items:center;gap:6px}
 .missed-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
@@ -475,6 +475,10 @@ table tfoot .total-row td{background:var(--primary-light);font-weight:700;color:
 .champion-meta{font-size:12px;color:var(--gray-500)}
 .champion-value{font-size:22px;font-weight:700;color:#dc2626;margin:2px 0}
 .champion-empty{color:var(--gray-400);font-size:13px}
+/* 拜访数据-卡点说明多行输入框 + 展开 */
+.blocker-note-cell{position:relative;vertical-align:top}
+.blocker-note-input{width:100%;resize:vertical;min-height:32px;max-height:120px;font-size:12px;line-height:1.4;font-family:inherit}
+.blocker-note-toggle{font-size:11px;padding:2px 6px;margin-top:2px}
 @media (max-width: 900px){.dash-new-grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -1499,6 +1503,15 @@ function _dashAddDays(ymd, days) {
   return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
 }
 
+// 给定日期字符串，返回其所在周的周一（YYYY-MM-DD），用于按周判断是否交周报
+function getWeekStartOf(ds) {
+  const p = ds.split('-').map(Number);
+  const dt = new Date(p[0], p[1] - 1, p[2]);
+  const d = dt.getDay() || 7;
+  dt.setDate(dt.getDate() - d + 1);
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+}
+
 function renderMissedDailyCard() {
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth();
@@ -1552,7 +1565,10 @@ function renderLastWeekVisitChampion() {
   const lastSunStr = _dashAddDays(thisMon, -1);
   const bySp = {};
   (cloudData.visitRecords || []).forEach(r => {
-    if (!r.date || r.date < lastMonStr || r.date > lastSunStr) return;
+    const vd = (r.contactTime || '').trim();
+    if (!vd) return;
+    const vds = normContactTime(vd).split(' ')[0];
+    if (vds < lastMonStr || vds > lastSunStr) return;
     const sp = (r.employee || '').trim();
     if (!sp) return;
     bySp[sp] = (bySp[sp] || 0) + 1;
@@ -1566,7 +1582,96 @@ function renderLastWeekVisitChampion() {
   return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上周拜访冠军</div><div class="champion-card-body"><div class="champion-trophy">🥇</div><div class="champion-name">' + esc(champ) + '</div><div class="champion-meta">' + esc(dept) + '</div><div class="champion-value">' + max + ' 次</div><div class="champion-meta">' + lastMonStr + ' ~ ' + lastSunStr + ' 拜访</div></div></div>';
 }
 
+// 当月漏交周报日历看板：与漏交日报同格式，某天所在周（周一~周日）若未提交周报则该周整周标红
+function renderMissedWeeklyCard() {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const todayStr = localYMD();
+  const myWeekStarts = new Set((cloudData.weeklyReports || []).filter(r => r.userId === currentUser.id && r.weekStart).map(r => r.weekStart));
+  const firstDay = new Date(y, m, 1);
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const startCol = (firstDay.getDay() + 6) % 7;
+  const headers = ['一','二','三','四','五','六','日'];
+  let cells = headers.map(h => '<div class="missed-cal-h">' + h + '</div>').join('');
+  for (let i = 0; i < startCol; i++) cells += '<div class="missed-cal-cell empty"></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    const wd = getWeekStartOf(ds);
+    const isFuture = ds > todayStr;
+    const isMissed = !isFuture && !myWeekStarts.has(wd);
+    const isToday = ds === todayStr;
+    const cls = ['missed-cal-cell'];
+    if (isMissed) cls.push('missed');
+    if (isToday) cls.push('today');
+    if (isFuture) cls.push('future');
+    cells += '<div class="' + cls.join(' ') + '" title="' + ds + (isMissed ? ' · 当周未交周报' : '') + '">' + d + '</div>';
+  }
+  return '<div class="dash-new-card"><div class="dash-new-card-title">📅 当月漏交周报（' + (m + 1) + '月）</div><div class="missed-cal-grid">' + cells + '</div></div>';
+}
+
+// 确保首页「销冠 / 拜访冠军」卡片所需数据对全员可见（员工默认不加载 salesRecords/visitRecords 以提速）
+// 仅在缺失时按需懒加载，不阻塞初始登录加载；数据加载完成后重渲染仪表盘
+let _championDataLoading = false;
+let _championDataReady = false;
+async function ensureChampionData() {
+  const salesArr = Array.isArray(cloudData.salesRecords) ? cloudData.salesRecords : (cloudData.salesRecords ? Object.values(cloudData.salesRecords) : []);
+  const visitArr = Array.isArray(cloudData.visitRecords) ? cloudData.visitRecords : (cloudData.visitRecords ? Object.values(cloudData.visitRecords) : []);
+  const haveSales = salesArr.length > 0;
+  const haveVisit = visitArr.length > 0;
+  if (haveSales && haveVisit) { _championDataReady = true; return; }
+  if (_championDataLoading) return;
+  _championDataLoading = true;
+  try {
+    const now = new Date();
+    let lastM = now.getMonth() - 1, lastY = now.getFullYear();
+    if (lastM < 0) { lastM = 11; lastY--; }
+    const ym = lastY + '-' + String(lastM + 1).padStart(2, '0');
+    const promises = [];
+    if (!haveSales) {
+      promises.push((async () => {
+        try {
+          let arr = [];
+          let res = await fetch(FB_BASE + '/salesRecords.json?orderBy="docMonth"&equalTo="' + encodeURIComponent(ym) + '"');
+          let j = res.ok ? await res.json() : null;
+          if (j && !j.error) arr = hydrateSalesRecords(j);
+          if (!arr.length) {
+            let fr = await fetch(FB_BASE + '/salesRecords.json');
+            let fj = fr.ok ? await fr.json() : null;
+            if (fj && !fj.error) arr = hydrateSalesRecords(fj);
+          }
+          const cur = Array.isArray(cloudData.salesRecords) ? cloudData.salesRecords : [];
+          const existing = new Set(cur.map(r => r.id).filter(Boolean));
+          const merged = cur.slice();
+          arr.forEach(r => { if (r && r.id && !existing.has(r.id)) merged.push(r); });
+          cloudData.salesRecords = merged;
+        } catch (e) { console.warn('champion sales load failed', e); }
+      })());
+    }
+    if (!haveVisit) {
+      promises.push((async () => {
+        try {
+          const res = await fetch(FB_BASE + '/visitRecords.json');
+          const j = res.ok ? await res.json() : null;
+          const arr = (j && !j.error) ? Object.values(j) : [];
+          const cur = Array.isArray(cloudData.visitRecords) ? cloudData.visitRecords : [];
+          const existing = new Set(cur.map(r => r.id).filter(Boolean));
+          const merged = cur.slice();
+          arr.forEach(r => { if (r && r.id && !existing.has(r.id)) merged.push(r); });
+          cloudData.visitRecords = merged;
+        } catch (e) { console.warn('champion visit load failed', e); }
+      })());
+    }
+    await Promise.all(promises);
+    _championDataReady = true;
+  } finally {
+    _championDataLoading = false;
+  }
+  const active = document.querySelector('.nav-item.active');
+  if (active && active.dataset.page === 'dashboard') renderDashboard();
+}
+
 function renderDashboard() {
+  ensureChampionData();
   const myDaily = cloudData.dailyReports.filter(r => r.userId === currentUser.id);
   const myWeekly = cloudData.weeklyReports.filter(r => r.userId === currentUser.id);
   const today = localYMD();
@@ -1586,6 +1691,7 @@ function renderDashboard() {
     const myWeek = myWeekly.find(r => r.weekStart === thisWeekStart);
     const dashNewGrid = `<div class="dash-new-grid">
       ${renderMissedDailyCard()}
+      ${renderMissedWeeklyCard()}
       ${renderLastMonthSalesChampion()}
       ${renderLastWeekVisitChampion()}
     </div>`;
@@ -1669,41 +1775,7 @@ function renderDashboard() {
       </div>
     </div>`;
 
-  // --- Kanban 3: Monthly submission counts ---
-  const now = new Date();
-  const ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-  const monthDaily = cloudData.dailyReports.filter(r => r.reportDate && r.reportDate.startsWith(ym));
-  const monthWeekly = cloudData.weeklyReports.filter(r => r.weekStart && r.weekStart.startsWith(ym));
-  const monthStats = activeUsers.filter(u => u.role !== 'manager').map(u => {
-    const dCount = monthDaily.filter(r => r.userId === u.id).length;
-    const wCount = monthWeekly.filter(r => r.userId === u.id).length;
-    return {name: u.name, department: u.department, dCount, wCount};
-  }).sort((a, b) => (b.dCount + b.wCount) - (a.dCount + a.wCount));
-
-  const totalD = monthStats.reduce((s, x) => s + x.dCount, 0);
-  const totalW = monthStats.reduce((s, x) => s + x.wCount, 0);
-
-  const monthKanban = `
-    <div class="card">
-      <div class="card-header"><h4>📊 本月提交统计 <span style="font-size:13px;font-weight:400;color:var(--gray-500)">（${now.getFullYear()}年${now.getMonth()+1}月）</span></h4>
-        <div style="display:flex;gap:8px"><span class="badge badge-success">日报 ${totalD} 次</span><span class="badge badge-warning">周报 ${totalW} 次</span></div>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>姓名</th><th>部门</th><th>日报提交次数</th><th>周报提交次数</th><th>合计</th></tr></thead>
-        <tbody>
-          ${monthStats.map(s => `
-            <tr>
-              <td><strong>${s.name}</strong></td>
-              <td>${s.department}</td>
-              <td>${s.dCount > 0 ? `<span style="color:var(--success);font-weight:600">${s.dCount}</span>` : '<span style="color:var(--gray-400)">0</span>'}</td>
-              <td>${s.wCount > 0 ? `<span style="color:var(--warning);font-weight:600">${s.wCount}</span>` : '<span style="color:var(--gray-400)">0</span>'}</td>
-              <td><strong>${s.dCount + s.wCount}</strong></td>
-            </tr>
-          `).join('')}
-          <tr style="background:var(--gray-50);font-weight:700"><td colspan="2">总计</td><td>${totalD}</td><td>${totalW}</td><td>${totalD + totalW}</td></tr>
-        </tbody>
-      </table></div>
-    </div>`;
+  // --- Kanban 3 (本月提交统计) 已按需求移除 ---
 
   const teamDailyToday = cloudData.dailyReports.filter(r => r.reportDate === today).length;
 
@@ -1714,14 +1786,14 @@ function renderDashboard() {
     </div>
     <div class="dash-new-grid">
       ${renderMissedDailyCard()}
+      ${renderMissedWeeklyCard()}
       ${renderLastMonthSalesChampion()}
       ${renderLastWeekVisitChampion()}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
       ${dailyKanban}
       ${weeklyKanban}
-    </div>
-    ${monthKanban}`;
+    </div>`;
 }
 
 function onDashDailyDateChange(val) {
@@ -6104,7 +6176,7 @@ function renderVisitTable() {
             <option value="">未设置</option>
             ${resultOptions}
           </select></td>
-          <td><input type="text" class="form-control form-control-sm" value="${bn.replace(/"/g,'&quot;').replace(/</g,'&lt;')}" onchange="onVisitEdit('${r.id}','blockerNote',this.value)" placeholder="输入卡点说明"></td>
+          <td class="blocker-note-cell"><textarea class="form-control form-control-sm blocker-note-input" rows="2" onchange="onVisitEdit('${r.id}','blockerNote',this.value)" placeholder="输入卡点说明">${bn.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>${bn.length > 60 ? `<button class="btn btn-outline btn-sm blocker-note-toggle" onclick="showBlockerNoteModal('${r.id}')">全文 ▾</button>` : ''}</td>
         </tr>`;
       }).join('')}
     </tbody>
@@ -6138,6 +6210,25 @@ function showVisitRemarkModal(recordId) {
   if (!r) return;
   const text = (r.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   showModal('备注详情', `<div style="margin-bottom:12px;font-size:13px;color:var(--gray-600)">${r.contactTime || ''} · ${r.customer || ''} · ${r.employee || ''}</div><div class="remark-popup-content">${text || '<span style="color:var(--gray-400)">暂无备注</span>'}</div><div class="modal-footer"><button class="btn btn-primary" onclick="closeModal()">关闭</button></div>`, true);
+}
+
+// 卡点说明：文字过多时点击「全文 ▾」弹出完整编辑框（item 8）
+function showBlockerNoteModal(recordId) {
+  const r = cloudData.visitRecords.find(x => x.id === recordId);
+  if (!r) return;
+  const cur = visitEditBuffer[recordId]?.blockerNote !== undefined ? visitEditBuffer[recordId].blockerNote : (r.blockerNote || '');
+  showModal('卡点说明（完整）', `<form onsubmit="return saveBlockerNoteModal(event,'${recordId}')" style="margin:0">
+    <div style="margin-bottom:10px;font-size:13px;color:var(--gray-600)">${r.contactTime || ''} · ${r.customer || ''} · ${r.employee || ''}</div>
+    <div class="form-group"><label>卡点说明</label><textarea class="form-control" id="blkNoteFull" rows="9" style="resize:vertical;line-height:1.5">${cur.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="submit" class="btn btn-primary">保存</button></div>
+  </form>`);
+}
+function saveBlockerNoteModal(e, id) {
+  e.preventDefault();
+  const v = document.getElementById('blkNoteFull').value;
+  onVisitEdit(id, 'blockerNote', v);
+  closeModal();
+  return false;
 }
 
 // 拜访数据分页控件
@@ -6612,6 +6703,9 @@ async function renderMgrReport() {
   const weekLabelMap = {};
   cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers')).forEach(r => { if (r.weekStart) weekLabelMap[r.weekStart] = r.weekLabel || (r.weekStart + ' ~ ' + r.weekEnd); });
   const weekOptions = Object.keys(weekLabelMap).sort().reverse().map(ws => `<option value="${ws}">${weekLabelMap[ws]}</option>`).join('');
+  const _mgrMonths = {};
+  Object.keys(weekLabelMap).forEach(ws => { const ym = ws.slice(0,7); _mgrMonths[ym] = true; });
+  const mgrMonths = Object.keys(_mgrMonths).sort().reverse();
 
   body.innerHTML = `
     <div class="card" style="margin-bottom:20px">
@@ -6653,10 +6747,20 @@ async function renderMgrReport() {
       <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <h4>📋 已提交的管理周报</h4>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select class="form-control form-control-sm" id="mgrReportWeekFilter" onchange="renderMgrReportList()" style="min-width:190px">
-            <option value="">全部周次</option>
-            ${weekOptions}
+          <select class="form-control form-control-sm" id="mgrReportMonthFilter" onchange="onMgrReportMonthChange()" style="min-width:140px">
+            <option value="">全部月份</option>
+            ${mgrMonths.map(m => `<option value="${m}">${m}</option>`).join('')}
           </select>
+          <div style="position:relative">
+            <button class="btn btn-sm btn-outline" onclick="toggleMgrWeekCheck()">📆 选择周次 ▾</button>
+            <div id="mgrWeekCheckPop" style="display:none;position:absolute;right:0;top:36px;z-index:60;background:#fff;border:1px solid var(--gray-200);border-radius:8px;padding:10px;box-shadow:0 6px 20px rgba(0,0,0,.15);max-height:280px;overflow:auto;min-width:250px">
+              <div style="display:flex;gap:8px;margin-bottom:8px">
+                <button class="btn btn-xs btn-outline" onclick="mgrWeekCheckAll(true)">全选</button>
+                <button class="btn btn-xs btn-outline" onclick="mgrWeekCheckAll(false)">清空</button>
+              </div>
+              <div id="mgrWeekCheckList"></div>
+            </div>
+          </div>
           <button class="btn btn-sm btn-outline" onclick="exportMgrReports()">📥 导出</button>
         </div>
       </div>
@@ -6686,6 +6790,7 @@ async function renderMgrReport() {
   }
 
   renderMgrReportList();
+  buildMgrWeekCheckList();
 }
 
 // 将拜访汇总快照格式化为「结果→销售人员」明细文本（details 优先，否则回退到计数快照）
@@ -6870,49 +6975,81 @@ async function deleteMgrReport(id) {
   }
 }
 
+// 管理周报：周次多选勾选列表（按月份筛选联动）
+function buildMgrWeekCheckList() {
+  const fm = document.getElementById('mgrReportMonthFilter')?.value || '';
+  const myReports = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers'));
+  const map = {};
+  myReports.forEach(r => { if (r.weekStart) map[r.weekStart] = r.weekLabel || (r.weekStart + ' ~ ' + r.weekEnd); });
+  let weeks = Object.keys(map).sort().reverse();
+  if (fm) weeks = weeks.filter(ws => ws.slice(0,7) === fm);
+  const list = document.getElementById('mgrWeekCheckList');
+  if (!list) return;
+  list.innerHTML = weeks.length ? weeks.map(ws => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:4px 0;cursor:pointer"><input type="checkbox" class="mgr-week-cb" value="${ws}" onchange="renderMgrReportList()"> ${map[ws]}</label>`).join('') : '<div style="font-size:12px;color:var(--gray-400)">该月份暂无周报</div>';
+}
+function onMgrReportMonthChange() { buildMgrWeekCheckList(); renderMgrReportList(); }
+function toggleMgrWeekCheck() { const p = document.getElementById('mgrWeekCheckPop'); if (p) p.style.display = p.style.display === 'none' ? 'block' : 'none'; }
+function mgrWeekCheckAll(v) { document.querySelectorAll('#mgrWeekCheckList .mgr-week-cb').forEach(cb => cb.checked = v); renderMgrReportList(); }
+
 function renderMgrReportList() {
   const container = document.getElementById('mgrReportList');
   if (!container) return;
-  const fw = document.getElementById('mgrReportWeekFilter')?.value || '';
-  let myReports = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers'));
-  if (fw) myReports = myReports.filter(r => r.weekStart === fw);
-  myReports.sort((a,b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  if (!myReports.length) {
-    container.innerHTML = '<div class="empty-state"><div class="icon">📭</div>' + (fw ? '该周次暂无管理周报记录' : '暂无管理周报记录') + '</div>';
+  const fm = document.getElementById('mgrReportMonthFilter')?.value || '';
+  const checkedWeeks = [...document.querySelectorAll('#mgrWeekCheckList .mgr-week-cb:checked')].map(cb => cb.value);
+  const myReports = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers'));
+  const weekLabelMap = {};
+  myReports.forEach(r => { if (r.weekStart) weekLabelMap[r.weekStart] = r.weekLabel || (r.weekStart + ' ~ ' + r.weekEnd); });
+  let allWeeks = Object.keys(weekLabelMap).sort().reverse();
+  let weeksToShow = allWeeks;
+  if (fm) weeksToShow = weeksToShow.filter(ws => ws.slice(0,7) === fm);
+  if (checkedWeeks.length) weeksToShow = weeksToShow.filter(ws => checkedWeeks.includes(ws));
+  const filtered = myReports.filter(r => weeksToShow.includes(r.weekStart));
+  if (!weeksToShow.length) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无管理周报记录</div>';
     return;
   }
-  container.innerHTML = myReports.map(r => {
-    const snap = r.visitSnapshot || {};
-    const snapCard = renderSnapshotCardHTML(snap);
-    const canEdit = r.userId === currentUser.id || hasPermission('editOthers');
-    const canDelete = r.userId === currentUser.id || hasPermission('deleteOthers');
-    return `<div class="mgr-report-card">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        <div>
-          <span style="font-weight:600;font-size:14px">${r.weekLabel || r.weekStart + ' ~ ' + r.weekEnd}</span>
-          <span style="margin-left:8px;background:var(--gray-100);padding:2px 10px;border-radius:10px;font-size:12px;color:var(--gray-600)">${r.department}</span>
-          <span style="margin-left:8px;font-size:12px;color:var(--gray-500)">提交人：${r.userName || '未知'}</span>
-        </div>
-        <div style="display:flex;gap:4px">
-          ${canEdit ? `<button class="btn btn-sm btn-outline" onclick="editMgrReport('${r.id}')">✏️ 编辑</button>` : ''}
-          ${canEdit ? `<button class="btn btn-sm btn-outline" onclick="regenerateMgrSnapshot('${r.id}')" title="依据最新拜访数据与配置重新生成拜访结果快照">🔄 重算快照</button>` : ''}
-          ${canDelete ? `<button class="btn btn-sm btn-outline" style="color:var(--danger)" onclick="deleteMgrReport('${r.id}')">🗑️ 删除</button>` : ''}
-        </div>
-      </div>
-      <div class="mgr-report-body">
-        <div class="mgr-report-col snapshot">${snapCard}</div>
-        <div class="mgr-report-col content">${(r.content || '').replace(/</g,'&lt;')}</div>
-      </div>
-      <div style="margin-top:8px;font-size:11px;color:var(--gray-400)">${r.createdAt ? '创建：' + r.createdAt.replace('T',' ').slice(0,16) : ''}${r.updatedAt && r.updatedAt !== r.createdAt ? ' · 更新：' + r.updatedAt.replace('T',' ').slice(0,16) : ''}</div>
-    </div>`;
-  }).join('');
+  // 按周横排：每周一列，列内「拜访汇总」在上、「周报内容」正下方
+  container.innerHTML = `<div style="display:flex;gap:16px;overflow-x:auto;padding-bottom:10px">
+    ${weeksToShow.map(ws => {
+      const wkReports = filtered.filter(r => r.weekStart === ws);
+      const label = weekLabelMap[ws] || ws;
+      return `<div style="flex:0 0 340px;min-width:340px;display:flex;flex-direction:column;gap:10px">
+        <div style="font-weight:600;font-size:13px;color:var(--gray-700);border-bottom:2px solid var(--primary);padding-bottom:6px">${label}</div>
+        ${wkReports.map(r => {
+          const snap = r.visitSnapshot || {};
+          const snapCard = renderSnapshotCardHTML(snap);
+          const canEdit = r.userId === currentUser.id || hasPermission('editOthers');
+          const canDelete = r.userId === currentUser.id || hasPermission('deleteOthers');
+          return `<div class="mgr-report-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px">
+              <span style="background:var(--gray-100);padding:2px 10px;border-radius:10px;font-size:12px;color:var(--gray-600)">${r.department}</span>
+              <span style="font-size:12px;color:var(--gray-500)">${r.userName || '未知'}</span>
+              <div style="display:flex;gap:4px">
+                ${canEdit ? `<button class="btn btn-xs btn-outline" onclick="editMgrReport('${r.id}')" title="编辑">✏️</button>` : ''}
+                ${canEdit ? `<button class="btn btn-xs btn-outline" onclick="regenerateMgrSnapshot('${r.id}')" title="重算快照">🔄</button>` : ''}
+                ${canDelete ? `<button class="btn btn-xs btn-outline" style="color:var(--danger)" onclick="deleteMgrReport('${r.id}')" title="删除">🗑️</button>` : ''}
+              </div>
+            </div>
+            <div class="mgr-report-col snapshot">${snapCard}</div>
+            <div class="mgr-report-col content" style="margin-top:8px">${(r.content || '').replace(/</g,'&lt;')}</div>
+            <div style="margin-top:6px;font-size:11px;color:var(--gray-400)">${r.createdAt ? '创建：' + r.createdAt.replace('T',' ').slice(0,16) : ''}${r.updatedAt && r.updatedAt !== r.createdAt ? ' · 更新：' + r.updatedAt.replace('T',' ').slice(0,16) : ''}</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }).join('')}
+  </div>`;
 }
 
-// 导出「管理周报」列表（按当前周次筛选结果）
+// 导出「管理周报」列表（按当前月份+周次多选筛选结果）
 function exportMgrReports() {
-  const fw = document.getElementById('mgrReportWeekFilter')?.value || '';
-  let list = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers'));
-  if (fw) list = list.filter(r => r.weekStart === fw);
+  const fm = document.getElementById('mgrReportMonthFilter')?.value || '';
+  const checkedWeeks = [...document.querySelectorAll('#mgrWeekCheckList .mgr-week-cb:checked')].map(cb => cb.value);
+  const myReports = cloudData.mgrReports.filter(r => r.userId === currentUser.id || hasPermission('editOthers'));
+  let allWeeks = [...new Set(myReports.map(r => r.weekStart).filter(Boolean))].sort().reverse();
+  let weeksToShow = allWeeks;
+  if (fm) weeksToShow = weeksToShow.filter(ws => ws.slice(0,7) === fm);
+  if (checkedWeeks.length) weeksToShow = weeksToShow.filter(ws => checkedWeeks.includes(ws));
+  const list = myReports.filter(r => weeksToShow.includes(r.weekStart));
   if (!list.length) { showToast('没有可导出的周报', 'warning'); return; }
   const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const headers = ['周次', '部门', '提交人', '总拜访数', '拜访结果明细', '周报内容', '创建时间', '更新时间'];
@@ -6935,7 +7072,8 @@ function exportMgrReports() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = '管理周报' + (fw ? '_' + fw : '_全部') + '.csv';
+  const _tag = (fm ? fm : '全部') + (checkedWeeks.length ? '_' + checkedWeeks.length + '周' : '');
+  a.download = '管理周报_' + _tag + '.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('已导出 ' + list.length + ' 条周报');
@@ -7796,6 +7934,15 @@ async function deleteSalesRecord(id) {
   } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
 }
 
+// 业绩汇总-年份显示筛选（多选）；null 表示全部显示
+let summaryYearSel = null;
+let summaryYearAllYears = [];
+function toggleSummaryYear(y) {
+  if (!summaryYearSel) summaryYearSel = new Set(summaryYearAllYears);
+  if (summaryYearSel.has(y)) summaryYearSel.delete(y); else summaryYearSel.add(y);
+  renderSalesDetail();
+}
+
 async function renderSalesDetail() {
   const canEdit = hasPermission('salesDetail');
   const f = salesDetailFilters;
@@ -7820,14 +7967,30 @@ async function renderSalesDetail() {
     if (!y) return;
     (byYear[y] = byYear[y] || []).push(r);
   });
-  const yearBlocks = Object.keys(byYear).sort((a, b) => b.localeCompare(a)).map(y => {
+  // 部门排序：优先按「第X部」数字顺序（一部/二部/三部…），其余排后（item 5）
+  const _teamOrderRank = (t) => {
+    const m = (t || '').match(/第?\s*([一二三四五六七八九十]+)\s*部/);
+    if (!m) return 99;
+    const cn = m[1];
+    const map = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10};
+    return map[cn] || 99;
+  };
+  const allYears = Object.keys(byYear).sort((a, b) => b.localeCompare(a));
+  summaryYearAllYears = allYears;
+  // 年份多选筛选（item 4）：null=全部
+  const selYears = (summaryYearSel && summaryYearSel.size) ? allYears.filter(y => summaryYearSel.has(y)) : allYears;
+  const yearFilterBar = allYears.length ? `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+    <span style="font-size:13px;font-weight:600;color:var(--gray-600)">显示年份：</span>
+    ${allYears.map(y => `<label style="font-size:13px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin:0"><input type="checkbox" ${selYears.includes(y)?'checked':''} onchange="toggleSummaryYear('${y}')"> ${y}</label>`).join('')}
+  </div>` : '';
+  const yearBlocks = selYears.map(y => {
     const recsY = byYear[y];
     const amtY = recsY.reduce((s, r) => s + toNum(r.amount), 0);
     const custY = new Set(recsY.map(r => r.customer).filter(Boolean)).size;
     const avgY = custY ? amtY / custY : 0;
     const tm = {};
     recsY.forEach(r => { const t = r.team || '未分配'; tm[t] = (tm[t] || 0) + toNum(r.amount); });
-    const pills = Object.keys(tm).map(t => `<div class="team-pill"><div class="t">${esc(t)}</div><div class="a">${fmtSalesMoney(tm[t])}</div></div>`).join('');
+    const pills = Object.keys(tm).sort((a,b)=>_teamOrderRank(a)-_teamOrderRank(b)).map(t => `<div class="team-pill"><div class="t">${esc(t)}</div><div class="a">${fmtSalesMoney(tm[t])}</div></div>`).join('');
     return `
       <div class="year-summary-row">
         <div class="year-label">${esc(y)}</div>
@@ -7910,6 +8073,7 @@ async function renderSalesDetail() {
   <div class="card">
     <div class="card-header"><h4>📊 业绩汇总</h4><span style="font-size:12px;color:var(--gray-500)">按年份统计（当前筛选范围内）</span></div>
     <div class="card-body">
+      ${yearFilterBar}
       ${yearBlocks || '<div style="padding:30px;text-align:center;color:var(--gray-400)">暂无数据</div>'}
     </div>
   </div>
