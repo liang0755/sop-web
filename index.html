@@ -775,6 +775,7 @@ async function loadCoreData() {
     // Load honorRecords (荣誉激励，所有角色均需查看首页上月荣誉卡片)
     const hrData = hRes.ok ? await hRes.json() : null;
     cloudData.honorRecords = hrData || {};
+    normalizeHonorRecords();
     isCloudAvailable = true;
   } catch(e) {
     console.warn('Core config fetch failed:', e.message);
@@ -1212,7 +1213,10 @@ async function silentRefresh(page) {
     if (newMgrSnap && typeof newMgrSnap === 'object') cloudData.mgrPerformanceSnapshots = newMgrSnap;
     // 荣誉激励后台刷新
     const newHonor = (iHonor >= 0 && results[iHonor] && results[iHonor].ok) ? await results[iHonor].json() : null;
-    if (newHonor && typeof newHonor === 'object') cloudData.honorRecords = newHonor;
+    if (newHonor && typeof newHonor === 'object') {
+      cloudData.honorRecords = newHonor;
+      normalizeHonorRecords();
+    }
     // Only update + re-render if data count changed (new records added by others)
     if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length || newSales.length !== cloudData.salesRecords.length) {
       cloudData.dailyReports = newDaily;
@@ -1613,6 +1617,59 @@ function renderLastMonthSalesChampion() {
     return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上个月销冠</div><div class="champion-card-body"><div class="champion-empty">' + lastY + '年' + (lastM + 1) + '月暂无销售数据</div></div></div>';
   }
   return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上个月销冠</div><div class="champion-card-body"><div class="champion-trophy">🥇</div><div class="champion-name">' + esc(champ.name) + '</div><div class="champion-meta">' + esc(champ.team || '—') + '</div><div class="champion-value">' + fmtSalesMoney(champ.total) + '</div><div class="champion-meta">' + lastY + '年' + (lastM + 1) + '月业绩</div></div></div>';
+}
+
+// 归一化 honorRecords：把历史 push ID 结构（每条独立 key + 含 awardMonth 字段）按月份聚合成 {YYYY-MM: [...]} 数组结构。
+// 历史原因：更早版本曾用 push ID；当前规范是 YYYY-MM → array。该函数幂等，多次调用结果一致。
+function normalizeHonorRecords() {
+  const rec = cloudData.honorRecords || {};
+  const out = {};
+  let hadPushId = false;
+  for (const k of Object.keys(rec)) {
+    if (/^\d{4}-\d{2}$/.test(k)) {
+      const v = rec[k];
+      if (Array.isArray(v)) {
+        out[k] = v;
+      } else if (v && typeof v === 'object') {
+        // 判断是否为「单条 item」（带 awardMonth/awardName 等字段）—— 是则说明此 key 存的是单条，迁移到对应月份
+        const looksLikeItem = !!(v.awardMonth || v.awardName || v.name || v.salesperson);
+        if (looksLikeItem && v.awardMonth && /^\d{4}-\d{2}$/.test(v.awardMonth)) {
+          if (!out[v.awardMonth]) out[v.awardMonth] = [];
+          out[v.awardMonth].push({
+            awardName: v.awardName || '',
+            salesperson: v.name || v.salesperson || '',
+            team: v.team || '',
+            bonus: toNum(v.bonus),
+            achievement: v.achievement || '',
+            remark: v.remark || v.note || ''
+          });
+          hadPushId = true;
+        } else {
+          // 非标准键值（如 Firebase 把数组转成对象 {0:..,1:..,length}），归一成数组
+          const arr = Object.values(v).filter(x => x && typeof x === 'object');
+          if (arr.length) out[k] = arr;
+          hadPushId = true;
+        }
+      }
+    } else {
+      // 非 YYYY-MM 键：当作 push ID 单条
+      const item = rec[k];
+      if (item && typeof item === 'object' && item.awardMonth && /^\d{4}-\d{2}$/.test(item.awardMonth)) {
+        if (!out[item.awardMonth]) out[item.awardMonth] = [];
+        out[item.awardMonth].push({
+          awardName: item.awardName || '',
+          salesperson: item.name || item.salesperson || '',
+          team: item.team || '',
+          bonus: toNum(item.bonus),
+          achievement: item.achievement || '',
+          remark: item.remark || item.note || ''
+        });
+        hadPushId = true;
+      }
+    }
+  }
+  cloudData.honorRecords = out;
+  // 注意：不写回 Firebase，等用户下次「保存配置」时统一持久化。
 }
 
 // 上月荣誉激励看板：按奖项分组展示获奖人+奖金，无数据则"虚位以待"
