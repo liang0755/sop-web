@@ -6515,10 +6515,16 @@ async function handleVisitUpload(input) {
       else if (h.includes('拜访结果')) colMap.visitResult = i;
       else if (h.includes('卡点') || h.includes('说明')) colMap.blockerNote = i;
     });
+    // 查重前确保内存中的拜访数据是最新的（避免登录后未刷新 / 缓存为空导致 existingKeys 为空而漏查重）
+    await ensureVisitDataLoaded();
     const newRecords = [];
     let dupCount = 0;
-    // 查重 key = 联系时间|客户|联系人|手机号|签到事件|员工|部门|签到地址|备注（不含拜访结果、卡点说明）
-    const buildDupKey = (o) => [normContactTime(o.contactTime||''), o.customer||'', o.contactPerson||'', o.phone||'', o.signinEvent||'', o.employee||'', canonDept(o.department||''), o.signinAddress||'', o.remark||''].map(v => (v||'').trim()).join('|');
+    // 查重 key = 联系时间(精确到分钟,忽略秒差) | 客户 | 联系人 | 手机号 | 签到事件 | 员工 | 部门 | 签到地址 | 备注（不含拜访结果、卡点说明）
+    // ① 时间统一到「YYYY-MM-DD HH:MM」，避免「10:00:00」与「10:00」因秒数差异被判为不同；
+    // ② 各字段折叠多余空白并 trim，避免首尾/中间空格差异导致漏查重。
+    const _normCell = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+    const _normTimeMin = s => { const t = normContactTime(s || ''); return t ? t.slice(0, 16) : ''; };
+    const buildDupKey = (o) => [_normTimeMin(o.contactTime), _normCell(o.customer), _normCell(o.contactPerson), _normCell(o.phone), _normCell(o.signinEvent), _normCell(o.employee), canonDept(o.department||''), _normCell(o.signinAddress), _normCell(o.remark)].join('|');
     // Keys already in DB — duplicates to be filtered out
     const existingKeys = new Set(cloudData.visitRecords.map(e => buildDupKey(e)));
     // Keys already added in this batch — avoid within-file duplicates too
