@@ -7845,7 +7845,9 @@ async function importSalesFile(file) {
       return;
     }
     const get = (r, name) => (r[name] == null ? '' : r[name]);
-    const existingKeys = new Set(cloudData.salesRecords.map(e => e.docNo).filter(Boolean));
+    // 查重 key = 商品名称(A列) + '|' + 单据编号(W列)；仅当「商品名称」与「单据编号」两者都相同才判定为重复并过滤（避免同一单据多商品行被误删）
+    const _dupKey = e => ((e.productName || '') + '|' + (e.docNo || '')).trim();
+    const existingKeys = new Set(cloudData.salesRecords.map(_dupKey).filter(Boolean));
     const batchKeys = new Set();
     let total = rows.length, kept = 0, filtered = 0, dup = 0;
     const corrected = { 'KA 一部（江浙沪区域）': 0, 'KA 二部（广东区域）': 0, 'KA 三部（全国区域）': 0 };
@@ -7856,8 +7858,9 @@ async function importSalesFile(file) {
       const team = SALES_STORE_CORRECTION[storeRaw] || storeRaw;
       corrected[team] = (corrected[team] || 0) + 1;
       const docNo = String(get(r, '单据编号') || '').trim();
-      const key = docNo || (String(get(r, '销售员') || '') + '|' + String(get(r, '单据日期') || '') + '|' + String(get(r, '商品名称') || ''));
-      if ((docNo && existingKeys.has(docNo)) || batchKeys.has(key)) { dup++; continue; }
+      const productName = String(get(r, '商品名称') || '').trim();
+      const key = productName + '|' + docNo;
+      if (existingKeys.has(key) || batchKeys.has(key)) { dup++; continue; }
       batchKeys.add(key);
       const docDate = String(get(r, '单据日期') || '');
       const rec = {
@@ -8110,7 +8113,7 @@ async function renderSalesDetail() {
       <div class="import-note">
         <div>📄 导入说明：系统仅保留 <b>KA 部门</b> 数据。导入时校验表头「销售员所属门店」，自动过滤非 KA 整行，并按规则校正门店名称。</div>
         <div>🔄 门店校正：KA-KA华东大区→<b>KA 一部（江浙沪区域）</b>；KA-KA全国大区→<b>KA 三部（全国区域）</b>；KA-KA华南大区→<b>KA 二部（广东区域）</b>。</div>
-        <div>⚠️ 已存在相同「单据编号」的记录将被跳过，避免重复导入。</div>
+        <div>⚠️ 查重规则：仅当「商品名称」与「单据编号」两者都相同才判定为重复并跳过（同一单据的多个商品行不会被误过滤）。</div>
       </div>
       <input type="file" id="salesFilePick" accept=".xlsx,.xls,.csv" style="display:none" onchange="onSalesFilePicked(event)">
     </div>
