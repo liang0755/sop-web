@@ -5300,7 +5300,7 @@ function renderConfigContent() {
                   <div class="form-group" style="margin-bottom:0"><label>权重(%)</label><input type="number" class="form-control" value="${it.weight}" onchange="updateMgrPerfItem(${i}, 'weight', parseFloat(this.value) || 0)"></div>
                   <div class="form-group" style="margin-bottom:0"><label>考核标准(数字)</label><input type="number" class="form-control" value="${it.standard}" onchange="updateMgrPerfItem(${i}, 'standard', parseFloat(this.value) || 0)" ${it.type === 'auto-team' ? 'disabled title="业绩考核标准自动取当月团队目标，可在单月看板每行手动覆盖"' : ''}></div>
                   <div class="form-group" style="margin-bottom:0;grid-column:span 3"><label>文字描述</label><input type="text" class="form-control" value="${esc(it.text || '')}" onchange="updateMgrPerfItem(${i}, 'text', this.value)" placeholder="考核项描述，可在单月每行覆盖"></div>
-                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${!it.capAt100 ? 'checked' : ''} onchange="updateMgrPerfItem(${i}, 'capAt100', !this.checked)"> 该项得分可超100（不勾选则封顶100）</label>
+                  <div class="form-group" style="margin-bottom:0"><label>限制分值(得分上限,0=不封顶)</label><input type="number" class="form-control" value="${it.cap != null && it.cap !== '' ? it.cap : (it.capAt100 ? 100 : 0)}" onchange="updateMgrPerfItem(${i}, 'cap', parseFloat(this.value) || 0)" placeholder="100"></div>
                 </div>
                 ${it.type === 'auto-team' ? '<div style="font-size:12px;color:var(--gray-500);margin-top:8px">业绩考核的「要求(考核标准)」自动取<b>当月团队目标</b>、「完成」自动取<b>当月团队业绩总和</b>，均可在单月绩效看板每行手动覆盖。</div>' : ''}
               </div>
@@ -5327,7 +5327,7 @@ function renderConfigContent() {
                   <div class="form-group" style="margin-bottom:0"><label>加分项名称</label><textarea class="form-control" rows="2" onchange="updateMgrPerfBonusItem(${i}, 'name', this.value)" style="resize:vertical;min-height:38px">${esc(b.name)}</textarea></div>
                   <div class="form-group" style="margin-bottom:0"><label>分值</label><input type="number" class="form-control" value="${b.points}" onchange="updateMgrPerfBonusItem(${i}, 'points', parseFloat(this.value) || 0)"></div>
                   <div class="form-group" style="margin-bottom:0"><label>文字描述</label><input type="text" class="form-control" value="${esc(b.text || '')}" onchange="updateMgrPerfBonusItem(${i}, 'text', this.value)" placeholder="可选"></div>
-                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${!b.capAt100 ? 'checked' : ''} onchange="updateMgrPerfBonusItem(${i}, 'capAt100', !this.checked)"> 该项得分可超100（不勾选则封顶100）</label>
+                  <div class="form-group" style="margin-bottom:0"><label>限制分值(得分上限,0=不封顶)</label><input type="number" class="form-control" value="${b.cap != null && b.cap !== '' ? b.cap : (b.capAt100 ? 100 : 0)}" onchange="updateMgrPerfBonusItem(${i}, 'cap', parseFloat(this.value) || 0)" placeholder="0"></div>
                 </div>
               </div>
             `).join('')}
@@ -5687,7 +5687,7 @@ function addMgrPerfItem() {
   const cfg = cloudData.formConfig.mgrPerformanceConfig;
   if (!cfg) return;
   if (!cfg.items) cfg.items = [];
-  cfg.items.push({ key: 'mgrItem_' + Date.now(), name: '新考核项', type: 'manual', enabled: true, weight: 0, standard: 0, text: '', capAt100: true });
+  cfg.items.push({ key: 'mgrItem_' + Date.now(), name: '新考核项', type: 'manual', enabled: true, weight: 0, standard: 0, text: '', capAt100: true, cap: 100 });
   renderConfigContent();
 }
 function deleteMgrPerfItem(i) {
@@ -5717,7 +5717,7 @@ function addMgrPerfBonusItem() {
   const cfg = cloudData.formConfig.mgrPerformanceConfig;
   if (!cfg) return;
   if (!cfg.bonus) cfg.bonus = [];
-  cfg.bonus.push({ key: 'mgrBonus_' + Date.now(), name: '新加分项', points: 0, text: '', enabled: true, capAt100: false });
+  cfg.bonus.push({ key: 'mgrBonus_' + Date.now(), name: '新加分项', points: 0, text: '', enabled: true, capAt100: false, cap: 0 });
   renderConfigContent();
 }
 function deleteMgrPerfBonusItem(i) {
@@ -10317,7 +10317,8 @@ function computePerfScore(rec, cfg, year, sp, month) {
     const std = manualSet ? stdFull : stdFull * perfProrationRatio(rec);
     const actual = getPerfItemActual(it, rec, year, sp, month);
     let raw = std ? (actual / std) * 100 : 0;
-    if (it.capAt100) raw = Math.min(100, raw);
+    const itemCap = (it.cap !== undefined && it.cap !== null && it.cap !== '' && Number(it.cap) > 0) ? Number(it.cap) : (it.capAt100 ? 100 : 0);
+    if (itemCap > 0) raw = Math.min(itemCap, raw);
     const weighted = raw * (it.weight || 0) / 100;
     itemScores[it.key] = { actual, standard: std, raw, weighted };
     total += weighted;
@@ -10327,7 +10328,8 @@ function computePerfScore(rec, cfg, year, sp, month) {
   (cfgN.bonus || []).filter(b => b.enabled).forEach(b => {
     const cnt = parseFloat(rec['bonus_' + b.key]) || 0;
     let pts = cnt * (b.points || 0);
-    if (b.capAt100) pts = Math.min(100, pts);
+    const bonusCap = (b.cap !== undefined && b.cap !== null && b.cap !== '' && Number(b.cap) > 0) ? Number(b.cap) : (b.capAt100 ? 100 : 0);
+    if (bonusCap > 0) pts = Math.min(bonusCap, pts);
     bonusScores[b.key] = { cnt, pts };
     bonus += pts;
   });
