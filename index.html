@@ -1252,6 +1252,27 @@ function getAIConfig() { return cloudData.aiConfig || DEFAULT_AI_CONFIG; }
 let aiChatHistory = [];
 let aiChatLoading = false;
 
+// AI 对话当天持久化（localStorage）—— 切换页面不丢失，隔天自动失效
+function getAIChatStorageKey() {
+  const d = new Date();
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return 'sop_ai_chat_' + y + '-' + m + '-' + day;
+}
+function saveAIChatStorage() {
+  try { localStorage.setItem(getAIChatStorageKey(), JSON.stringify(aiChatHistory)); } catch(e) {}
+}
+function loadAIChatStorage() {
+  try {
+    const raw = localStorage.getItem(getAIChatStorageKey());
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : null;
+  } catch(e) { return null; }
+}
+function clearAIChatStorage() {
+  try { localStorage.removeItem(getAIChatStorageKey()); } catch(e) {}
+}
+
 // ============ Role & Permission Config ============
 const DEFAULT_ROLE_CONFIG = {
   roles: [
@@ -4218,6 +4239,15 @@ async function saveAIConfig() {
   }
 }
 
+// 计算某日期是当年的第几周（ISO 周一为起始）—— AI 上下文专用
+function getAIWeekNumber(d) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+}
+
 function buildAIContext() {
   const userMap = {};
   cloudData.users.forEach(u => { userMap[u.id] = u; });
@@ -4429,8 +4459,25 @@ function buildAIContext() {
   const mgrPerfBase = fc.mgrPerformanceBase;
 
   const activeUsers = cloudData.users.filter(u => u.active);
+  const _now = new Date();
+  const _y = _now.getFullYear(), _m = _now.getMonth() + 1;
+  const curMonthStr = _y + '-' + String(_m).padStart(2, '0');           // 当前月 YYYY-MM（如 2026-07）
+  const _lm = _m === 1 ? 12 : _m - 1;
+  const _ly = _m === 1 ? _y - 1 : _y;
+  const lastMonthStr = _ly + '-' + String(_lm).padStart(2, '0');         // 上个月 YYYY-MM（如 2026-06）
+  const todayStr = _y + '-' + String(_m).padStart(2, '0') + '-' + String(_now.getDate()).padStart(2, '0'); // YYYY-MM-DD
   const context = {
-    systemDate: new Date().toLocaleDateString('zh-CN'),
+    systemDate: todayStr,
+    currentDate: {
+      today: todayStr,                                    // 今天 YYYY-MM-DD
+      currentMonth: curMonthStr,                          // 当前月 YYYY-MM
+      currentYear: String(_y),
+      lastMonth: lastMonthStr,                            // 上个月 YYYY-MM
+      currentMonthLabel: _y + '年' + _m + '月',           // 如 2026年7月
+      lastMonthLabel: _ly + '年' + _lm + '月',             // 如 2026年6月
+      dayOfWeek: ['日','一','二','三','四','五','六'][_now.getDay()],  // 星期几
+      weekOfYear: getAIWeekNumber(_now)                     // 第几周
+    },
     overview: {
       totalUsers: activeUsers.length,
       departments: cloudData.departments,
@@ -4489,6 +4536,16 @@ function buildAISystemMessage() {
     + '2. 提供数据洞察、趋势分析和改进建议\n'
     + '3. 用清晰的Markdown表格和列表呈现分析结果\n'
     + '4. 所有回复使用中文\n\n'
+    + '【时间参照 - 务必严格遵守，这是回答时间相关问题的基础】\n'
+    + '- currentDate 字段包含今天的精确日期、当前月份(currentMonth, YYYY-MM)、上个月(lastMonth, YYYY-MM)、当前年、星期、第几周。\n'
+    + '- 当用户说「本月 / 这个月 / 当前月」时，必须筛选 currentMonth 对应的数据。\n'
+    + '- 当用户说「上个月 / 上月 / 上一个月份」时，必须筛选 lastMonth 对应的数据。\n'
+    + '- 当用户说「上月」时，绝不要回答 currentMonth 的数据，反之亦然。\n'
+    + '- 数据中的月份字段(docMonth/reportDate/contactTime/weekStart 等)格式为 YYYY-MM 或 YYYY-MM-DD，直接用字符串前缀匹配即可（如 lastMonth="2026-06" 则筛选 docMonth.startsWith("2026-06")）。\n'
+    + '- 当用户说「最近 N 个月」时，从 currentMonth 往前数 N 个月（含当月）。\n'
+    + '- 当用户说「去年」时，指 currentYear - 1。\n'
+    + '- 当用户说「本季度」时，按自然季度：1-3月=Q1, 4-6月=Q2, 7-9月=Q3, 10-12月=Q4。\n'
+    + '- 回答时必须在结果中明确标注「以下数据来自 X 月(YYYY-MM)」，让用户确认时间范围无误。\n\n'
     + '【数据来源路由规则 - 务必严格遵守】\n'
     + '- 当用户的问题涉及「拜访 / 客户拜访 / 签到 / 卡点 / 拜访结果 / 客户跟进 / 谁去了哪些客户 / 各签到事件分布 / 拜访转化」等拜访类话题时，必须使用 visitRecords 与 visitSummary 进行分析，绝不要用日报/周报数据来回答拜访类问题。\n'
     + '- 日报/周报数据(dailyReports/weeklyReports)只用于业绩指标分析（新增线索、建联、AB意向、成交、金额、完成率等），不要把它当作拜访数据。\n'
@@ -4564,7 +4621,7 @@ async function callAI(messages) {
       model: config.model,
       messages: messages,
       max_tokens: 4096,
-      temperature: 0.7,
+      temperature: 0.3,
       stream: false
     })
   });
@@ -4718,6 +4775,25 @@ function exportAIChatWord() {
 }
 
 function initAIChat() {
+  // 尝试恢复当天对话历史（切换页面不丢失）
+  const saved = loadAIChatStorage();
+  if (saved && saved.length > 0) {
+    aiChatHistory = saved;
+    const msgArea = document.getElementById('aiChatMessages');
+    if (!msgArea) return;
+    msgArea.innerHTML = '';
+    saved.forEach(m => {
+      if (m.role === 'assistant') {
+        appendAIMessage('assistant', m.content);
+      } else if (m.role === 'user') {
+        // 历史用户消息只存了文本标签（含附件名），恢复时不再带图片/文件对象
+        appendAIMessage('user', m.content);
+      }
+    });
+    msgArea.scrollTop = msgArea.scrollHeight;
+    return;
+  }
+  // 无历史 → 显示欢迎语
   aiChatHistory = [];
   const msgArea = document.getElementById('aiChatMessages');
   if (!msgArea) return;
@@ -4961,6 +5037,7 @@ async function sendAIMessage() {
 
     // Keep history to last 20 messages to avoid token overflow
     if (aiChatHistory.length > 20) aiChatHistory = aiChatHistory.slice(-20);
+    saveAIChatStorage();
   } catch(err) {
     const ti = document.getElementById('aiTypingIndicator');
     if (ti) ti.remove();
@@ -4982,6 +5059,7 @@ function clearAIChat() {
   aiChatHistory = [];
   aiPendingImages = [];
   aiPendingFiles = [];
+  clearAIChatStorage();
   initAIChat();
 }
 
