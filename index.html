@@ -8374,6 +8374,7 @@ let csPageRows = [];
 let csPage = 1;
 let csPageSize = 20;
 let csMonths = []; // 客户汇总月份多选（'01'~'12'）；空数组=全部月份
+let csSortState = null; // 客户汇总排序状态：{ col: 'docMonth'|'salesperson'|'amount'|'team'|'customerSource'|'category'|'customerProfile', dir: 'asc'|'desc' }；null=默认按年/月+销售员+客户 升序
 
 async function renderSalesBoard() {
   const html = `
@@ -8959,7 +8960,30 @@ function renderCustomerSummary() {
     if (!g.category && r.category) g.category = r.category;
     if (!g.customerProfile && r.customerProfile) g.customerProfile = r.customerProfile;
   });
-  const rows = Object.keys(groups).map(k => groups[k]).sort((a, b) => (a.docMonth + a.salesperson + a.customer).localeCompare(b.docMonth + b.salesperson + b.customer));
+  const defaultSort = (a, b) => (a.docMonth + a.salesperson + a.customer).localeCompare(b.docMonth + b.salesperson + b.customer);
+  let rows;
+  if (csSortState && csSortState.col) {
+    const dir = csSortState.dir === 'asc' ? 1 : -1;
+    const col = csSortState.col;
+    rows = Object.keys(groups).map(k => groups[k]).sort((a, b) => {
+      let av = a[col], bv = b[col];
+      // 空值始终排到末尾（无论 asc/desc）
+      const aEmpty = (av === '' || av == null), bEmpty = (bv === '' || bv == null);
+      if (aEmpty && bEmpty) return defaultSort(a, b);
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      let cmp;
+      if (col === 'amount') {
+        cmp = toNum(av) - toNum(bv);
+      } else {
+        cmp = String(av).localeCompare(String(bv), 'zh');
+      }
+      if (cmp !== 0) return cmp * dir;
+      return defaultSort(a, b);
+    });
+  } else {
+    rows = Object.keys(groups).map(k => groups[k]).sort(defaultSort);
+  }
   csAllRows = rows;
   // 分页
   const totalRows = rows.length;
@@ -9012,7 +9036,13 @@ function renderCustomerSummary() {
       </select>
     </div>`;
   const headCheck = `<th style="text-align:center;width:40px"><input type="checkbox" id="csHeadCheck" ${allSelOnPage?'checked':''} onchange="csToggleAll(this.checked)"></th>`;
-  wrap.innerHTML = `<table><thead><tr>${headCheck}<th>年/月</th><th>销售员</th><th>客户</th><th class="num">折后总金额</th><th>销售员所属门店</th><th>客户来源</th><th>品类</th><th>客户画像</th></tr></thead><tbody>${rowsHtml}</tbody></table>${pager}`;
+  // 表头排序：高亮当前排序列并显示 ↑/↓
+  const sortTh = (col, label, cls = '') => {
+    const active = csSortState && csSortState.col === col;
+    const arrow = active ? (csSortState.dir === 'asc' ? '↑' : '↓') : '⇅';
+    return `<th class="sort-th${active ? ' active' : ''}${cls ? ' ' + cls : ''}" onclick="csSortBy('${col}')">${label}<span class="sort-ind${active ? ' active' : ''}">${arrow}</span></th>`;
+  };
+  wrap.innerHTML = `<table><thead><tr>${headCheck}${sortTh('docMonth','年/月')}${sortTh('salesperson','销售员')}<th>客户</th>${sortTh('amount','折后总金额','num')}${sortTh('team','销售员所属门店')}${sortTh('customerSource','客户来源')}${sortTh('category','品类')}${sortTh('customerProfile','客户画像')}</tr></thead><tbody>${rowsHtml}</tbody></table>${pager}`;
   updateCsBatchBar(totalRows);
 }
 
@@ -9042,11 +9072,23 @@ async function saveCustomerTag(group, encKey, encVal) {
 
 function lyMonth(mm) { const p = String(mm).split('-'); return (parseInt(p[0], 10) - 1) + '-' + p[1]; }
 
-// ===== 客户汇总：分页 / 勾选 / 批量设置 / 导出 =====
+// ===== 客户汇总：分页 / 勾选 / 批量设置 / 导出 / 排序 =====
 function csRefilter() { csPage = 1; csSelectedKeys.clear(); renderCustomerSummary(); }
 function csGotoPage(p) { csPage = p; renderCustomerSummary(); }
 function csSetPageSize(v) { csPageSize = parseInt(v, 10) || 20; csPage = 1; renderCustomerSummary(); }
 function csKeyOf(g) { return g.docMonth + '|' + g.salesperson + '|' + (g.customer || ''); }
+// 点击表头排序：同列切换方向，其他列默认 desc；连续 3 次点击同列 → 取消排序回默认
+function csSortBy(col) {
+  if (!csSortState || csSortState.col !== col) {
+    csSortState = { col: col, dir: 'desc' };
+  } else if (csSortState.dir === 'desc') {
+    csSortState.dir = 'asc';
+  } else {
+    csSortState = null; // 第 3 次：恢复默认顺序
+  }
+  csPage = 1;
+  renderCustomerSummary();
+}
 
 function csToggleSelect(idx, checked) {
   const g = csPageRows[idx];
