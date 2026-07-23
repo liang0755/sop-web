@@ -7084,32 +7084,57 @@ function exportMgrReports() {
   if (checkedWeeks.length) weeksToShow = weeksToShow.filter(ws => checkedWeeks.includes(ws));
   const list = myReports.filter(r => weeksToShow.includes(r.weekStart));
   if (!list.length) { showToast('没有可导出的周报', 'warning'); return; }
-  const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  const headers = ['周次', '部门', '提交人', '总拜访数', '拜访结果明细', '周报内容', '创建时间', '更新时间'];
-  const rows = list.map(r => {
-    const snap = r.visitSnapshot || {};
-    const snapStr = formatVisitSnapshotDetail(snap);
-    return [
-      r.weekLabel || (r.weekStart + ' ~ ' + r.weekEnd),
-      r.department || '',
-      r.userName || '未知',
-      snap.total || 0,
-      snapStr,
-      (r.content || '').replace(/\n/g, ' '),
-      (r.createdAt || '').replace('T', ' ').slice(0, 16),
-      (r.updatedAt || '').replace('T', ' ').slice(0, 16)
-    ];
-  });
-  const csv = '\uFEFF' + [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
   const _tag = (fm ? fm : '全部') + (checkedWeeks.length ? '_' + checkedWeeks.length + '周' : '');
-  a.download = '管理周报_' + _tag + '.csv';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast('已导出 ' + list.length + ' 条周报');
+  const doExport = () => {
+    const headers = ['周次', '部门', '提交人', '总拜访数', '拜访结果明细', '周报内容', '创建时间', '更新时间'];
+    const aoa = [headers];
+    list.forEach(r => {
+      const snap = r.visitSnapshot || {};
+      const snapStr = formatVisitSnapshotDetail(snap);
+      aoa.push([
+        r.weekLabel || (r.weekStart + ' ~ ' + r.weekEnd),
+        r.department || '',
+        r.userName || '未知',
+        snap.total || 0,
+        snapStr,
+        (r.content || ''),
+        (r.createdAt || '').replace('T', ' ').slice(0, 16),
+        (r.updatedAt || '').replace('T', ' ').slice(0, 16)
+      ]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    // 「周报内容」列（第 6 列，索引 5）设置自动换行 + 顶对齐
+    const contentCol = 5;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      const addr = XLSX.utils.encode_cell({ r: R, c: contentCol });
+      if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+      ws[addr].s = ws[addr].s || {};
+      ws[addr].s.alignment = Object.assign(ws[addr].s.alignment || {}, { wrapText: true, vertical: 'top' });
+    }
+    // 设置列宽（周报内容列较宽，便于换行阅读）
+    ws['!cols'] = [
+      { wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 32 }, { wch: 60 }, { wch: 18 }, { wch: 18 }
+    ];
+    // 表头加粗
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const addr = XLSX.utils.encode_cell({ r: range.s.r, c: C });
+      if (ws[addr]) ws[addr].s = Object.assign(ws[addr].s || {}, { font: { bold: true }, alignment: { vertical: 'center' } });
+    }
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '管理周报');
+    XLSX.writeFile(wb, '管理周报_' + _tag + '.xlsx');
+    showToast('已导出 ' + list.length + ' 条周报');
+  };
+  if (typeof XLSX === 'undefined') {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onload = doExport;
+    s.onerror = () => showToast('表格组件加载失败，请重试', 'error');
+    document.body.appendChild(s);
+  } else {
+    doExport();
+  }
 }
 
 // ============ Visit Statistics Dashboard ============
