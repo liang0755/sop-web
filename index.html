@@ -215,11 +215,11 @@ tr:hover td{background:var(--gray-50)}
 .ai-fullpage-header{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;background:#fff;border-bottom:1px solid var(--gray-200);flex-shrink:0}
 .ai-fullpage-header h4{font-size:15px;font-weight:600;margin:0}
 .ai-chat-fullpage{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;background:var(--gray-50)}
-.ai-chat-fullpage .ai-chat-messages{flex:1;overflow-y:auto;padding:20px;max-width:1000px;margin:0 auto;width:100%;box-sizing:border-box}
-.ai-chat-fullpage .ai-suggestion-chips{max-width:1000px;margin:0 auto;width:100%;box-sizing:border-box}
+.ai-chat-fullpage .ai-chat-messages{flex:1;overflow-y:auto;padding:20px 24px;max-width:100%;margin:0 auto;width:100%;box-sizing:border-box}
+.ai-chat-fullpage .ai-suggestion-chips{max-width:100%;margin:0 auto;width:100%;box-sizing:border-box;padding-left:24px;padding-right:24px}
 <omitted>
 /* AI Chat input bar (ChatGPT style) */
-.ai-chat-fullpage .ai-chat-input-bar{max-width:900px;margin:0 auto;width:100%;box-sizing:border-box;padding:12px 20px 18px;flex-shrink:0;background:transparent}
+.ai-chat-fullpage .ai-chat-input-bar{max-width:100%;margin:0 auto;width:100%;box-sizing:border-box;padding:12px 24px 18px;flex-shrink:0;background:transparent}
 .ai-textarea-wrap{background:#fff;border:1.5px solid var(--gray-200);border-radius:18px;padding:12px 16px 4px;transition:border-color .15s,box-shadow .15s;box-shadow:0 1px 3px rgba(0,0,0,.04)}
 .ai-textarea-wrap:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
 .ai-textarea-wrap textarea{width:100%;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.6;color:var(--gray-900);background:transparent;min-height:24px;max-height:160px;padding:0}
@@ -1695,10 +1695,16 @@ function renderLastMonthHonor() {
   const colsHtml = awardNames.map(aw => {
     const items = byAward[aw];
     const rowsHtml = items.map(it => {
-      const name = (it.salesperson || '').trim() || '—';
-      const bonus = toNum(it.bonus);
-      const bonusTxt = bonus > 0 ? '<span class="honor-bonus">' + fmtSalesMoney(bonus) + '</span>' : '';
-      return '<div class="honor-row">' + esc(name) + bonusTxt + '</div>';
+      const names = (it.salesperson || '').split('\n').map(s => s.trim()).filter(Boolean);
+      const bonuses = String(it.bonus || '').split('\n').map(s => s.trim());
+      if (!names.length) names.push('—');
+      let html = '';
+      names.forEach((nm, idx) => {
+        const b = bonuses[idx] || '';
+        const bTxt = b ? ' <span class="honor-bonus">' + fmtSalesMoney(toNum(b)) + '</span>' : '';
+        html += '<div class="honor-row">' + esc(nm) + bTxt + '</div>';
+      });
+      return html;
     }).join('');
     return '<div class="honor-col"><div class="honor-col-head">' + esc(aw) + '</div><div class="honor-col-body">' + rowsHtml + '</div></div>';
   }).join('');
@@ -4578,7 +4584,7 @@ function buildAIContext() {
       awardName: (it.awardName || '').trim(),
       salesperson: (it.salesperson || '').trim(),
       team: (it.team || '').trim(),
-      bonus: toNum(it.bonus),
+      bonus: String(it.bonus || ''),
       achievement: (it.achievement || '').trim(),
       note: (it.note || '').trim()
     }));
@@ -5748,14 +5754,13 @@ function renderConfigContent() {
     if (curM && !allMonths.includes(curM)) allMonths.unshift(curM);
     const list = (cloudData.honorRecords && cloudData.honorRecords[curM]) || [];
     const activeUsers = cloudData.users.filter(u => u.active);
-    const userOpts = activeUsers.map(u => '<option value="' + esc(u.name) + '">' + esc(u.name) + '（' + esc(u.department || '未分配') + '）</option>').join('');
     const monthOpts = allMonths.map(m => '<option value="' + m + '" ' + (m === curM ? 'selected' : '') + '>' + m + '</option>').join('');
     // 唯一奖项列表（用于下拉建议）
     const allAwards = [...new Set(Object.keys(cloudData.honorRecords || {}).flatMap(k => (cloudData.honorRecords[k] || []).map(i => (i.awardName||'').trim()).filter(Boolean)))];
     const awardOpts = allAwards.map(a => '<option value="' + esc(a) + '">').join('');
     c.innerHTML = `
       <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
-        配置每个月的<b>奖项与获奖人员/奖金</b>，保存后<b>首页「上月荣誉激励」卡片</b>会立即展示；空月份卡片显示「虚位以待」。奖项名称支持自由填写；姓名选择用户后<b>团队自动匹配</b>该用户所属部门。
+        配置每个月的<b>奖项与获奖人员/奖金</b>，保存后<b>首页「上月荣誉激励」卡片</b>会立即展示；空月份卡片显示「虚位以待」。奖项名称支持自由填写；<b>姓名、成就、备注均支持换行</b>（姓名可填写多人，每行一人）。团队信息不再单独维护。
       </div>
       <div class="card" style="margin-bottom:16px">
         <div class="card-header"><h4>当前月份</h4></div>
@@ -5778,22 +5783,20 @@ function renderConfigContent() {
           <div style="overflow-x:auto"><table class="data-table" style="min-width:920px">
             <thead><tr style="background:var(--gray-50)">
               <th style="width:140px">奖项名称</th>
-              <th style="width:140px">姓名</th>
-              <th style="width:120px">团队</th>
+              <th style="width:200px">姓名（支持换行/多人）</th>
               <th style="width:100px">奖金</th>
-              <th>成就</th>
-              <th>备注</th>
+              <th style="width:200px">成就（支持换行）</th>
+              <th style="width:200px">备注（支持换行）</th>
               <th style="width:120px">操作</th>
             </tr></thead>
             <tbody id="honorCfgTbody">
               ${list.map((it, i) => `
                 <tr>
                   <td><input type="text" class="form-control form-control-sm" list="honorAwardDl" value="${esc(it.awardName || '')}" onchange="updateHonorCfgItem(${i}, 'awardName', this.value)" placeholder="如：外部攻坚奖"></td>
-                  <td><select class="form-control form-control-sm" onchange="onHonorCfgNameChange(${i}, this.value)"><option value="">-- 选择用户 --</option>${userOpts.replace('value="' + esc(it.salesperson||'') + '"', 'value="' + esc(it.salesperson||'') + '" selected')}</select></td>
-                  <td><input type="text" class="form-control form-control-sm" id="honorTeam_${i}" value="${esc(it.team || '')}" readonly style="background:var(--gray-100)"></td>
-                  <td><input type="number" class="form-control form-control-sm" value="${it.bonus != null && it.bonus !== '' ? it.bonus : 0}" onchange="updateHonorCfgItem(${i}, 'bonus', parseFloat(this.value) || 0)"></td>
-                  <td><input type="text" class="form-control form-control-sm" value="${esc(it.achievement || '')}" onchange="updateHonorCfgItem(${i}, 'achievement', this.value)" placeholder="选填"></td>
-                  <td><input type="text" class="form-control form-control-sm" value="${esc(it.note || '')}" onchange="updateHonorCfgItem(${i}, 'note', this.value)" placeholder="选填"></td>
+                  <td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;width:100%;font-size:12px" onchange="updateHonorCfgItem(${i}, 'salesperson', this.value)" placeholder="可填写多人，每行一人">${esc(it.salesperson || '')}</textarea></td>
+                  <td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;width:100%;font-size:12px" onchange="updateHonorCfgItem(${i}, 'bonus', this.value)" placeholder="可填写多人奖金，每行一人（与姓名行对应）">${esc(it.bonus != null ? it.bonus : '')}</textarea></td>
+                  <td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;width:100%;font-size:12px" onchange="updateHonorCfgItem(${i}, 'achievement', this.value)" placeholder="选填">${esc(it.achievement || '')}</textarea></td>
+                  <td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;width:100%;font-size:12px" onchange="updateHonorCfgItem(${i}, 'note', this.value)" placeholder="选填">${esc(it.note || '')}</textarea></td>
                   <td><button class="btn btn-sm btn-danger" onclick="deleteHonorCfgItem(${i})">🗑 删除</button></td>
                 </tr>
               `).join('')}
@@ -6208,7 +6211,7 @@ function addHonorMonthItem() {
   if (!/^\d{4}-\d{2}$/.test(ym || '')) { alert('请先选择/填写有效的月份（YYYY-MM）'); return; }
   honorCfgMonth = ym;
   const arr = _ensureHonorBucket(ym);
-  arr.push({ id: genId(), awardName: '', salesperson: '', team: '', bonus: 0, achievement: '', note: '', createdAt: new Date().toISOString() });
+  arr.push({ id: genId(), awardName: '', salesperson: '', team: '', bonus: '', achievement: '', note: '', createdAt: new Date().toISOString() });
   renderConfigContent();
 }
 function updateHonorCfgItem(i, field, value) {
@@ -6227,17 +6230,6 @@ function deleteHonorCfgItem(i) {
   if (!confirm('确定删除这条奖项配置吗？')) return;
   arr.splice(i, 1);
   if (!arr.length) delete cloudData.honorRecords[ym];
-  renderConfigContent();
-}
-function onHonorCfgNameChange(i, name) {
-  const ym = honorCfgMonth;
-  if (!ym) return;
-  const arr = _ensureHonorBucket(ym);
-  if (!arr[i]) return;
-  arr[i].salesperson = name;
-  const u = cloudData.users.find(u => u.name === name);
-  arr[i].team = u ? (u.department || '') : '';
-  arr[i].updatedAt = new Date().toISOString();
   renderConfigContent();
 }
 
