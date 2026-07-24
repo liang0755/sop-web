@@ -10989,6 +10989,20 @@ let mgrPerfViewSnapshot = false;   // 是否查看管理「最终保存」冻结
 function perfKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
 function mgrKey(year, mgr, m) { return year + '_' + String(mgr).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
 
+// 判断某月某人是否已「最终保存」(生成冻结快照)；type: 'sales' | 'm0' | 'mgr'
+function isPerfSnapshotSaved(type, year, name, m) {
+  if (type === 'sales') {
+    return !!(cloudData.performanceSnapshots && cloudData.performanceSnapshots[perfKey(year, name, m)]);
+  }
+  if (type === 'm0') {
+    return !!(cloudData.m0PerformanceSnapshots && cloudData.m0PerformanceSnapshots[m0Key(year, name, m)]);
+  }
+  if (type === 'mgr') {
+    return !!(cloudData.mgrPerformanceSnapshots && cloudData.mgrPerformanceSnapshots[mgrKey(year, name, m)]);
+  }
+  return false;
+}
+
 function normalizePerfConfig(cfg) {
   if (!cfg || typeof cfg !== 'object') return { items: [], bonus: [], totalCapAt100: true, totalCap: 100 };
   if (Array.isArray(cfg.items)) {
@@ -11540,7 +11554,9 @@ function refreshPerfMatrix() {
       const level = getSalesLevel(year, row.sp, m, baseMap);
       const rec = getPerfRecord(year, row.sp, m);
       const score = getFinalScore(rec, cfg, year, row.sp, m);
-      h += `<td class="num" style="text-align:center"><div>${level || '—'}</div><div style="color:${scoreColor(score)};font-weight:700">${score.toFixed(2)}</div></td>`;
+      const saved = isPerfSnapshotSaved('sales', year, row.sp, m);
+      const colorVal = saved ? scoreColor(score) : 'var(--gray-400)';
+      h += `<td class="num" style="text-align:center"><div>${level || '—'}</div><div style="color:${colorVal};font-weight:700">${score.toFixed(2)}</div></td>`;
     });
     h += '</tr>';
   });
@@ -11949,7 +11965,9 @@ function refreshM0PerfMatrix() {
       const level = gradeRec.grade || '—';
       const rec = getM0PerfRecord(year, row.m0, m);
       const score = getFinalScore(rec, cfg, year, row.m0, m);
-      h += `<td class="num" style="text-align:center"><div>${level || '—'}</div><div style="color:${scoreColor(score)};font-weight:700">${score.toFixed(2)}</div></td>`;
+      const saved = isPerfSnapshotSaved('m0', year, row.m0, m);
+      const colorVal = saved ? scoreColor(score) : 'var(--gray-400)';
+      h += `<td class="num" style="text-align:center"><div>${level || '—'}</div><div style="color:${colorVal};font-weight:700">${score.toFixed(2)}</div></td>`;
     });
     h += '</tr>';
   });
@@ -12476,7 +12494,9 @@ function refreshMgrPerfMatrix() {
     months.forEach(m => {
       const rec = getMgrPerfRecord(year, row.mgr, m);
       const score = getFinalScore(rec, cfg, year, row.mgr, m);
-      h += `<td class="num" style="text-align:center"><div style="color:${scoreColor(score)};font-weight:700">${score.toFixed(2)}</div></td>`;
+      const saved = isPerfSnapshotSaved('mgr', year, row.mgr, m);
+      const colorVal = saved ? scoreColor(score) : 'var(--gray-400)';
+      h += `<td class="num" style="text-align:center"><div style="color:${colorVal};font-weight:700">${score.toFixed(2)}</div></td>`;
     });
     h += '</tr>';
   });
