@@ -11003,6 +11003,158 @@ function isPerfSnapshotSaved(type, year, name, m) {
   return false;
 }
 
+// ===== 绩效总分批量导入（Excel/CSV 透视表：第一列=姓名，1月…12月各一列，值为绩效总分；导入即同时更新实时记录并生成「最终保存」冻结快照）=====
+function perfSalesNames() {
+  const statusMap = buildUserStatusMap();
+  const set = new Set();
+  (cloudData.salesRecords || []).forEach(r => {
+    const sp = (r.salesperson || '').trim();
+    if (sp && statusMap[sp] === '在职') set.add(sp);
+  });
+  return [...set];
+}
+
+function buildPerfScoreSnapshot(kind, year, name, month) {
+  if (kind === 'sales') {
+    const cfg = getPerfConfig();
+    const baseMap = buildSalesBaseForYear(year);
+    const rec = getPerfRecord(year, name, month);
+    const scores = computePerfScore(rec, cfg, year, name, month);
+    const level = getSalesLevel(year, name, month, baseMap);
+    const base = getPerfBase(level) * (rec.workingDays || 30) / 30;
+    const snap = {
+      year: String(year), sp: name, month,
+      level: level || '',
+      finalScore: getFinalScore(rec, cfg, year, name, month),
+      computedScore: scores.score,
+      workingDays: rec.workingDays || 30,
+      comment: rec.comment || '',
+      base: base,
+      items: {}, bonus: {},
+      snapshotAt: new Date().toISOString(),
+      snapshotBy: (currentUser && currentUser.name) || ''
+    };
+    (cfg.items || []).filter(it => it.enabled).forEach(it => {
+      const ik = it.key;
+      const actual = getPerfItemActual(it, rec, year, name, month);
+      const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
+      const stdRaw = manualStd ? rec['standard_' + ik] : (it.standard || 0);
+      const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
+      const raw = (scores.itemScores[ik] || {}).raw || 0;
+      snap.items[ik] = { name: it.name, actual, standard: std, score: raw, text: (rec['text_' + ik] || it.text || '') };
+    });
+    (cfg.bonus || []).filter(b => b.enabled).forEach(b => {
+      snap.bonus[b.key] = { name: b.name, cnt: parseFloat(rec['bonus_' + b.key]) || 0 };
+    });
+    return snap;
+  } else {
+    const cfg = getMgrPerfConfig();
+    const rec = getMgrPerfRecord(year, name, month);
+    const scores = computePerfScore(rec, cfg, year, name, month);
+    const base = getMgrPerfBase() * (rec.workingDays || 30) / 30;
+    const snap = {
+      year: String(year), mgr: name, month,
+      finalScore: getFinalScore(rec, cfg, year, name, month),
+      computedScore: scores.score,
+      workingDays: rec.workingDays || 30,
+      comment: rec.comment || '',
+      base: base,
+      items: {}, bonus: {},
+      snapshotAt: new Date().toISOString(),
+      snapshotBy: (currentUser && currentUser.name) || ''
+    };
+    (cfg.items || []).filter(it => it.enabled).forEach(it => {
+      const ik = it.key;
+      const actual = (it.type === 'auto-team' || it.type === 'auto-demo') ? getPerfItemActual(it, rec, year, name, month) : (parseFloat(rec['actual_' + ik]) || 0);
+      const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
+      const stdRaw = manualStd ? rec['standard_' + ik] : (it.type === 'auto-team' ? teamTargetFor(year, name, month) : (it.standard || 0));
+      const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
+      const raw = (scores.itemScores[ik] || {}).raw || 0;
+      snap.items[ik] = { name: it.name, actual, standard: std, score: raw, text: (rec['text_' + ik] || it.text || '') };
+    });
+    (cfg.bonus || []).filter(b => b.enabled).forEach(b => {
+      snap.bonus[b.key] = { name: b.name, cnt: parseFloat(rec['bonus_' + b.key]) || 0 };
+    });
+    return snap;
+  }
+}
+
+function downloadPerfScoreTemplate(kind) {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  const yearEl = document.getElementById(kind === 'sales' ? 'perfYear' : 'mgrPerfYear');
+  const year = yearEl ? yearEl.value : (kind === 'sales' ? perfYear : mgrPerfYear);
+  const header = ['姓名']; for (let i = 1; i <= 12; i++) header.push(i + '月');
+  const aoa = [header];
+  const names = kind === 'sales' ? perfSalesNames() : mgrSpActiveList();
+  names.forEach(n => aoa.push([n].concat(new Array(12).fill(''))));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '绩效总分');
+  XLSX.writeFile(wb, (kind === 'sales' ? '销售' : '管理') + '绩效总分模板_' + year + '.xlsx');
+}
+
+function importPerfScoreExcel(input, kind) {
+  const file = input.files && input.files[0]; if (!file) { input.value = ''; return; }
+  const year = (kind === 'sales'
+    ? (document.getElementById('perfYear') ? document.getElementById('perfYear').value : perfYear)
+    : (document.getElementById('mgrPerfYear') ? document.getElementById('mgrPerfYear').value : mgrPerfYear));
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面后重试', 'error'); input.value = ''; return; }
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (!rows.length) { alert('文件中没有数据行'); input.value = ''; return; }
+      const headers = Object.keys(rows[0]);
+      const nameCol = headers.find(h => { const s = String(h || '').trim().toLowerCase(); return s.indexOf('姓名') >= 0 || s.indexOf('名称') >= 0 || s.indexOf('人员') >= 0 || s.indexOf('name') >= 0; }) || headers[0];
+      const monthColMap = {};
+      for (let i = 1; i <= 12; i++) {
+        const mm = String(i).padStart(2, '0');
+        const hit = headers.find(h => { const s = String(h || '').trim(); return s === i + '月' || s === mm + '月' || s === String(i) || s === mm || s.replace(/[^0-9]/g, '') === String(i); });
+        if (hit) monthColMap[mm] = hit;
+      }
+      if (!Object.keys(monthColMap).length) { alert('未识别到月份列。模板列应为：姓名、1月…12月（每个格填该月绩效总分）'); input.value = ''; return; }
+      const userNames = new Set((cloudData.users || []).map(u => (u.name || '').trim()).filter(Boolean));
+      const matched = []; const unmatched = new Set();
+      rows.forEach(r => {
+        const nm = String(r[nameCol] || '').trim();
+        if (!nm || nm === '合计') return;
+        if (!userNames.has(nm)) { unmatched.add(nm); return; }
+        Object.keys(monthColMap).forEach(mm => {
+          const v = parseFloat(String(r[monthColMap[mm]]).replace(/,/g, ''));
+          if (!isNaN(v) && v !== 0) matched.push({ name: nm, month: parseInt(mm, 10), score: v });
+        });
+      });
+      if (!matched.length) { alert('没有有效的绩效总分数据（姓名未匹配到系统用户，或分数均为 0）'); input.value = ''; return; }
+      const umCount = unmatched.size;
+      if (!confirm('成功匹配 ' + matched.length + ' 条绩效总分（覆盖 ' + year + ' 年）' + (umCount ? '，' + umCount + ' 个姓名未匹配系统用户已跳过' : '') + '。\n确定导入吗？导入将同时更新实时记录并【最终保存】冻结快照（矩阵立即显示彩色）。')) { input.value = ''; return; }
+      if (kind === 'sales') { if (!cloudData.performanceRecords) cloudData.performanceRecords = {}; if (!cloudData.performanceSnapshots) cloudData.performanceSnapshots = {}; }
+      else { if (!cloudData.mgrPerformanceRecords) cloudData.mgrPerformanceRecords = {}; if (!cloudData.mgrPerformanceSnapshots) cloudData.mgrPerformanceSnapshots = {}; }
+      matched.forEach(it => {
+        if (kind === 'sales') {
+          const k = perfKey(year, it.name, it.month);
+          cloudData.performanceRecords[k] = Object.assign({}, cloudData.performanceRecords[k] || {}, { finalScore: it.score });
+          apiUpdate('performanceRecords', k, cloudData.performanceRecords[k]).catch(() => {});
+          const snap = buildPerfScoreSnapshot('sales', year, it.name, it.month);
+          cloudData.performanceSnapshots[k] = snap;
+          apiUpdate('performanceSnapshots', k, snap).catch(() => {});
+        } else {
+          const k = mgrKey(year, it.name, it.month);
+          cloudData.mgrPerformanceRecords[k] = Object.assign({}, cloudData.mgrPerformanceRecords[k] || {}, { finalScore: it.score });
+          apiUpdate('mgrPerformanceRecords', k, cloudData.mgrPerformanceRecords[k]).catch(() => {});
+          const snap = buildPerfScoreSnapshot('mgr', year, it.name, it.month);
+          cloudData.mgrPerformanceSnapshots[k] = snap;
+          apiUpdate('mgrPerformanceSnapshots', k, snap).catch(() => {});
+        }
+      });
+      showToast('已导入 ' + matched.length + ' 条绩效总分' + (umCount ? ('，' + umCount + ' 个未匹配跳过') : '') + '，并已最终保存', 'success', 4500);
+      if (kind === 'sales') perfRefresh(); else mgrPerfRefresh();
+    } catch (err) { alert('导入失败：' + (err.message || err)); }
+    input.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
 function normalizePerfConfig(cfg) {
   if (!cfg || typeof cfg !== 'object') return { items: [], bonus: [], totalCapAt100: true, totalCap: 100 };
   if (Array.isArray(cfg.items)) {
@@ -11492,6 +11644,9 @@ function renderSalesPerf() {
           <button class="btn btn-outline btn-sm" onclick="refreshPerfSingle()">刷新计算</button>
           <button class="btn btn-outline btn-sm" onclick="openPerfBatchStandard()">📝 批量设置要求</button>
           <button class="btn btn-primary btn-sm" onclick="savePerfSnapshot()">💾 最终保存</button>
+          <button class="btn btn-success btn-sm" onclick="document.getElementById('perfImportFile').click()">📥 导入绩效总分</button>
+          <input type="file" id="perfImportFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="importPerfScoreExcel(this,'sales')">
+          <button class="btn btn-outline btn-sm" onclick="downloadPerfScoreTemplate('sales')">⬇️ 模板</button>
           <button class="btn ${perfViewSnapshot?'btn-primary':'btn-outline'} btn-sm" onclick="perfViewSnapshot=!perfViewSnapshot;renderSalesPerf()">${perfViewSnapshot?'📌 返回实时':'📷 查看最终保存版本'}</button>
           <button class="btn btn-success btn-sm" onclick="exportPerfSingleXlsx()">📥 导出Excel</button>
           `}
@@ -12451,6 +12606,9 @@ function renderMgrPerf() {
           <button class="btn btn-outline btn-sm" onclick="refreshMgrPerfSingle()">刷新计算</button>
           <button class="btn btn-outline btn-sm" onclick="openMgrPerfBatchStandard()">📝 批量设置要求</button>
           <button class="btn btn-primary btn-sm" onclick="saveMgrPerfSnapshot()">💾 最终保存</button>
+          <button class="btn btn-success btn-sm" onclick="document.getElementById('mgrPerfImportFile').click()">📥 导入绩效总分</button>
+          <input type="file" id="mgrPerfImportFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="importPerfScoreExcel(this,'mgr')">
+          <button class="btn btn-outline btn-sm" onclick="downloadPerfScoreTemplate('mgr')">⬇️ 模板</button>
           <button class="btn ${mgrPerfViewSnapshot?'btn-primary':'btn-outline'} btn-sm" onclick="mgrPerfViewSnapshot=!mgrPerfViewSnapshot;renderMgrPerf()">${mgrPerfViewSnapshot?'📌 返回实时':'📷 查看最终保存版本'}</button>
           <button class="btn btn-success btn-sm" onclick="exportMgrPerfSingleXlsx()">📥 导出Excel</button>
           `}
