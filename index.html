@@ -4544,7 +4544,7 @@ function buildAIContext() {
       if (!teamPerformanceSummary[tm]) teamPerformanceSummary[tm] = { byMonth: {} };
       Object.keys(teamTargets[year][tm] || {}).forEach(mo => {
         const target = toNum(teamTargets[year][tm][mo]);
-        const perf = (teamPerfByTM[tm] && teamPerfByTM[tm][mo]) || { amount: 0, grossProfit: 0, count: 0 };
+        const perf = (teamPerfByTM[tm] && teamPerfByTM[tm][year + '-' + mo]) || { amount: 0, grossProfit: 0, count: 0 };
         const amt = Math.round(toNum(perf.amount) * 100) / 100;
         const hc = toNum((teamHeadcount[year] && teamHeadcount[year][tm] && teamHeadcount[year][tm][mo]) || 0);
         teamPerformanceSummary[tm].byMonth[mo] = {
