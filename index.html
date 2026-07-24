@@ -5750,6 +5750,7 @@ function renderConfigContent() {
   if (configTab === 'honorConfig') {
     const now = new Date();
     const curM = honorCfgMonth || (function(){ let lm = now.getMonth() - 1, ly = now.getFullYear(); if (lm < 0) { lm = 11; ly--; } return ly + '-' + String(lm + 1).padStart(2,'0'); })();
+    if (!honorCfgMonth) honorCfgMonth = curM; // 默认月份下 honorCfgMonth 为 null，赋值后编辑/删除/保存助手函数才能拿到有效月份
     const allMonths = Object.keys(cloudData.honorRecords || {}).filter(k => /^\d{4}-\d{2}$/.test(k)).sort().reverse();
     if (curM && !allMonths.includes(curM)) allMonths.unshift(curM);
     const list = (cloudData.honorRecords && cloudData.honorRecords[curM]) || [];
@@ -6196,6 +6197,14 @@ function updateMgrPerfBase(value) {
 
 // ===== 荣誉激励配置助手（formConfig tab 内编辑 honorRecords）=====
 let honorCfgMonth = null;
+// 解析有效月份：优先用已选 honorCfgMonth，否则兜底为上月（YYYY-MM），避免编辑/删除助手函数因 null 静默失败
+function honorEffectiveMonth() {
+  if (honorCfgMonth && /^\d{4}-\d{2}$/.test(honorCfgMonth)) return honorCfgMonth;
+  const now = new Date();
+  let lm = now.getMonth() - 1, ly = now.getFullYear();
+  if (lm < 0) { lm = 11; ly--; }
+  return ly + '-' + String(lm + 1).padStart(2, '0');
+}
 function _ensureHonorBucket(ym) {
   if (!cloudData.honorRecords) cloudData.honorRecords = {};
   if (!Array.isArray(cloudData.honorRecords[ym])) cloudData.honorRecords[ym] = [];
@@ -6207,7 +6216,7 @@ function onHonorCfgMonthChange(ym) {
   renderConfigContent();
 }
 function addHonorMonthItem() {
-  const ym = honorCfgMonth || document.getElementById('honorCfgMonthSel')?.value;
+  const ym = honorEffectiveMonth() || document.getElementById('honorCfgMonthSel')?.value;
   if (!/^\d{4}-\d{2}$/.test(ym || '')) { alert('请先选择/填写有效的月份（YYYY-MM）'); return; }
   honorCfgMonth = ym;
   const arr = _ensureHonorBucket(ym);
@@ -6215,16 +6224,16 @@ function addHonorMonthItem() {
   renderConfigContent();
 }
 function updateHonorCfgItem(i, field, value) {
-  const ym = honorCfgMonth;
-  if (!ym) return;
+  const ym = honorEffectiveMonth();
+  if (!/^\d{4}-\d{2}$/.test(ym)) return;
   const arr = _ensureHonorBucket(ym);
   if (!arr[i]) return;
   arr[i][field] = value;
   if (field === 'awardName' || field === 'bonus') arr[i].updatedAt = new Date().toISOString();
 }
 function deleteHonorCfgItem(i) {
-  const ym = honorCfgMonth;
-  if (!ym) return;
+  const ym = honorEffectiveMonth();
+  if (!/^\d{4}-\d{2}$/.test(ym)) return;
   const arr = _ensureHonorBucket(ym);
   if (!arr[i]) return;
   if (!confirm('确定删除这条奖项配置吗？')) return;
