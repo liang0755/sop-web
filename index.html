@@ -681,6 +681,7 @@ async function loadCoreData() {
     }
     cloudData.formConfig.mgrPerformanceConfig = normalizePerfConfig(cloudData.formConfig.mgrPerformanceConfig);
     migrateMgrPerfConfig();
+    migrateM0PerfConfig();
     if (cloudData.formConfig.mgrPerformanceBase === undefined || cloudData.formConfig.mgrPerformanceBase === null) cloudData.formConfig.mgrPerformanceBase = DEFAULT_FORM_CONFIG.mgrPerformanceBase;
     if (!fcData) {
       try { await fetch(FB_BASE + '/formConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.formConfig)}); } catch(e) {}
@@ -814,6 +815,7 @@ async function loadCoreData() {
     }
     cloudData.formConfig.mgrPerformanceConfig = normalizePerfConfig(cloudData.formConfig.mgrPerformanceConfig);
     migrateMgrPerfConfig();
+    migrateM0PerfConfig();
     if (cloudData.formConfig.mgrPerformanceBase === undefined || cloudData.formConfig.mgrPerformanceBase === null) cloudData.formConfig.mgrPerformanceBase = DEFAULT_FORM_CONFIG.mgrPerformanceBase;
   }
 }
@@ -1515,7 +1517,7 @@ const DEFAULT_FORM_CONFIG = {
   m0PerformanceConfig: {
     totalCapAt100: true,
     items: [
-      { key: 'effective', name: '有效建联', type: 'manual', enabled: true, weight: 10, standard: 75, text: '有效建联', capAt100: true },
+      { key: 'effective', name: '演示', type: 'auto-m0-demo', enabled: true, weight: 10, standard: 20, text: '个人拜访量 + 陪访有效建联量', capAt100: true },
       { key: 'channel', name: '渠道', type: 'manual', enabled: true, weight: 10, standard: 1, text: '渠道拓展', capAt100: true },
       { key: 'newMedia', name: '新媒体', type: 'manual', enabled: true, weight: 10, standard: 8, text: '新媒体运营', capAt100: true }
     ],
@@ -5594,7 +5596,7 @@ function renderConfigContent() {
     const bonus = cfg.bonus || [];
     c.innerHTML = `
       <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
-        配置 M0 绩效统计的<b>考核项（手动录入，<b>不</b>自动带入自拓演示数量</b>）、<b>加分项</b>以及<b>各 M0 职级绩效基数</b>。保存后立即生效；单月看板中每行可单独覆盖考核要求、完成情况、描述文字与加分次数。
+        配置 M0 绩效统计的<b>考核项（支持「手动录入」与「自动(M0演示)」两种类型）</b>、<b>加分项</b>以及<b>各 M0 职级绩效基数</b>。考核项为「自动(M0演示)」时，「完成」自动取<b>个人拜访量 + 陪访有效建联量</b>（按所选年月从拜访记录/日报陪访渠道汇总），并可在单月看板每行手动覆盖。保存后立即生效；单月看板中每行可单独覆盖考核要求、完成情况、描述文字与加分次数。
       </div>
       <div class="card" style="margin-bottom:16px">
         <div class="card-header"><h4>总分规则</h4></div>
@@ -5605,7 +5607,7 @@ function renderConfigContent() {
         </div>
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><h4>考核项配置（手动录入）</h4><span style="font-size:12px;color:var(--gray-500)">权重总和建议为100；数字=考核标准/目标（用于计算得分）；文字=考核项描述（默认，可在单月每行覆盖）</span></div>
+        <div class="card-header"><h4>考核项配置</h4><span style="font-size:12px;color:var(--gray-500)">权重总和建议为100；「自动(M0演示)」类型的「完成」自动取个人拜访量+陪访有效建联量（可在单月每行手动覆盖）；「手动录入」类型的数字=考核标准/目标（用于计算得分）；文字=考核项描述（默认，可在单月每行覆盖）</span></div>
         <div class="card-body">
           <div id="m0PerfItemsList">
             ${items.map((it, i) => `
@@ -5613,19 +5615,21 @@ function renderConfigContent() {
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
                   <input type="checkbox" ${it.enabled ? 'checked' : ''} onchange="toggleM0PerfItemEnabled(${i})" title="启用/停用">
                   <b style="font-size:13px">${i + 1}. ${esc(it.name)}</b>
-                  <span class="badge badge-gray" style="font-size:11px">手动录入</span>
+                  <span class="badge badge-gray" style="font-size:11px">${it.type === 'auto-m0-demo' ? '自动(M0演示)' : '手动录入'}</span>
                   <div style="flex:1"></div>
                   <button class="btn btn-sm btn-outline" onclick="moveM0PerfItem(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
                   <button class="btn btn-sm btn-outline" onclick="moveM0PerfItem(${i}, 1)" ${i === items.length - 1 ? 'disabled' : ''}>↓</button>
                   <button class="btn btn-sm btn-danger" onclick="deleteM0PerfItem(${i})">删除</button>
                 </div>
-                <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px">
+                <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px">
+                  <div class="form-group" style="margin-bottom:0"><label>类型</label><select class="form-control" onchange="updateM0PerfItem(${i}, 'type', this.value)"><option value="auto-m0-demo" ${it.type === 'auto-m0-demo' ? 'selected' : ''}>自动(M0演示)</option><option value="manual" ${it.type === 'manual' ? 'selected' : ''}>手动录入</option></select></div>
                   <div class="form-group" style="margin-bottom:0"><label>考核项名称</label><input type="text" class="form-control" value="${esc(it.name)}" onchange="updateM0PerfItem(${i}, 'name', this.value)"></div>
                   <div class="form-group" style="margin-bottom:0"><label>权重(%)</label><input type="number" class="form-control" value="${it.weight}" onchange="updateM0PerfItem(${i}, 'weight', parseFloat(this.value) || 0)"></div>
                   <div class="form-group" style="margin-bottom:0"><label>考核标准(数字)</label><input type="number" class="form-control" value="${it.standard}" onchange="updateM0PerfItem(${i}, 'standard', parseFloat(this.value) || 0)"></div>
-                  <div class="form-group" style="margin-bottom:0;grid-column:span 2"><label>文字描述</label><input type="text" class="form-control" value="${esc(it.text || '')}" onchange="updateM0PerfItem(${i}, 'text', this.value)" placeholder="考核项描述，可在单月每行覆盖"></div>
+                  <div class="form-group" style="margin-bottom:0;grid-column:span 3"><label>文字描述</label><input type="text" class="form-control" value="${esc(it.text || '')}" onchange="updateM0PerfItem(${i}, 'text', this.value)" placeholder="考核项描述，可在单月每行覆盖"></div>
                   <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:22px"><input type="checkbox" ${!it.capAt100 ? 'checked' : ''} onchange="updateM0PerfItem(${i}, 'capAt100', !this.checked)"> 该项得分可超100（不勾选则封顶100）</label>
                 </div>
+                ${it.type === 'auto-m0-demo' ? '<div style="font-size:12px;color:var(--gray-500);margin-top:8px">演示考核的「完成」自动取<b>个人拜访量 + 陪访有效建联量</b>（按所选年月从拜访记录/日报陪访渠道汇总），可在单月绩效看板每行手动覆盖。</div>' : ''}
               </div>
             `).join('')}
           </div>
@@ -7574,6 +7578,201 @@ function exportMgrReports() {
 }
 
 // ============ Visit Statistics Dashboard ============
+// ===== 拜访统计 · M0 陪访统计 =====
+let m0vMode = 'month';        // 'week' | 'month'
+let m0vChannel = '';
+let m0vPersonFilter = 'all';
+
+function getM0VisitChannel() {
+  if (!m0vChannel) m0vChannel = (cloudData.formConfig && cloudData.formConfig.m0VisitChannel) || '陪访（仅M0需要填写）';
+  return m0vChannel;
+}
+function m0vWeekKey(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const day = d.getDay() || 7;
+  const mon = new Date(d); mon.setDate(d.getDate() - day + 1);
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  const fmt = x => String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+  return { key: 'W' + mon.getFullYear() + '-' + fmt(mon), label: fmt(mon) + '~' + fmt(sun) };
+}
+function computeM0VisitRows() {
+  const s = document.getElementById('visitStatsStart')?.value || '';
+  const e = document.getElementById('visitStatsEnd')?.value || '';
+  const channel = getM0VisitChannel();
+  const reports = cloudData.dailyReports || [];
+  const rows = [];
+  reports.forEach(r => {
+    const rd = r.reportDate || '';
+    if (s && rd < s) return;
+    if (e && rd > e) return;
+    (r.channels || []).forEach(ch => {
+      if (ch.channel !== channel) return;
+      const cnt = toNum(ch.effectiveContacts);
+      if (cnt <= 0) return;
+      rows.push({ date: rd, m0: r.name || '未知', cnt, issues: (ch.issues || '').toString().trim() });
+    });
+  });
+  rows.sort((a, b) => a.date.localeCompare(b.date) || a.m0.localeCompare(b.m0, 'zh'));
+  return rows;
+}
+function renderM0VisitStats() {
+  const s = document.getElementById('visitStatsStart')?.value || '';
+  const e = document.getElementById('visitStatsEnd')?.value || '';
+  const c = document.getElementById('visitStatsResults');
+  if (!c) return;
+  const channel = getM0VisitChannel();
+  const reports = cloudData.dailyReports || [];
+  const channelSet = new Set();
+  reports.forEach(r => (r.channels || []).forEach(ch => { if (ch.channel) channelSet.add(ch.channel); }));
+  const channelOpts = [...channelSet].sort().map(n => `<option value="${esc(n)}" ${n === channel ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const rows = computeM0VisitRows();
+  // periods
+  const periods = [];
+  if (m0vMode === 'month') {
+    let sy = 2000, sm = 1, ey = 2099, em = 12;
+    if (s) { const p = s.slice(0, 7).split('-').map(Number); sy = p[0]; sm = p[1]; }
+    if (e) { const p = e.slice(0, 7).split('-').map(Number); ey = p[0]; em = p[1]; }
+    let y = sy, m = sm;
+    while (y < ey || (y === ey && m <= em)) {
+      const ym = y + '-' + String(m).padStart(2, '0');
+      periods.push({ key: ym, label: ym });
+      m++; if (m > 12) { m = 1; y++; }
+    }
+  } else if (s && e) {
+    let cur = new Date(s + 'T00:00:00');
+    const end = new Date(e + 'T00:00:00');
+    const seen = new Set();
+    while (cur <= end) {
+      const k = m0vWeekKey(localYMD(cur));
+      if (!seen.has(k.key)) { seen.add(k.key); periods.push(k); }
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+  // matrix: m0 -> period -> sum
+  const m0Set = [];
+  const m0Map = {};
+  rows.forEach(r => {
+    if (!m0Map[r.m0]) { m0Map[r.m0] = {}; m0Set.push(r.m0); }
+    const pk = m0vMode === 'month' ? r.date.slice(0, 7) : m0vWeekKey(r.date).key;
+    m0Map[r.m0][pk] = (m0Map[r.m0][pk] || 0) + r.cnt;
+  });
+  m0Set.sort((a, b) => a.localeCompare(b, 'zh'));
+  const totalVisits = rows.length;
+  const totalCnt = rows.reduce((a, r) => a + r.cnt, 0);
+  const m0Count = m0Set.length;
+  const avg = m0Count ? (totalCnt / m0Count).toFixed(2) : '0.00';
+  // matrix html
+  let matrixHtml;
+  if (m0Set.length && periods.length) {
+    let head = '<th style="text-align:left;white-space:nowrap;position:sticky;left:0;background:#fff;z-index:2">M0</th>';
+    periods.forEach(p => head += `<th style="text-align:center;white-space:nowrap">${esc(p.label)}</th>`);
+    head += '<th style="text-align:center;background:#FFF8EE">合计</th>';
+    let body = '';
+    const colTotals = {};
+    let grand = 0;
+    m0Set.forEach(m0 => {
+      let tds = `<td style="white-space:nowrap;font-weight:600;position:sticky;left:0;background:#fff">${esc(m0)}</td>`;
+      let rowSum = 0;
+      periods.forEach(p => {
+        const v = m0Map[m0][p.key] || 0;
+        rowSum += v; colTotals[p.key] = (colTotals[p.key] || 0) + v;
+        tds += `<td style="text-align:center">${v || ''}</td>`;
+      });
+      grand += rowSum;
+      tds += `<td style="text-align:center;font-weight:700;background:#FFF8EE">${rowSum}</td>`;
+      body += `<tr>${tds}</tr>`;
+    });
+    let trow = '<td style="font-weight:700;position:sticky;left:0;background:#fff">合计</td>';
+    periods.forEach(p => trow += `<td style="text-align:center;font-weight:700;color:#16a34a">${colTotals[p.key] || 0}</td>`);
+    trow += `<td style="text-align:center;font-weight:800;background:#FFF8EE;color:#dc2626">${grand}</td>`;
+    body += `<tr>${trow}</tr>`;
+    matrixHtml = `<div class="table-wrap"><table class="table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  } else {
+    matrixHtml = '<div class="empty-state"><div class="icon">📭</div>所选范围内暂无「' + esc(channel) + '」陪访数据</div>';
+  }
+  // detail
+  const persons = [...m0Set];
+  const personOpts = '<option value="all" ' + (m0vPersonFilter === 'all' ? 'selected' : '') + '>全部 M0</option>' + persons.map(p => `<option value="${esc(p)}" ${p === m0vPersonFilter ? 'selected' : ''}>${esc(p)}</option>`).join('');
+  const detailRows = m0vPersonFilter === 'all' ? rows : rows.filter(r => r.m0 === m0vPersonFilter);
+  let dbody = detailRows.map(r => `<tr><td style="white-space:nowrap">${r.date}</td><td style="white-space:nowrap">${esc(r.m0)}</td><td style="text-align:center;font-weight:600">${r.cnt}</td><td style="max-width:420px;white-space:pre-wrap">${esc(r.issues).replace(/\n/g, '<br>')}</td></tr>`).join('');
+  if (!detailRows.length) dbody = '<tr><td colspan="4" style="text-align:center;color:var(--gray-400);padding:18px">暂无明细</td></tr>';
+  const kpis = [
+    { l: '陪访记录数', v: totalVisits, c: 'var(--primary)' },
+    { l: '有效建联数合计', v: totalCnt, c: 'var(--success)' },
+    { l: '参与 M0 数', v: m0Count, c: 'var(--warning)' },
+    { l: '人均陪访', v: avg, c: 'var(--danger)' }
+  ];
+  const kpiHtml = kpis.map(k => `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:${k.c}">${k.v}</div><div style="font-size:12px;color:var(--gray-500)">${k.l}</div></div>`).join('');
+  c.innerHTML = `
+    <div class="card" style="margin-bottom:16px"><div class="card-header">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <h4>📊 M0 陪访统计（有效建联量）</h4>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:12px;color:var(--gray-500)">渠道</label>
+          <select class="form-control form-control-sm" style="width:auto" onchange="onM0VisitChannelChange(this)">${channelOpts}</select>
+        </div>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-sm ${m0vMode==='week'?'btn-primary':'btn-outline'}" onclick="setM0vMode('week')">按周</button>
+          <button class="btn btn-sm ${m0vMode==='month'?'btn-primary':'btn-outline'}" onclick="setM0vMode('month')">按月</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:16px">${kpiHtml}</div>
+      <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">汇总矩阵（行 = M0，列 = ${m0vMode==='month'?'月份':'周'}，单元格 = 该周期有效建联数合计；默认渠道可在上方切换，数据来源 = 日报对应渠道的「有效建联」汇总）</div>
+      ${matrixHtml}
+    </div></div>
+    <div class="card"><div class="card-body">
+      <div class="sec-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px">
+        <span>📋 明细数据</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <select class="form-control form-control-sm" style="width:auto" onchange="setM0vPerson(this.value)">${personOpts}</select>
+          <button class="btn btn-sm btn-outline" onclick="exportM0VisitCsv()">📊 CSV</button>
+          <button class="btn btn-sm btn-success" onclick="exportM0VisitXlsx()">📥 Excel</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>日期</th><th>M0</th><th style="text-align:center">有效建联数</th><th>问题/提升动作</th></tr></thead><tbody>${dbody}</tbody></table></div>
+    </div></div>`;
+}
+function onM0VisitChannelChange(sel) {
+  m0vChannel = sel.value;
+  if (cloudData.formConfig) {
+    cloudData.formConfig.m0VisitChannel = m0vChannel;
+    if (typeof apiUpdate === 'function') apiUpdate('formConfig', 'm0VisitChannel', m0vChannel).catch(() => {});
+  }
+  renderM0VisitStats();
+}
+function setM0vMode(mode) { m0vMode = mode; renderM0VisitStats(); }
+function setM0vPerson(p) { m0vPersonFilter = p; renderM0VisitStats(); }
+function csvCell(v) {
+  const s = String(v == null ? '' : v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function exportM0VisitCsv() {
+  const rows = computeM0VisitRows();
+  const detail = m0vPersonFilter === 'all' ? rows : rows.filter(r => r.m0 === m0vPersonFilter);
+  const header = ['日期', 'M0', '有效建联数', '问题/提升动作'];
+  const lines = [header.map(csvCell).join(',')];
+  detail.forEach(r => lines.push([r.date, r.m0, r.cnt, r.issues].map(csvCell).join(',')));
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'M0陪访统计_' + (document.getElementById('visitStatsStart')?.value || '') + '_' + (document.getElementById('visitStatsEnd')?.value || '') + '.csv'; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function exportM0VisitXlsx() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面后重试', 'error'); return; }
+  const rows = computeM0VisitRows();
+  const detail = m0vPersonFilter === 'all' ? rows : rows.filter(r => r.m0 === m0vPersonFilter);
+  const aoa = [['日期', 'M0', '有效建联数', '问题/提升动作']];
+  detail.forEach(r => aoa.push([r.date, r.m0, r.cnt, r.issues]));
+  if (aoa.length <= 1) { showToast('当前无可导出的明细数据', 'warning'); return; }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'M0陪访明细');
+  XLSX.writeFile(wb, 'M0陪访统计_' + (document.getElementById('visitStatsStart')?.value || '') + '_' + (document.getElementById('visitStatsEnd')?.value || '') + '.xlsx');
+  showToast('已导出 Excel（' + (aoa.length - 1) + ' 行）', 'success');
+}
+
 async function renderVisitStats() {
   if (!hasPermission('visitStats')) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
@@ -7592,6 +7791,7 @@ async function renderVisitStats() {
       <div class="summary-tab visit-stats-tab ${visitStatsTab==='team'?'active':''}" onclick="switchVisitStatsTab('team', this)">🏢 团队拜访卡点统计</div>
       <div class="summary-tab visit-stats-tab ${visitStatsTab==='teamType'?'active':''}" onclick="switchVisitStatsTab('teamType', this)">🏢 团队拜访类型统计</div>
       <div class="summary-tab visit-stats-tab ${visitStatsTab==='person'?'active':''}" onclick="switchVisitStatsTab('person', this)">👤 个人拜访类型统计</div>
+      <div class="summary-tab visit-stats-tab ${visitStatsTab==='m0visit'?'active':''}" onclick="switchVisitStatsTab('m0visit', this)">👥 M0陪访统计</div>
     </div>
     <div class="card" style="margin-bottom:20px"><div class="card-body">
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap" id="visitDateBtns">
@@ -7651,6 +7851,7 @@ function setVisitDateRange(type, btn) {
 }
 
 function loadVisitStats() {
+  if (visitStatsTab === 'm0visit') { renderM0VisitStats(); return; }
   const s = document.getElementById('visitStatsStart')?.value || '';
   const e = document.getElementById('visitStatsEnd')?.value || '';
   let records = cloudData.visitRecords.filter(r => {
@@ -11293,7 +11494,38 @@ function getPerfItemActual(item, rec, year, sp, month) {
     if (rec['manual_' + item.key]) return parseFloat(rec['actual_' + item.key]) || 0;
     return teamPerfSum(year, sp, month);
   }
+  if (item.type === 'auto-m0-demo') {
+    if (rec['manual_' + item.key]) return parseFloat(rec['actual_' + item.key]) || 0;
+    return m0DemoActual(year, month, sp);
+  }
   return parseFloat(rec['actual_' + item.key]) || 0;
+}
+// M0 演示考核项「完成」自动值 = 个人拜访量 + 陪访有效建联量
+// 个人拜访量：visitRecords 中 employee == m0 且 年月匹配 contactTime 的条数
+// 陪访有效建联量：dailyReports 中 name == m0 且 渠道「陪访（仅M0需要填写）」且 年月匹配 reportDate 的 effectiveContacts 合计
+function m0DemoActual(year, month, m0) {
+  const ym = String(year) + String(month).padStart(2, '0');
+  const ymDash = String(year) + '-' + String(month).padStart(2, '0');
+  let visits = 0;
+  (cloudData.visitRecords || []).forEach(r => {
+    const emp = (r.employee || r.salesperson || '').trim();
+    if (emp !== (m0 || '').trim()) return;
+    const vd = (r.contactTime || '').replace(/\D/g, '').slice(0, 6);
+    if (vd !== ym) return;
+    visits++;
+  });
+  let peifang = 0;
+  (cloudData.dailyReports || []).forEach(r => {
+    if ((r.name || '').trim() !== (m0 || '').trim()) return;
+    if ((r.reportDate || '').slice(0, 7) !== ymDash) return;
+    (r.channels || []).forEach(c => {
+      const ch = c.channel || '';
+      if (ch.indexOf('陪访') >= 0 && ch.indexOf('提升动作') < 0) {
+        peifang += toNum(c.effectiveContacts);
+      }
+    });
+  });
+  return visits + peifang;
 }
 // 管理者团队（取该人员所属团队/门店，与团队月目标、团队业绩统计同一口径）
 function teamTargetFor(year, sp, month) {
@@ -11328,6 +11560,21 @@ function migrateMgrPerfConfig() {
     target.standard = 0;
     target.text = target.text || '团队业绩目标完成';
     cfg.migratedAutoTeam = true;
+  }
+}
+// M0 绩效配置迁移：将名字含「演示」的手动考核项升级为自动(auto-m0-demo)，仅执行一次并持久化
+function migrateM0PerfConfig() {
+  const cfg = cloudData.formConfig && cloudData.formConfig.m0PerformanceConfig;
+  if (!cfg || !Array.isArray(cfg.items)) return;
+  if (cfg.migratedM0Demo) return;
+  const target = cfg.items.find(it => (it.name || '').indexOf('演示') >= 0 && it.type === 'manual');
+  if (target) {
+    target.type = 'auto-m0-demo';
+    target.text = target.text || '个人拜访量 + 陪访有效建联量';
+    cfg.migratedM0Demo = true;
+    if (typeof apiUpdate === 'function') apiUpdate('formConfig', 'm0PerformanceConfig', cfg).catch(() => {});
+  } else {
+    cfg.migratedM0Demo = true;
   }
 }
 
@@ -11952,7 +12199,7 @@ function m0PerfRowDisplay(year, m0, month, cfg, snap) {
   if (snap) {
     const items = (cfg.items || []).filter(it => it.enabled).map(it => {
       const si = snap.items[it.key] || {};
-      return { it, actual: si.actual || 0, standard: (si.standard !== undefined ? si.standard : (it.standard || 0)), score: si.score || 0, text: si.text || '', frozen: true, isAuto: (it.type === 'auto-demo' || it.type === 'auto-team') };
+      return { it, actual: si.actual || 0, standard: (si.standard !== undefined ? si.standard : (it.standard || 0)), score: si.score || 0, text: si.text || '', frozen: true, isAuto: (it.type === 'auto-demo' || it.type === 'auto-team' || it.type === 'auto-m0-demo') };
     });
     const bonus = (cfg.bonus || []).filter(b => b.enabled).map(b => ({ b, cnt: (snap.bonus[b.key] || {}).cnt || 0, frozen: true }));
     return { level: snap.level || '', base: snap.base || 0, workingDays: snap.workingDays || 30, comment: snap.comment || '', finalScore: snap.finalScore, computedScore: snap.computedScore, items, bonus, frozen: true };
@@ -11964,13 +12211,14 @@ function m0PerfRowDisplay(year, m0, month, cfg, snap) {
   const base = getPerfBase(level) * (rec.workingDays || 30) / 30;
   const items = (cfg.items || []).filter(it => it.enabled).map(it => {
     const ik = it.key;
+    const isAuto = (it.type === 'auto-demo' || it.type === 'auto-m0-demo');
     const manual = rec['manual_' + ik];
-    const actual = parseFloat(rec['actual_' + ik]) || 0;
+    const actual = isAuto ? (manual ? (parseFloat(rec['actual_' + ik]) || 0) : m0DemoActual(year, month, m0)) : (parseFloat(rec['actual_' + ik]) || 0);
     const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
     const stdRaw = manualStd ? rec['standard_' + ik] : (it.standard || 0);
     const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
     const txt = (rec['text_' + ik] !== undefined && rec['text_' + ik] !== '') ? rec['text_' + ik] : (it.text || '');
-    return { it, actual, standard: std, score: (scores.itemScores[ik] || {}).raw || 0, text: txt, frozen: false, isAuto: false, manual };
+    return { it, actual, standard: std, score: (scores.itemScores[ik] || {}).raw || 0, text: txt, frozen: false, isAuto, manual };
   });
   const bonus = (cfg.bonus || []).filter(b => b.enabled).map(b => ({ b, cnt: parseFloat(rec['bonus_' + b.key]) || 0, frozen: false }));
   return { level, base, workingDays: rec.workingDays || 30, comment: rec.comment || '', finalScore: getFinalScore(rec, cfg, year, m0, month), computedScore: scores.score, items, bonus, frozen: false };
@@ -12008,7 +12256,7 @@ function saveM0PerfSnapshot() {
     };
     (cfg.items || []).filter(it => it.enabled).forEach(it => {
       const ik = it.key;
-      const actual = parseFloat(rec['actual_' + ik]) || 0;
+      const actual = getPerfItemActual(it, rec, year, m0, month);
       const manualStd = (rec['standard_' + ik] !== undefined && rec['standard_' + ik] !== '');
       const stdRaw = manualStd ? rec['standard_' + ik] : (it.standard || 0);
       const std = manualStd ? stdRaw : stdRaw * perfProrationRatio(rec);
@@ -12186,7 +12434,7 @@ function refreshM0PerfSingle() {
   h += '</tr><tr>';
   items.forEach(it => {
     h += '<th style="background:#FAEEDA">要求</th>';
-    h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' || it.type === 'auto-team' ? '完成(自动)' : '完成'}</th>`;
+    h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' || it.type === 'auto-team' || it.type === 'auto-m0-demo' ? '完成(自动)' : '完成'}</th>`;
     h += '<th style="background:#FAEEDA">得分</th>';
   });
   bonusList.forEach(b => { h += `<th style="background:#EAF3DE;white-space:pre-wrap">${esc(b.name)}</th>`; });
@@ -12205,9 +12453,16 @@ function refreshM0PerfSingle() {
       const stdCell = d.frozen
         ? `<div style="font-size:11px;margin-bottom:2px">${esc(x.text || '')}</div><div style="font-size:11px">要求 ${x.standard}</div>`
         : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="saveM0PerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="saveM0PerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
-      const actCell = d.frozen
-        ? `<div style="font-size:11px">${x.actual}</div>`
-        : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveM0PerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+      const actCell = (() => {
+        if (x.isAuto) {
+          if (d.frozen) return `<div style="font-size:11px">${x.actual}</div>`;
+          const resetBtn = x.manual ? `<button class="btn btn-xs btn-outline" title="重置为自动(个人拜访量+陪访有效建联量)" onclick="saveM0PerfByKey('${k}', {'manual_${ik}':false})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
+          return `${resetBtn}<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveM0PerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:70px;margin-top:2px">`;
+        }
+        return d.frozen
+          ? `<div style="font-size:11px">${x.actual}</div>`
+          : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveM0PerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+      })();
       h += `<td style="background:#FFF8EE">${stdCell}</td>`;
       h += `<td style="background:#FFF8EE">${actCell}</td>`;
       h += `<td style="text-align:center;font-weight:600">${Number(x.score).toFixed(2)}</td>`;
@@ -12480,7 +12735,7 @@ function mgrPerfRowDisplay(year, mgr, month, cfg, snap) {
   if (snap) {
     const items = (cfg.items || []).filter(it => it.enabled).map(it => {
       const si = snap.items[it.key] || {};
-      return { it, actual: si.actual || 0, standard: (si.standard !== undefined ? si.standard : (it.standard || 0)), score: si.score || 0, text: si.text || '', frozen: true, isAuto: (it.type === 'auto-demo' || it.type === 'auto-team') };
+      return { it, actual: si.actual || 0, standard: (si.standard !== undefined ? si.standard : (it.standard || 0)), score: si.score || 0, text: si.text || '', frozen: true, isAuto: (it.type === 'auto-demo' || it.type === 'auto-team' || it.type === 'auto-m0-demo') };
     });
     const bonus = (cfg.bonus || []).filter(b => b.enabled).map(b => ({ b, cnt: (snap.bonus[b.key] || {}).cnt || 0, frozen: true }));
     return { base: snap.base || 0, workingDays: snap.workingDays || 30, comment: snap.comment || '', finalScore: snap.finalScore, computedScore: snap.computedScore, items, bonus, frozen: true };
@@ -12717,7 +12972,7 @@ function refreshMgrPerfSingle() {
   h += '</tr><tr>';
   items.forEach(it => {
     h += '<th style="background:#FAEEDA">要求</th>';
-    h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' || it.type === 'auto-team' ? '完成(自动)' : '完成'}</th>`;
+    h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' || it.type === 'auto-team' || it.type === 'auto-m0-demo' ? '完成(自动)' : '完成'}</th>`;
     h += '<th style="background:#FAEEDA">得分</th>';
   });
   bonusList.forEach(b => { h += `<th style="background:#EAF3DE;white-space:pre-wrap">${esc(b.name)}</th>`; });
