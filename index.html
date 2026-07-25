@@ -7930,7 +7930,7 @@ function renderGroupedVisitStats(records, s, e, mode) {
   }).join('');
   const bodyRows1 = display1.map(emp => {
     const cells = events.map(ev => `<td style="text-align:center;padding:6px 8px">${matrix[emp][ev] || ''}</td>`).join('');
-    const label = byEmp[emp].dept ? `${emp}<br><span style="font-size:11px;color:var(--gray-500);font-weight:400">${byEmp[emp].dept}</span>` : emp;
+    const label = emp;
     return `<tr>
       <td style="white-space:nowrap;font-weight:600;padding:8px 10px">${label}</td>
       ${cells}
@@ -7950,7 +7950,7 @@ function renderGroupedVisitStats(records, s, e, mode) {
     <div class="card-body" style="padding:16px">
       <div class="table-wrap"><table style="font-size:13px;min-width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--gray-50)">
-          <th style="text-align:left;padding:8px 10px">${unitLabel}</th>${thCells}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计
+          <th style="text-align:left;padding:8px 10px">${unitName}</th>${thCells}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计
             <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
               <button onclick='setVisitSort("${mode}","events","__total__","asc")' title="按合计升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${st1.key==='__total__'&&st1.dir==='asc'?'#16a34a':'#6b7280'}">▲</button>
               <button onclick='setVisitSort("${mode}","events","__total__","desc")' title="按合计降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${st1.key==='__total__'&&st1.dir==='desc'?'#dc2626':'#6b7280'}">▼</button>
@@ -8013,8 +8013,8 @@ function renderGroupedVisitStats(records, s, e, mode) {
     mode, s, e,
     events: {
       label: '按签到事件',
-      headers: [unitLabel, ...events, '合计'],
-      rows: display1.map(emp => [ byEmp[emp].dept ? `${emp}（${byEmp[emp].dept}）` : emp, ...events.map(ev => matrix[emp][ev] || ''), rowTotals[emp] ])
+      headers: [unitName, ...events, '合计'],
+      rows: display1.map(emp => [ emp, ...events.map(ev => matrix[emp][ev] || ''), rowTotals[emp] ])
     },
     cats: {
       label: '按归类汇总',
