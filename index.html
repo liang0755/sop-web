@@ -6863,11 +6863,11 @@ function parseVisitCSV(text) {
   return rows;
 }
 
-// 拜访数据·查重 key（与导入查重逻辑一致）：联系时间(到分钟)+客户+联系人+手机号+签到事件+员工+部门+签到地址+备注，空白归一
+// 拜访数据·查重 key（与导入查重逻辑一致）：联系时间(到分钟)+客户+联系人+手机号+员工+部门+签到地址+备注（不含签到事件，空白归一）
 function buildVisitDupKey(o) {
   const _normCell = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
   const _normTimeMin = s => { const t = normContactTime(s || ''); return t ? t.slice(0, 16) : ''; };
-  return [_normTimeMin(o.contactTime), _normCell(o.customer), _normCell(o.contactPerson), _normCell(o.phone), _normCell(o.signinEvent), _normCell(o.employee), canonDept(o.department||''), _normCell(o.signinAddress), _normCell(o.remark)].join('|');
+  return [_normTimeMin(o.contactTime), _normCell(o.customer), _normCell(o.contactPerson), _normCell(o.phone), _normCell(o.employee), canonDept(o.department||''), _normCell(o.signinAddress), _normCell(o.remark)].join('|');
 }
 
 // 拜访数据·按相同 key 清理重复：每组相同 key 仅保留第一条，删除其余（先弹窗确认，逐条删除并同步内存）
@@ -6950,12 +6950,12 @@ async function handleVisitUpload(input) {
     await ensureVisitDataLoaded();
     const newRecords = [];
     let dupCount = 0;
-    // 查重 key = 联系时间(精确到分钟,忽略秒差) | 客户 | 联系人 | 手机号 | 签到事件 | 员工 | 部门 | 签到地址 | 备注（不含拜访结果、卡点说明）
+    // 查重 key = 联系时间(精确到分钟,忽略秒差) | 客户 | 联系人 | 手机号 | 员工 | 部门 | 签到地址 | 备注（不含签到事件/拜访结果/卡点说明，签到事件不参与查重）
     // ① 时间统一到「YYYY-MM-DD HH:MM」，避免「10:00:00」与「10:00」因秒数差异被判为不同；
     // ② 各字段折叠多余空白并 trim，避免首尾/中间空格差异导致漏查重。
     const _normCell = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
     const _normTimeMin = s => { const t = normContactTime(s || ''); return t ? t.slice(0, 16) : ''; };
-    const buildDupKey = (o) => [_normTimeMin(o.contactTime), _normCell(o.customer), _normCell(o.contactPerson), _normCell(o.phone), _normCell(o.signinEvent), _normCell(o.employee), canonDept(o.department||''), _normCell(o.signinAddress), _normCell(o.remark)].join('|');
+    const buildDupKey = (o) => [_normTimeMin(o.contactTime), _normCell(o.customer), _normCell(o.contactPerson), _normCell(o.phone), _normCell(o.employee), canonDept(o.department||''), _normCell(o.signinAddress), _normCell(o.remark)].join('|');
     // Keys already in DB — duplicates to be filtered out
     const existingKeys = new Set(cloudData.visitRecords.map(e => buildDupKey(e)));
     // Keys already added in this batch — avoid within-file duplicates too
@@ -6971,7 +6971,6 @@ async function handleVisitUpload(input) {
         customer: customer,
         contactPerson: r[colMap.contactPerson] || '',
         phone: r[colMap.phone] || '',
-        signinEvent: r[colMap.signinEvent] || '',
         employee: employee,
         department: r[colMap.department] || '',
         signinAddress: r[colMap.signinAddress] || '',
