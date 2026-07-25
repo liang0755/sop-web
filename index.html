@@ -661,6 +661,9 @@ async function loadCoreData() {
       ['customerSource', 'category', 'customerProfile'].forEach(k => {
         if (!Array.isArray(cloudData.formConfig.customerTags[k])) cloudData.formConfig.customerTags[k] = [];
       });
+      if (!cloudData.formConfig.customerTags.customerSourceGroups || typeof cloudData.formConfig.customerTags.customerSourceGroups !== 'object') {
+        cloudData.formConfig.customerTags.customerSourceGroups = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.customerTags.customerSourceGroups));
+      }
     }
     if (typeof cloudData.formConfig.customerSummaryNote !== 'string') cloudData.formConfig.customerSummaryNote = '';
     if (!cloudData.formConfig.teamTargets || typeof cloudData.formConfig.teamTargets !== 'object') cloudData.formConfig.teamTargets = {};
@@ -1475,7 +1478,14 @@ const DEFAULT_FORM_CONFIG = {
   customerTags: {
     customerSource: [],   // 客户来源
     category: [],         // 品类
-    customerProfile: []   // 客户画像
+    customerProfile: [],  // 客户画像
+    // 客户来源分组映射：{ 组名: [客户来源项, ...] }。不在任何组的项归入「其他」。
+    // 用于业绩看板「销售签约分析」按分组汇总业绩。
+    customerSourceGroups: {
+      '自拓': ['电话自拓', '地推自拓', '渠道推单'],
+      '线索': [],
+      '其他': []
+    }
   },
   // 客户汇总数据页面右上角说明文案（支持简单 HTML），在「表单配置-客户标签配置」Tab 中维护。
   customerSummaryNote: '',
@@ -4678,7 +4688,13 @@ function buildAIContext() {
     mgrPerformanceConfig: mgrPerfCfg,
     mgrPerformanceRecords: mgrPerfRecords,
     mgrPerformanceBase: mgrPerfBase,
-    honorRecords: honorRecords
+    honorRecords: honorRecords,
+    customerTags: {
+      customerSource: (fc.customerTags && fc.customerTags.customerSource) || [],
+      category: (fc.customerTags && fc.customerTags.category) || [],
+      customerProfile: (fc.customerTags && fc.customerTags.customerProfile) || [],
+      customerSourceGroups: (fc.customerTags && fc.customerTags.customerSourceGroups) || {}
+    }
   };
   return JSON.stringify(context, null, 2);
 }
@@ -4753,6 +4769,8 @@ function buildAISystemMessage() {
     + '- 当用户的问题涉及「M0 绩效 / M0 考核 / M0 得分」时，必须使用 m0PerformanceRecords 与 m0PerformanceConfig 回答；涉及「M0 评级 / M0 升降级」时使用 m0Records 与 m0Config 回答。\n'
     + '- 当用户的问题涉及「管理绩效 / 管理者绩效 / 主管绩效得分」时，必须使用 mgrPerformanceRecords 与 mgrPerformanceConfig 回答（管理者角色用户，无职级之分，绩效基数默认 5000，最终基数=基数×在职天数/30）。\n'
     + '- 当用户的问题涉及「荣誉激励 / 奖项 / 获奖人 / 奖金 / 销冠 / 攻坚奖 / 营销端冠军 / 团队冠军」时，必须使用 honorRecords 回答（按月份聚合的奖项与获奖人员/奖金/成就/备注）。\n'
+    + '- 当用户的问题涉及「销售签约分析 / 各销售按来源分组的业绩矩阵 / 某销售某月某来源业绩 / 自拓/线索/其他 来源分组业绩对比」时，先看 customerTags.customerSourceGroups（{组名:[客户来源项]}）确定分组归属，再用 salesRecords 按 salesperson/docMonth/customerSource 汇总各 (月×组) 业绩。「销售」口径：在岗 + 非 admin/manager/viewer + 非 M0。\n'
+    + '- customerTags 字段: customerSource/category/customerProfile 三个选项数组 + customerSourceGroups 分组映射({组名:[客户来源项]})。未配置分组时所有客户来源归入「其他」。\n'
     + '- 团队业绩统计(teamPerformanceSummary)字段:\n'
     + '  - byMonth[月份]: { target(月目标金额), amount(实际业绩金额), grossProfit(毛利), completionRate(完成率%, 目标为0时为null), headcount(团队人数), efficiency(人效=业绩÷人数, 人数为0时为null) }\n'
     + '- 销售绩效(performanceRecords)字段: key=年_销售_月，含 workingDays(在职天数)/comment(总评)/base(基数)/items(各考核项:{actual完成,standard要求,score得分,text描述})/bonus(加分项次数)\n'
@@ -5420,11 +5438,15 @@ function renderConfigContent() {
             <button class="btn btn-outline" style="width:100%;padding:10px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addCustomerTagOption('${g.key}')">➕ 添加${g.label}选项</button>
           </div>
         </div>`;
+      if (g.key === 'customerSource') {
+        // 紧随「客户来源」卡片之后插入「客户来源分组」配置卡片
+        html2 += renderCustomerSourceGroupsCard();
+      }
     });
     const note = (cloudData.formConfig.customerSummaryNote || '').replace(/"/g, '&quot;');
     c.innerHTML = `
       <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
-        💡 配置「客户来源 / 品类 / 客户画像」的<b>固定选项</b>，用于业绩看板「客户汇总数据」的后三列<b>单选框</b>。新增/删除后点击底部「保存配置」生效；每行选项的 <b>▲/▼</b> 可<b>上下移动调整顺序</b>。某组选项为空时，对应单选框仅显示「未设置」。
+        💡 配置「客户来源 / 品类 / 客户画像」的<b>固定选项</b>，用于业绩看板「客户汇总数据」的后三列<b>单选框</b>。新增/删除后点击底部「保存配置」生效；每行选项的 <b>▲/▼</b> 可<b>上下移动调整顺序</b>。某组选项为空时，对应单选框仅显示「未设置」。下方「客户来源分组」可把客户来源按自定义分组归类（用于「销售签约分析」按组汇总业绩）。
       </div>
       ${html2}
       <div class="card" style="margin-bottom:16px">
@@ -5978,6 +6000,98 @@ function moveCustomerTagOption(group, i, dir) {
   const j = i + dir;
   if (j < 0 || j >= arr.length) return;
   const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  renderConfigContent();
+}
+
+// ===== 客户来源分组配置（用于「销售签约分析」按组汇总业绩）=====
+function ensureCustomerSourceGroups() {
+  if (!cloudData.formConfig.customerTags) cloudData.formConfig.customerTags = { customerSource: [], category: [], customerProfile: [] };
+  if (!cloudData.formConfig.customerTags.customerSourceGroups || typeof cloudData.formConfig.customerTags.customerSourceGroups !== 'object') {
+    cloudData.formConfig.customerTags.customerSourceGroups = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.customerTags.customerSourceGroups));
+  }
+  return cloudData.formConfig.customerTags.customerSourceGroups;
+}
+function renderCustomerSourceGroupsCard() {
+  const groups = ensureCustomerSourceGroups();
+  const sourceList = (cloudData.formConfig.customerTags && cloudData.formConfig.customerTags.customerSource) || [];
+  let html = '';
+  Object.keys(groups).forEach(groupName => {
+    const items = groups[groupName] || [];
+    const itemBadges = items.map(it => `<span class="badge" style="font-size:12px;padding:5px 10px;margin:3px 4px 3px 0;background:var(--primary-light);color:var(--primary-dark);cursor:pointer" onclick="removeItemFromCustomerSourceGroup('${esc(groupName)}','${esc(it)}')" title="点击移除">${esc(it)} ×</span>`).join('');
+    const availOpts = sourceList.filter(it => !items.includes(it));
+    const addSelect = availOpts.length > 0 ? `<select class="form-control" style="display:inline-block;width:auto;margin-top:8px;font-size:12px;padding:4px 8px;min-width:160px" onchange="if(this.value){addItemToCustomerSourceGroup('${esc(groupName)}', this.value); this.value='';}"><option value="">+ 从「客户来源」添加</option>${availOpts.map(it => `<option value="${esc(it)}">${esc(it)}</option>`).join('')}</select>` : '';
+    html += `
+      <div class="channel-card" style="margin-bottom:10px">
+        <div class="channel-card-header" style="padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span class="badge badge-info" style="font-size:12px">分组</span>
+          <input type="text" class="form-control" value="${esc(groupName)}" onchange="renameCustomerSourceGroup('${esc(groupName)}', this.value)" style="flex:0 0 160px" />
+          <span style="font-size:12px;color:var(--gray-500)">${items.length} 项</span>
+          <button class="btn btn-danger btn-sm" onclick="removeCustomerSourceGroup('${esc(groupName)}')">🗑 删除分组</button>
+        </div>
+        <div style="padding:0 16px 12px">
+          <div style="margin-bottom:6px">${itemBadges || '<span style="font-size:11px;color:var(--gray-400)">（暂未添加任何选项；该组的来源项将归入「其他」）</span>'}</div>
+          ${addSelect}
+        </div>
+      </div>`;
+  });
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header">
+        <h4>🏷️ 客户来源分组</h4>
+        <span style="font-size:12px;color:var(--gray-500)">将「客户来源」选项按自定义分组归类，用于业绩看板「销售签约分析」按组汇总业绩。未归入任何组的项自动归入「其他」。新增/删除分组或调整组内选项后，点底部「保存配置」生效。</span>
+      </div>
+      <div class="card-body">
+        ${html}
+        <button class="btn btn-outline" style="width:100%;padding:10px;border:2px dashed var(--gray-300);color:var(--gray-500)" onclick="addCustomerSourceGroup()">➕ 添加新分组</button>
+      </div>
+    </div>`;
+}
+function addCustomerSourceGroup() {
+  const name = (prompt('请输入新分组名称（如：自拓/线索/其他）：') || '').trim();
+  if (!name) return;
+  const groups = ensureCustomerSourceGroups();
+  if (groups[name] !== undefined) { showToast('分组名已存在', 'error'); return; }
+  groups[name] = [];
+  renderConfigContent();
+}
+function removeCustomerSourceGroup(groupName) {
+  if (!confirm(`确定删除分组「${groupName}」吗？组内选项将自动归入「其他」（未配置时也走「其他」）。`)) return;
+  const groups = ensureCustomerSourceGroups();
+  delete groups[groupName];
+  renderConfigContent();
+}
+function renameCustomerSourceGroup(oldName, newName) {
+  const trimmed = (newName || '').trim();
+  if (!trimmed) { showToast('分组名不能为空', 'error'); renderConfigContent(); return; }
+  if (trimmed === oldName) return;
+  const groups = ensureCustomerSourceGroups();
+  if (groups[trimmed] !== undefined) { showToast('分组名已存在', 'error'); renderConfigContent(); return; }
+  groups[trimmed] = groups[oldName];
+  delete groups[oldName];
+  renderConfigContent();
+}
+function addItemToCustomerSourceGroup(groupName, item) {
+  if (!item) return;
+  const groups = ensureCustomerSourceGroups();
+  const g = groups[groupName];
+  if (!g) return;
+  // 检查是否已在其他组中（每个选项只能属于一个组）
+  for (const [gn, items] of Object.entries(groups)) {
+    if (items.includes(item)) {
+      if (gn !== groupName) showToast(`选项「${item}」已在分组「${gn}」中，请先移除`, 'error');
+      renderConfigContent();
+      return;
+    }
+  }
+  g.push(item);
+  renderConfigContent();
+}
+function removeItemFromCustomerSourceGroup(groupName, item) {
+  const groups = ensureCustomerSourceGroups();
+  const g = groups[groupName];
+  if (!g) return;
+  const idx = g.indexOf(item);
+  if (idx >= 0) g.splice(idx, 1);
   renderConfigContent();
 }
 
@@ -8968,6 +9082,7 @@ async function renderSalesBoard() {
       <div class="summary-tab ${salesBoardTab==='customer'?'active':''}" onclick="switchSalesBoardTab('customer')">👥 客户汇总数据</div>
       <div class="summary-tab ${salesBoardTab==='source'?'active':''}" onclick="switchSalesBoardTab('source')">🏷️ 客户来源汇总</div>
       <div class="summary-tab ${salesBoardTab==='profile'?'active':''}" onclick="switchSalesBoardTab('profile')">👤 客户画像汇总</div>
+      <div class="summary-tab ${salesBoardTab==='signing'?'active':''}" onclick="switchSalesBoardTab('signing')">📝 销售签约分析</div>
     </div>
     <div id="sbContent"></div>`;
   document.getElementById('contentBody').innerHTML = html;
@@ -8983,6 +9098,7 @@ function renderSalesBoards() {
   if (salesBoardTab === 'customer') { renderSalesBoardCustomer(); return; }
   if (salesBoardTab === 'source') { renderSalesBoardSource(); return; }
   if (salesBoardTab === 'profile') { renderSalesBoardProfile(); return; }
+  if (salesBoardTab === 'signing') { renderSalesBoardSigning(); return; }
   renderSalesBoardStats();
 }
 
@@ -9336,6 +9452,165 @@ function renderProfileSummaryTable(year) {
   wrap.innerHTML = `<table class="source-summary-table">${head}${body}${foot}</table>`;
 }
 
+// ===== 销售签约分析：销售 × 月份 × 来源分组 业绩矩阵 =====
+// 在岗销售成员：在岗 + 非 admin/manager/viewer + 不在 M0 名单中
+function getActiveSalesUsers() {
+  const m0Set = new Set();
+  (cloudData.formConfig?.m0Config?.groups || []).forEach(g => { if (g.m0) m0Set.add((g.m0 || '').trim()); });
+  return (cloudData.users || [])
+    .filter(u => u && u.name && u.active && !u.leaveDate && u.role !== 'admin' && u.role !== 'manager' && u.role !== 'viewer' && !m0Set.has((u.name || '').trim()))
+    .map(u => ({ name: u.name }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+}
+// 聚合：返回 { result: {销售: {月: {组: 业绩}}}, groupOrder: ['自拓','线索','其他',...], months: ['01'..'12'] }
+function aggregateSalesSigning(year) {
+  const groupsMap = (cloudData.formConfig?.customerTags?.customerSourceGroups) || {};
+  const sourceList = (cloudData.formConfig?.customerTags?.customerSource) || [];
+  const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+  const preferred = ['自拓', '线索', '其他'];
+  const configured = Object.keys(groupsMap);
+  const groupOrder = preferred.filter(g => configured.includes(g)).concat(configured.filter(g => !preferred.includes(g)));
+  const itemToGroup = {};
+  for (const [gn, items] of Object.entries(groupsMap)) items.forEach(it => { itemToGroup[it] = gn; });
+  const sales = (cloudData.salesRecords || []).filter(r => (r.docMonth || '').startsWith(year));
+  const result = {};
+  sales.forEach(r => {
+    const sp = (r.salesperson || '').trim();
+    const dm = r.docMonth || '';
+    if (!sp || !dm) return;
+    const m = dm.slice(5);
+    if (!months.includes(m)) return;
+    const src = (r.customerSource || '').trim();
+    if (!src || !sourceList.includes(src)) return; // 空/未配置来源跳过
+    const g = itemToGroup[src] || '其他';
+    if (!result[sp]) result[sp] = {};
+    if (!result[sp][m]) result[sp][m] = {};
+    result[sp][m][g] = (result[sp][m][g] || 0) + toNum(r.amount);
+  });
+  return { result, groupOrder, months };
+}
+function renderSalesBoardSigning() {
+  const years = [...new Set((cloudData.salesRecords || []).map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
+  const cont = document.getElementById('sbContent');
+  cont.innerHTML = `
+    <div class="card">
+      <div class="card-header"><h4>📝 销售签约分析</h4><span style="font-size:12px;color:var(--gray-500)">按年显示：纵向在岗销售成员 × 横向月份 × 来源分组，单元格汇总业绩</span></div>
+      <div class="card-body">
+        <div class="filter-bar">
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="sigYear" onchange="renderSalesSigningTable(this.value)">${yearOpts}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesSigningYear()">重置为今年</button></div>
+          <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportSalesSigning()">📤 导出 Excel</button></div>
+        </div>
+        <div style="font-size:12px;color:var(--gray-600);margin-top:8px">💡 销售成员口径：在岗 + 非 admin/manager/viewer + 非 M0。分组顺序：自拓 → 线索 → 其他（在「表单配置 → 客户标签配置」可调整分组与归属项）。</div>
+      </div>
+    </div>
+    <div class="card"><div class="card-body"><div class="table-wrap" id="sigTableWrap"></div></div></div>`;
+  const yEl = document.getElementById('sigYear'); if (yEl) yEl.value = year;
+  renderSalesSigningTable(year);
+}
+function resetSalesSigningYear() {
+  const years = [...new Set((cloudData.salesRecords || []).map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const curYear = new Date().getFullYear().toString();
+  const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
+  const yEl = document.getElementById('sigYear'); if (yEl) yEl.value = year;
+  renderSalesSigningTable(year);
+}
+function renderSalesSigningTable(year) {
+  const wrap = document.getElementById('sigTableWrap');
+  if (!wrap) return;
+  const users = getActiveSalesUsers();
+  const { result, groupOrder, months } = aggregateSalesSigning(year);
+  if (!users.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无在岗销售成员</div>'; return; }
+  const ng = groupOrder.length;
+  let head = '<thead><tr><th rowspan="2" style="min-width:100px;position:sticky;left:0;background:#fff;z-index:2">销售</th>';
+  months.forEach(m => { head += `<th colspan="${ng}">${parseInt(m, 10)}月</th>`; });
+  head += `<th colspan="${ng}" style="background:var(--gray-100)">合计</th></tr><tr>`;
+  months.concat(['合计']).forEach(() => { groupOrder.forEach(g => { head += `<th class="num" style="white-space:nowrap">${esc(g)}</th>`; }); });
+  head += '</tr></thead>';
+  let body = '<tbody>';
+  const colAmount = {};
+  months.forEach(m => { groupOrder.forEach(g => { colAmount[m + '|' + g] = 0; }); });
+  groupOrder.forEach(g => { colAmount['合计|' + g] = 0; });
+  users.forEach(u => {
+    const spRow = result[u.name] || {};
+    body += `<tr><td style="position:sticky;left:0;background:#fff;font-weight:600">${esc(u.name)}</td>`;
+    const rowTotals = {}; groupOrder.forEach(g => { rowTotals[g] = 0; });
+    months.forEach(m => {
+      const monthData = spRow[m] || {};
+      groupOrder.forEach(g => {
+        const a = monthData[g] || 0;
+        colAmount[m + '|' + g] += a;
+        rowTotals[g] += a;
+        body += `<td class="num" style="white-space:nowrap">${a ? fmtSalesMoney(a) : '-'}</td>`;
+      });
+    });
+    groupOrder.forEach(g => {
+      colAmount['合计|' + g] += rowTotals[g];
+      body += `<td class="num" style="font-weight:700;background:var(--gray-50);white-space:nowrap">${rowTotals[g] ? fmtSalesMoney(rowTotals[g]) : '-'}</td>`;
+    });
+    body += '</tr>';
+  });
+  body += '</tbody>';
+  let foot = '<tfoot><tr class="total-row"><td>合计</td>';
+  months.forEach(m => {
+    groupOrder.forEach(g => { foot += `<td class="num" style="white-space:nowrap">${colAmount[m + '|' + g] ? fmtSalesMoney(colAmount[m + '|' + g]) : '-'}</td>`; });
+  });
+  groupOrder.forEach(g => { foot += `<td class="num" style="white-space:nowrap">${colAmount['合计|' + g] ? fmtSalesMoney(colAmount['合计|' + g]) : '-'}</td>`; });
+  foot += '</tr></tfoot>';
+  wrap.innerHTML = `<table class="source-summary-table" style="font-size:12px">${head}${body}${foot}</table>`;
+}
+function exportSalesSigning() {
+  const year = document.getElementById('sigYear') ? document.getElementById('sigYear').value : new Date().getFullYear().toString();
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
+  const users = getActiveSalesUsers();
+  const { result, groupOrder, months } = aggregateSalesSigning(year);
+  if (!users.length) { showToast('无在岗销售成员', 'error'); return; }
+  // 表头：销售 / 月(colspan N) ... / 合计(colspan N)
+  const header1 = ['销售'];
+  months.forEach(m => header1.push(parseInt(m, 10) + '月'));
+  header1.push('合计');
+  const header2 = [''];
+  months.concat(['合计']).forEach(() => { groupOrder.forEach(g => header2.push(g)); });
+  const aoa = [header1, header2];
+  const colSum = {};
+  months.forEach(m => groupOrder.forEach(g => { colSum[m + '|' + g] = 0; }));
+  groupOrder.forEach(g => { colSum['合计|' + g] = 0; });
+  users.forEach(u => {
+    const spRow = result[u.name] || {};
+    const row = [u.name];
+    const rowTotals = {}; groupOrder.forEach(g => rowTotals[g] = 0);
+    months.forEach(m => {
+      const monthData = spRow[m] || {};
+      groupOrder.forEach(g => {
+        const a = monthData[g] || 0;
+        rowTotals[g] += a;
+        colSum[m + '|' + g] += a;
+        row.push(a);
+      });
+    });
+    groupOrder.forEach(g => { row.push(rowTotals[g]); colSum['合计|' + g] += rowTotals[g]; });
+    aoa.push(row);
+  });
+  const totalsRow = ['合计'];
+  months.forEach(m => groupOrder.forEach(g => totalsRow.push(colSum[m + '|' + g])));
+  groupOrder.forEach(g => totalsRow.push(colSum['合计|' + g]));
+  aoa.push(totalsRow);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!merges'] = [];
+  ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 1, c: 0 } });
+  let col = 1;
+  for (let i = 0; i < months.length + 1; i++) {
+    ws['!merges'].push({ s: { r: 0, c: col }, e: { r: 0, c: col + groupOrder.length - 1 } });
+    col += groupOrder.length;
+  }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, year + '销售签约分析');
+  XLSX.writeFile(wb, year + '销售签约分析.xlsx');
+}
+
 function exportProfileSummary() {
   const year = document.getElementById('profileYear') ? document.getElementById('profileYear').value : new Date().getFullYear().toString();
   const profileMap = aggregateProfileSummary(year);
@@ -9651,6 +9926,7 @@ async function saveCustomerTag(group, encKey, encVal) {
   saveReportsCache();
   if (salesBoardTab === 'source') renderSalesBoardSource();
   if (salesBoardTab === 'profile') renderSalesBoardProfile();
+  if (salesBoardTab === 'signing') renderSalesBoardSigning();
   if (fail) showToast('已保存 ' + n + ' 条，' + fail + ' 条缺少存储键未写入', 'error', 2500);
   else showToast('已保存（' + n + ' 条明细）', 'success', 1500);
 }
@@ -9749,6 +10025,7 @@ async function applyCsBatchTags() {
     renderCustomerSummary();
     if (salesBoardTab === 'source') renderSalesBoardSource();
     if (salesBoardTab === 'profile') renderSalesBoardProfile();
+    if (salesBoardTab === 'signing') renderSalesBoardSigning();
     showToast('已批量设置（' + total + ' 条明细）', 'success');
   } catch (e) { showToast('批量设置失败：' + e.message, 'error', 4000); }
 }
