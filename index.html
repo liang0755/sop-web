@@ -8027,8 +8027,8 @@ function renderGroupedVisitStats(records, s, e, mode) {
   const introTitle = isTeam ? `团队拜访类型统计（按团队/部门，共 ${emps.length} 个）` : `个人拜访类型统计（按人员，共 ${emps.length} 人）`;
   const intro = `<div style="font-size:13px;color:var(--gray-500);margin-bottom:12px">${introTitle} · ${s || '全部'} 至 ${e || '全部'}<span style="margin-left:8px;color:var(--gray-400)">提示：点击事件列 / 归类列 / 合计列的 ▲▼，可按该列数值对${unitName}行升/降序排列（两张表独立排序，自动保存，当前排序列高亮）</span></div>`;
   const sideBySide = `<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:20px">
-    <div style="flex:1 1 0;min-width:360px">${table1}</div>
-    <div style="flex:1 1 0;min-width:360px">${table2}</div>
+    <div style="flex:2 1 0;min-width:360px">${table1}</div>
+    <div style="flex:1 1 0;min-width:240px">${table2}</div>
   </div>`;
   return intro + sideBySide;
 }
