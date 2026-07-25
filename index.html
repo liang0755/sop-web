@@ -2611,6 +2611,14 @@ function renderSummary() {
       <div class="form-group"><label>类型</label><select class="form-control" id="sumType" onchange="onSummaryTypeChange()"><option value="daily">日报</option><option value="weekly">周报</option></select></div>
       <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="sumStart" value="${mAgo}"></div>
       <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="sumEnd" value="${today}"></div>
+      <div class="form-group"><label>快捷时间</label><div style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="applySummaryQuickDate('yesterday')">昨天</button>
+        <button class="btn btn-outline btn-sm" onclick="applySummaryQuickDate('today')">今天</button>
+        <button class="btn btn-outline btn-sm" onclick="applySummaryQuickDate('thisWeek')">本周</button>
+        <button class="btn btn-outline btn-sm" onclick="applySummaryQuickDate('lastWeek')">上周</button>
+        <button class="btn btn-outline btn-sm" onclick="applySummaryQuickDate('thisMonth')">本月</button>
+        <button class="btn btn-outline btn-sm" onclick="applySummaryQuickDate('lastMonth')">上月</button>
+      </div></div>
       <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="loadSummary()">🔍 汇总查询</button></div>
       <div class="form-group"><label>&nbsp;</label>${hasPermission('exportData')?'<button class="btn btn-success" onclick="exportSummaryCSV()">📥 导出汇总数据</button>':''}</div>
     </div></div></div>
@@ -2641,6 +2649,16 @@ function renderSummary() {
 function onSummaryTypeChange() {
   // Reset sub-filters when report type changes
   summaryFilters = {dept:'', person:'', channel:''};
+  loadSummary();
+}
+
+// 团队汇总：快捷时间按钮（昨天/今天/本周/上周/本月/上月），复用 getQuickDateRange，以周一为周起始
+function applySummaryQuickDate(type) {
+  const range = getQuickDateRange(type);
+  const s = document.getElementById('sumStart');
+  const e = document.getElementById('sumEnd');
+  if (s) s.value = range.start;
+  if (e) e.value = range.end;
   loadSummary();
 }
 
