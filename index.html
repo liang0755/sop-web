@@ -156,6 +156,8 @@ tr:hover td{background:var(--gray-50)}
 .summary-tab{padding:10px 20px;cursor:pointer;font-size:14px;font-weight:500;color:var(--gray-500);border-bottom:2px solid transparent;margin-bottom:-2px}
 .summary-tab.active{color:var(--primary);border-bottom-color:var(--primary)}
 .summary-tab:hover{color:var(--primary)}
+.summary-group-label{width:100%;font-size:12px;font-weight:700;color:var(--gray-500);letter-spacing:.5px;padding:14px 2px 5px;display:flex;align-items:center;gap:7px;user-select:none}
+.summary-group-label::before{content:'';width:3px;height:14px;background:var(--primary);border-radius:2px;display:inline-block}
 .empty-state{text-align:center;padding:60px 20px;color:var(--gray-400)}
 .empty-state .icon{font-size:48px;margin-bottom:12px}
 .hidden{display:none!important}
@@ -5277,13 +5279,18 @@ function renderFormConfig() {
   const body = document.getElementById('contentBody');
   body.innerHTML = `
     <div id="configAlert"></div>
-    <div class="summary-tabs" style="margin-bottom:20px">
+    <div class="summary-tabs" style="margin-bottom:20px;border-bottom:none;flex-wrap:wrap;row-gap:6px">
+      <div class="summary-group-label">📋 日报周报</div>
       <div class="summary-tab ${configTab==='daily'?'active':''}" onclick="switchConfigTab('daily')">日报配置</div>
       <div class="summary-tab ${configTab==='weekly'?'active':''}" onclick="switchConfigTab('weekly')">周报配置</div>
+
+      <div class="summary-group-label">🤝 拜访演示</div>
       <div class="summary-tab ${configTab==='visitResults'?'active':''}" onclick="switchConfigTab('visitResults')">拜访结果配置</div>
       <div class="summary-tab ${configTab==='signinCategories'?'active':''}" onclick="switchConfigTab('signinCategories')">签到归类配置</div>
       <div class="summary-tab ${configTab==='signinEvents'?'active':''}" onclick="switchConfigTab('signinEvents')">签到事件配置</div>
       <div class="summary-tab ${configTab==='customerTags'?'active':''}" onclick="switchConfigTab('customerTags')">客户标签配置</div>
+
+      <div class="summary-group-label">🏅 绩效评级</div>
       <div class="summary-tab ${configTab==='gradeConfig'?'active':''}" onclick="switchConfigTab('gradeConfig')">评级标准配置</div>
       <div class="summary-tab ${configTab==='performance'?'active':''}" onclick="switchConfigTab('performance')">销售绩效配置</div>
       <div class="summary-tab ${configTab==='m0GradeConfig'?'active':''}" onclick="switchConfigTab('m0GradeConfig')">M0评级</div>
