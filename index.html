@@ -10760,20 +10760,71 @@ function sgBuildRoll(year) {
   return { roll, spList: [...spSet] };
 }
 function sgAutoFill() {
+  const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+  if (!levels.length) { showToast('请先在「评级标准配置」中设置评级标准', 'error'); return; }
+  if (salesGradeTab === 'single') {
+    const year = salesGradeYear;
+    const { roll, spList } = sgBuildRoll(year);
+    let list = spList.filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp));
+    const m = salesGradeMonth;
+    list.forEach(sp => { const k = gradeKey(year, sp, m); sgPending[k] = { grade: GRADE_AUTO }; });
+    renderSalesGrade();
+    showToast('已按自动评级值填充「' + m + ' 月」，记得点「💾 最终保存」', 'success');
+    return;
+  }
+  // 升降级矩阵：先让用户勾选要填充的月份
+  sgOpenMonthPicker();
+}
+// 弹出月份选择框（升降级矩阵用），可选多个月份，勾选后仅填充选中月
+function sgOpenMonthPicker() {
+  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
+  const sel = new Set(months);   // 默认全选
+  const overlay = document.createElement('div');
+  overlay.id = 'sgFillOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center';
+  let html = '<div style="background:#fff;border-radius:12px;max-width:460px;width:92%;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.2)">';
+  html += '<h3 style="margin:0 0 4px;font-size:16px">选择要填充的月份</h3>';
+  html += '<p style="margin:0 0 14px;color:#666;font-size:13px">仅勾选的月份会被填充为「自动评级值」（覆盖已手动修改的评级），结果先暂存，点「💾 最终保存」后才写入。</p>';
+  html += '<div id="sgFillMonthGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">';
+  months.forEach(m => { html += '<button type="button" class="sg-fill-month" data-m="' + m + '" style="padding:10px;border:1px solid #d6deeb;border-radius:8px;background:#e0ecff;cursor:pointer;font-size:14px">' + m + '月</button>'; });
+  html += '</div>';
+  html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:16px;cursor:pointer"><input type="checkbox" id="sgFillAll" checked> 全选（填充全部 12 个月）</label>';
+  html += '<div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" id="sgFillCancel" style="padding:8px 16px;border:1px solid #d6deeb;border-radius:8px;background:#fff;cursor:pointer">取消</button><button type="button" id="sgFillOk" style="padding:8px 16px;border:none;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer">确定填充</button></div>';
+  html += '</div>';
+  overlay.innerHTML = html;
+  document.body.appendChild(overlay);
+  const grid = overlay.querySelector('#sgFillMonthGrid');
+  const allCb = overlay.querySelector('#sgFillAll');
+  grid.querySelectorAll('.sg-fill-month').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const m = parseInt(btn.dataset.m, 10);
+      if (sel.has(m)) { sel.delete(m); btn.style.background = '#fff'; }
+      else { sel.add(m); btn.style.background = '#e0ecff'; }
+      allCb.checked = (sel.size === 12);
+    });
+  });
+  allCb.addEventListener('change', () => {
+    if (allCb.checked) { sel.clear(); months.forEach(m => sel.add(m)); grid.querySelectorAll('.sg-fill-month').forEach(b => b.style.background = '#e0ecff'); }
+    else { sel.clear(); grid.querySelectorAll('.sg-fill-month').forEach(b => b.style.background = '#fff'); }
+  });
+  overlay.querySelector('#sgFillCancel').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#sgFillOk').addEventListener('click', () => {
+    const ms = [...sel];
+    if (!ms.length) { showToast('请至少选择一个月份', 'error'); return; }
+    overlay.remove();
+    sgDoFill(ms);
+  });
+}
+function sgDoFill(months) {
   const year = salesGradeYear;
   const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
   if (!levels.length) { showToast('请先在「评级标准配置」中设置评级标准', 'error'); return; }
-  if (!confirm('将把当前看板所有显示的评级格子填充为「自动评级值」（覆盖已手动修改的评级）。结果先暂存，点「💾 最终保存」后才写入。确定继续？')) return;
-  const { roll, spList } = sgBuildRoll(year);
+  const { spList } = sgBuildRoll(year);
   let list = spList.filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp));
-  if (salesGradeTab === 'single') {
-    const m = salesGradeMonth;
-    list.forEach(sp => { const k = gradeKey(year, sp, m); const auto = autoGrade(roll[sp] ? roll[sp][m] : 0, levels); sgPending[k] = { grade: GRADE_AUTO }; });
-  } else {
-    [1,2,3,4,5,6,7,8,9,10,11,12].forEach(m => list.forEach(sp => { const k = gradeKey(year, sp, m); sgPending[k] = { grade: GRADE_AUTO }; }));
-  }
+  months.forEach(m => list.forEach(sp => { const k = gradeKey(year, sp, m); sgPending[k] = { grade: GRADE_AUTO }; }));
   renderSalesGrade();
-  showToast('已按自动评级值填充，记得点「💾 最终保存」', 'success');
+  showToast('已按自动评级值填充 ' + months.length + ' 个月（' + months.map(m => m + '月').join('、') + '），记得点「💾 最终保存」', 'success');
 }
 function sgSaveAll() {
   const keys = Object.keys(sgPending);
