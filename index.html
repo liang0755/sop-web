@@ -5409,6 +5409,8 @@ function renderConfigContent() {
                 <div class="channel-card" style="margin-bottom:10px">
                   <div class="channel-card-header" style="padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                     <span class="badge badge-gray" style="font-size:12px">${i + 1}</span>
+                    <button class="btn btn-outline btn-sm" ${i===0?'disabled':''} onclick="moveCustomerTagOption('${g.key}', ${i}, -1)" title="上移">▲</button>
+                    <button class="btn btn-outline btn-sm" ${i===list.length-1?'disabled':''} onclick="moveCustomerTagOption('${g.key}', ${i}, 1)" title="下移">▼</button>
                     <input type="text" class="form-control" value="${v.replace(/"/g,'&quot;')}" onchange="updateCustomerTagOption('${g.key}', ${i}, this.value)" style="flex:1;min-width:160px;max-width:320px" placeholder="${g.label}选项，如：线上">
                     <button class="btn btn-danger btn-sm" onclick="deleteCustomerTagOption('${g.key}', ${i})">🗑 删除</button>
                   </div>
@@ -5422,7 +5424,7 @@ function renderConfigContent() {
     const note = (cloudData.formConfig.customerSummaryNote || '').replace(/"/g, '&quot;');
     c.innerHTML = `
       <div style="margin-bottom:16px;font-size:13px;color:var(--gray-600)">
-        💡 配置「客户来源 / 品类 / 客户画像」的<b>固定选项</b>，用于业绩看板「客户汇总数据」的后三列<b>单选框</b>。新增/删除后点击底部「保存配置」生效。某组选项为空时，对应单选框仅显示「未设置」。
+        💡 配置「客户来源 / 品类 / 客户画像」的<b>固定选项</b>，用于业绩看板「客户汇总数据」的后三列<b>单选框</b>。新增/删除后点击底部「保存配置」生效；每行选项的 <b>▲/▼</b> 可<b>上下移动调整顺序</b>。某组选项为空时，对应单选框仅显示「未设置」。
       </div>
       ${html2}
       <div class="card" style="margin-bottom:16px">
@@ -5968,6 +5970,14 @@ function addCustomerTagOption(group) {
 function deleteCustomerTagOption(group, i) {
   if (!confirm('确定删除此选项吗？已有客户汇总数据中的该值不会被自动改动。')) return;
   if (cloudData.formConfig.customerTags && cloudData.formConfig.customerTags[group]) cloudData.formConfig.customerTags[group].splice(i, 1);
+  renderConfigContent();
+}
+function moveCustomerTagOption(group, i, dir) {
+  if (!cloudData.formConfig.customerTags || !cloudData.formConfig.customerTags[group]) return;
+  const arr = cloudData.formConfig.customerTags[group];
+  const j = i + dir;
+  if (j < 0 || j >= arr.length) return;
+  const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
   renderConfigContent();
 }
 
