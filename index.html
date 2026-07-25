@@ -10706,6 +10706,112 @@ function saveGradeRefresh(key, patch) {
   else if (salesGradeTab === 'matrix') refreshSalesGrade();
 }
 
+// ===== 销售评级看板：暂存 + 最终保存（支持按月份自动填充、手动改后恢复自动）=====
+const GRADE_AUTO = '__AUTO__';          // 哨兵：恢复为自动评级（最终保存时清除手动值）
+let sgPending = {};                      // key -> { grade: 字符串|GRADE_AUTO, note: 字符串 }
+function sgStage(key, patch) {
+  if (!sgPending[key]) sgPending[key] = {};
+  Object.assign(sgPending[key], patch);
+  renderSalesGrade();
+}
+function sgPendingCount() {
+  let n = 0;
+  Object.keys(sgPending).forEach(k => {
+    const p = sgPending[k]; const rec = (cloudData.gradeRecords && cloudData.gradeRecords[k]) || {};
+    const gradeChanged = p.grade !== undefined && p.grade !== GRADE_AUTO && p.grade !== (rec.grade || '');
+    const gradeRestored = p.grade === GRADE_AUTO && !!rec.grade;
+    const noteChanged = p.note !== undefined && p.note !== (rec.note || '');
+    if (gradeChanged || gradeRestored || noteChanged) n++;
+  });
+  return n;
+}
+function sgEffectiveGrade(key, autoValue) {
+  const rec = (cloudData.gradeRecords && cloudData.gradeRecords[key]) || {};
+  const p = sgPending[key];
+  if (p && p.grade !== undefined) return p.grade === GRADE_AUTO ? autoValue : p.grade;
+  return rec.grade || autoValue;
+}
+function sgEffectiveNote(key) {
+  const rec = (cloudData.gradeRecords && cloudData.gradeRecords[key]) || {};
+  const p = sgPending[key];
+  return (p && p.note !== undefined) ? p.note : (rec.note || '');
+}
+function sgBuildRoll(year) {
+  const statusMap = buildUserStatusMap();
+  const base = {}; const spSet = new Set();
+  (cloudData.salesRecords || []).forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    if (statusMap[sp] !== '在职') return;
+    const m = parseInt(dm.slice(5, 7), 10);
+    if (!(m >= 1 && m <= 12)) return;
+    if (!base[sp]) base[sp] = {};
+    base[sp][m] = (base[sp][m] || 0) + toNum(r.amount);
+    spSet.add(sp);
+  });
+  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
+  const roll = {};
+  spSet.forEach(sp => {
+    roll[sp] = {};
+    months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); roll[sp][m] = s; });
+  });
+  return { roll, spList: [...spSet] };
+}
+function sgAutoFill() {
+  const year = salesGradeYear;
+  const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+  if (!levels.length) { showToast('请先在「评级标准配置」中设置评级标准', 'error'); return; }
+  if (!confirm('将把当前看板所有显示的评级格子填充为「自动评级值」（覆盖已手动修改的评级）。结果先暂存，点「💾 最终保存」后才写入。确定继续？')) return;
+  const { roll, spList } = sgBuildRoll(year);
+  let list = spList.filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp));
+  if (salesGradeTab === 'single') {
+    const m = salesGradeMonth;
+    list.forEach(sp => { const k = gradeKey(year, sp, m); const auto = autoGrade(roll[sp] ? roll[sp][m] : 0, levels); sgPending[k] = { grade: GRADE_AUTO }; });
+  } else {
+    [1,2,3,4,5,6,7,8,9,10,11,12].forEach(m => list.forEach(sp => { const k = gradeKey(year, sp, m); sgPending[k] = { grade: GRADE_AUTO }; }));
+  }
+  renderSalesGrade();
+  showToast('已按自动评级值填充，记得点「💾 最终保存」', 'success');
+}
+function sgSaveAll() {
+  const keys = Object.keys(sgPending);
+  if (!keys.length) { showToast('没有需要保存的改动', 'info'); return; }
+  if (!cloudData.gradeRecords) cloudData.gradeRecords = {};
+  let n = 0;
+  keys.forEach(k => {
+    const p = sgPending[k];
+    const rec = Object.assign({}, cloudData.gradeRecords[k] || {});
+    if (p.grade !== undefined) {
+      if (p.grade === GRADE_AUTO) { delete rec.grade; }
+      else rec.grade = p.grade;
+    }
+    if (p.note !== undefined) rec.note = p.note;
+    cloudData.gradeRecords[k] = rec;
+    apiUpdate('gradeRecords', k, rec).catch(e => showToast('保存失败: ' + e.message, 'error'));
+    n++;
+  });
+  sgPending = {};
+  showToast('已保存 ' + n + ' 条评级改动', 'success');
+  renderSalesGrade();
+}
+function sgDiscard() {
+  if (!Object.keys(sgPending).length) return;
+  if (!confirm('放弃当前所有未保存的评级改动（自动填充/手动修改/恢复自动）？')) return;
+  sgPending = {};
+  renderSalesGrade();
+}
+function sgRefreshDirtyUI() {
+  const n = sgPendingCount();
+  const dirty = document.getElementById('sgDirty');
+  const save = document.getElementById('sgSaveBtn');
+  const disc = document.getElementById('sgDiscardBtn');
+  if (dirty) dirty.textContent = n ? ('● ' + n + ' 处未保存改动') : '';
+  if (save) save.style.display = n ? '' : 'none';
+  if (disc) disc.style.display = n ? '' : 'none';
+}
+
 let salesGradeYear = '';
 let salesGradeTab = 'matrix';
 let salesGradeMonth = (new Date().getMonth() + 1);
@@ -10741,7 +10847,13 @@ function renderSalesGrade() {
             <button class="btn btn-sm ${salesGradeTab==='m0single'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='m0single';m0ConfigPanelOpen=false;renderSalesGrade()">M0 当月评级看板</button>
           </div>
         </div>
-        <button class="btn btn-outline btn-sm" onclick="sgExportDispatch()">⬇️ 导出 Excel</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <span id="sgDirty" style="font-size:12px;color:#dc2626;font-weight:600"></span>
+          <button class="btn btn-outline btn-sm" onclick="sgAutoFill()">🔄 按月份自动填充</button>
+          <button class="btn btn-outline btn-sm" onclick="sgDiscard()" id="sgDiscardBtn" style="display:none">↩️ 放弃改动</button>
+          <button class="btn btn-primary btn-sm" onclick="sgSaveAll()" id="sgSaveBtn" style="display:none">💾 最终保存</button>
+          <button class="btn btn-outline btn-sm" onclick="sgExportDispatch()">⬇️ 导出 Excel</button>
+        </div>
       </div>
       <div class="card-body">
         <div class="filter-bar">
@@ -10793,6 +10905,7 @@ function renderSalesGrade() {
   else if (salesGradeTab === 'm0matrix') refreshM0Grade();
   else if (salesGradeTab === 'm0single') refreshM0GradeSingle();
   else refreshSalesGrade();
+  sgRefreshDirtyUI();
 }
 
 function sgSpLabel() {
@@ -11068,12 +11181,12 @@ function sgExportDispatch() {
   else exportSalesGrade();
 }
 function sgNoteText() {
-  if (salesGradeTab === 'single') return '说明：单月评级看板为「升降级矩阵」的表格视图，数据与矩阵<b>联动</b>（评级/备注修改即时同步）。纵向仅显示在册<b>在职</b>销售，横向为：评级业绩（滚动3月）/ 评级 / 升降级 / 备注。<b>升降级为实时</b>按当月职级对比上月职级自动计算（修改评级即时刷新）。';
+  if (salesGradeTab === 'single') return '说明：单月评级看板为「升降级矩阵」的表格视图，数据与矩阵<b>联动</b>。纵向仅显示在册<b>在职</b>销售，横向为：评级业绩（滚动3月）/ 评级 / 升降级 / 备注。<b>升降级为实时</b>按当月职级对比上月职级自动计算。<b>评级支持「暂存 + 最终保存」</b>：修改评级或点「🔄 按月份自动填充」会先<b>暂存</b>（格子显示 ●暂存，可点 ↺ 恢复为自动评级），最后点「💾 最终保存」才写入；也可「↩️ 放弃改动」。';
   if (salesGradeTab === 'm0matrix' || salesGradeTab === 'm0single') {
     const cnt = ((cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || []).length;
     return '说明：M0 看板考核业绩 = <b>M0 人员当月业绩</b> + 所选<b>累加人员当月业绩</b>之和（仅取当月，不滚动 3 月）。<b>评级</b>为下拉选择（取值「表单配置-M0评级」）；<b>升降级</b>为<b>自动</b>按当月评级对比上月评级得出（升级 / 降级 / 持平），不与手动输入联动。' + (cnt ? '' : ' <b style="color:#dc2626">当前未配置 M0 计算范围，请在上方「⚙️ M0 计算范围」中设置。</b>');
   }
-  return '说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为<b>实时</b>按当月职级对比上月职级自动计算（修改评级后即时刷新，含手动改动的职级）。';
+  return '说明：每个单元格为「滚动3个月评级业绩」= 该销售员当月及前 2 个月业绩之和（如 3月 = 1月+2月+3月）。纵向仅显示在册<b>在职</b>销售，横向为 1–12 月。每个单元格含：滚动业绩、单月业绩、<b>当月评级</b>（按「表单配置-评级标准配置」自动评定，可手动修改）、<b>备注</b>（手动填写）；▲升级 / ▼降级 为<b>实时</b>按当月职级对比上月职级自动计算。<b>评级支持「暂存 + 最终保存」</b>：修改评级或点「🔄 按月份自动填充」会先<b>暂存</b>（格子显示 ●暂存，可点 ↺ 恢复为自动评级），最后点「💾 最终保存」才写入；也可「↩️ 放弃改动」。';
 }
 function refreshM0Grade() {
   const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
@@ -11269,21 +11382,27 @@ function refreshSalesGrade() {
       colTot[m] += v;
       const single = row.single[m] || 0;
       const auto = autoGrade(v, levels);
-      const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m)]) || {};
-      const grade = rec.grade || auto;
-      const note = rec.note || '';
+      const k = gradeKey(year, row.sp, m);
+      const rec = (cloudData.gradeRecords && cloudData.gradeRecords[k]) || {};
+      const p = sgPending[k];
+      const grade = (p && p.grade !== undefined) ? (p.grade === GRADE_AUTO ? auto : p.grade) : (rec.grade || auto);
+      const note = (p && p.note !== undefined) ? p.note : (rec.note || '');
       let upFlag = '';
       if (m > 1) {
         const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m - 1)]) || {};
-        const prevGrade = prevRec.grade || autoGrade(row.roll[m - 1], levels);
+        const pp = sgPending[gradeKey(year, row.sp, m - 1)];
+        const prevGrade = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? autoGrade(row.roll[m - 1], levels) : pp.grade) : (prevRec.grade || autoGrade(row.roll[m - 1], levels));
         const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
         if (ci > pi) upFlag = ' <span style="color:#16a34a;font-size:10px">▲升级</span>';
         else if (ci < pi) upFlag = ' <span style="color:#dc2626;font-size:10px">▼降级</span>';
       }
+      const isPending = !!(p && (p.grade !== undefined || p.note !== undefined));
+      const canRestore = (!!rec.grade && rec.grade !== auto) || (p && p.grade !== undefined && p.grade !== GRADE_AUTO);
+      const restoreBtn = canRestore ? `<button class="btn btn-xs btn-outline" title="恢复为自动评级" onclick="sgStage('${k}', {grade:GRADE_AUTO})">↺</button>` : '';
+      const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600">●暂存</span>` : '';
       const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
-      const k = gradeKey(year, row.sp, m);
       h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div>`
-         + `<div style="margin-top:4px"><select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="saveGradeRefresh('${k}', {grade:this.value})">${opts}</select>${upFlag}</div></td>`;
+         + `<div style="margin-top:4px;display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div>${badge}${upFlag}</td>`;
     });
     h += `</tr>`;
   });
@@ -11340,16 +11459,16 @@ function exportSalesGrade() {
     months.forEach(m => {
       const v = Math.round(row.roll[m]);
       const auto = autoGrade(v, levels);
-      const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m)]) || {};
-      const grade = rec.grade || auto;
+      const k = gradeKey(year, row.sp, m);
+      const grade = sgEffectiveGrade(k, auto);
       let chg = '';
       if (m > 1) {
-        const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m - 1)]) || {};
-        const prevGrade = prevRec.grade || autoGrade(Math.round(row.roll[m - 1]), levels);
+        const prevK = gradeKey(year, row.sp, m - 1);
+        const prevGrade = sgEffectiveGrade(prevK, autoGrade(Math.round(row.roll[m - 1]), levels));
         const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
         chg = ci > pi ? '▲升级' : (ci < pi ? '▼降级' : '持平');
       }
-      r.push(v, grade, chg, rec.note || '');
+      r.push(v, grade, chg, sgEffectiveNote(k));
     });
     aoa.push(r);
   });
@@ -11402,32 +11521,39 @@ function refreshSalesGradeSingle() {
     const v = row.roll[month];
     const single = row.single[month] || 0;
     const auto = autoGrade(v, levels);
-    const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month)]) || {};
-    const grade = rec.grade || auto;
-    const note = rec.note || '';
+    const k = gradeKey(year, row.sp, month);
+    const rec = (cloudData.gradeRecords && cloudData.gradeRecords[k]) || {};
+    const p = sgPending[k];
+    const grade = (p && p.grade !== undefined) ? (p.grade === GRADE_AUTO ? auto : p.grade) : (rec.grade || auto);
+    const note = (p && p.note !== undefined) ? p.note : (rec.note || '');
     let prevGrade = '—';
     if (month > 1) {
       const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
-      prevGrade = prevRec.grade || autoGrade(row.roll[month - 1], levels);
+      const pp = sgPending[gradeKey(year, row.sp, month - 1)];
+      prevGrade = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? autoGrade(row.roll[month - 1], levels) : pp.grade) : (prevRec.grade || autoGrade(row.roll[month - 1], levels));
     }
     let upFlag = '<span style="color:var(--gray-400)">—</span>';
     if (month > 1) {
       const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
-      const prevGradeForChg = prevRec.grade || autoGrade(row.roll[month - 1], levels);
+      const pp = sgPending[gradeKey(year, row.sp, month - 1)];
+      const prevGradeForChg = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? autoGrade(row.roll[month - 1], levels) : pp.grade) : (prevRec.grade || autoGrade(row.roll[month - 1], levels));
       const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGradeForChg, levels);
       if (ci > pi) upFlag = '<span style="color:#16a34a;font-weight:600">▲升级</span>';
       else if (ci < pi) upFlag = '<span style="color:#dc2626;font-weight:600">▼降级</span>';
       else upFlag = '<span style="color:var(--gray-400)">持平</span>';
     }
+    const isPending = !!(p && (p.grade !== undefined || p.note !== undefined));
+    const canRestore = (!!rec.grade && rec.grade !== auto) || (p && p.grade !== undefined && p.grade !== GRADE_AUTO);
+    const restoreBtn = canRestore ? `<button class="btn btn-xs btn-outline" title="恢复为自动评级" onclick="sgStage('${k}', {grade:GRADE_AUTO})">↺</button>` : '';
+    const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600">●暂存</span> ` : '';
     const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
-    const k = gradeKey(year, row.sp, month);
     h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`
        + `<td style="text-align:center">${esc(prevGrade)}</td>`
        + `<td>${esc(row.team) || '-'}</td>`
        + `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div></td>`
-       + `<td><select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="saveGradeRefresh('${k}', {grade:this.value})">${opts}</select></td>`
+       + `<td>${badge}<div style="display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div></td>`
        + `<td style="text-align:center">${upFlag}</td>`
-       + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:12px;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="saveGradeByKey('${k}', {note:this.value})">${esc(note)}</textarea></td>`
+       + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:12px;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="sgStage('${k}', {note:this.value})">${esc(note)}</textarea></td>`
        + `</tr>`;
   });
   h += '</tbody>';
@@ -11476,17 +11602,17 @@ function exportSalesGradeSingle() {
     const v = Math.round(row.roll[month]);
     const single = Math.round(row.single[month] || 0);
     const auto = autoGrade(v, levels);
-    const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month)]) || {};
-    const grade = rec.grade || auto;
+    const k = gradeKey(year, row.sp, month);
+    const grade = sgEffectiveGrade(k, auto);
     let prevGrade = '—';
     let chg = '—';
     if (month > 1) {
-      const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
-      prevGrade = prevRec.grade || autoGrade(Math.round(row.roll[month - 1]), levels);
+      const prevK = gradeKey(year, row.sp, month - 1);
+      prevGrade = sgEffectiveGrade(prevK, autoGrade(Math.round(row.roll[month - 1]), levels));
       const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
       chg = ci > pi ? '▲升级' : (ci < pi ? '▼降级' : '持平');
     }
-    aoa.push([row.sp, prevGrade, row.team || '', v, single, grade, chg, rec.note || '']);
+    aoa.push([row.sp, prevGrade, row.team || '', v, single, grade, chg, sgEffectiveNote(k)]);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
