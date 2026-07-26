@@ -11444,8 +11444,8 @@ function refreshSalesGrade() {
         const pp = sgPending[gradeKey(year, row.sp, m - 1)];
         const prevGrade = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? autoGrade(row.roll[m - 1], levels) : pp.grade) : (prevRec.grade || autoGrade(row.roll[m - 1], levels));
         const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
-        if (ci > pi) upFlag = ' <span style="color:#16a34a;font-size:10px">▲升级</span>';
-        else if (ci < pi) upFlag = ' <span style="color:#dc2626;font-size:10px">▼降级</span>';
+      if (ci > pi) upFlag = '<span style="color:#16a34a">▲升级</span>';
+      else if (ci < pi) upFlag = '<span style="color:#dc2626">▼降级</span>';
       }
       const isPending = !!(p && (p.grade !== undefined || p.note !== undefined));
       const canRestore = (!!rec.grade && rec.grade !== auto) || (p && p.grade !== undefined && p.grade !== GRADE_AUTO);
@@ -11453,7 +11453,7 @@ function refreshSalesGrade() {
       const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600">●暂存</span>` : '';
       const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
       h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div>`
-         + `<div style="margin-top:4px;display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:24px;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div>${badge}${upFlag}</td>`;
+         + `<div style="margin-top:4px;display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:24px;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div>${badge}<div style="font-size:10px;height:14px;line-height:14px;text-align:center;margin-top:2px">${upFlag || '&nbsp;'}</div></td>`;
     });
     h += `</tr>`;
   });
