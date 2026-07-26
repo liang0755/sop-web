@@ -11453,10 +11453,10 @@ function refreshSalesGrade() {
       const isPending = !!(p && (p.grade !== undefined || p.note !== undefined));
       const canRestore = (!!rec.grade && rec.grade !== auto) || (p && p.grade !== undefined && p.grade !== GRADE_AUTO);
       const restoreBtn = canRestore ? `<button type="button" title="恢复为自动评级" onclick="sgStage('${k}', {grade:GRADE_AUTO})" style="padding:0;width:22px;height:22px;font-size:13px;line-height:1;border:1px solid #d6deeb;border-radius:6px;background:#fff;cursor:pointer;color:var(--gray-500);flex-shrink:0">↺</button>` : '';
-      const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600">●暂存</span>` : '';
+      const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600;margin-right:4px">●暂存</span>` : '';
       const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
       h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div>`
-         + `<div style="margin-top:4px;display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:24px;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div>${badge}<div style="font-size:10px;min-height:14px;line-height:14px;text-align:center;margin-top:2px">${upFlag}</div></td>`;
+         + `<div style="margin-top:4px;display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:24px;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div><div style="font-size:10px;min-height:14px;line-height:14px;text-align:center;margin-top:2px">${badge}${upFlag}</div></td>`;
     });
     h += `</tr>`;
   });
