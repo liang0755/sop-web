@@ -6698,7 +6698,7 @@ function renderVisitTable() {
   <div class="card"><div class="table-wrap"><table style="font-size:12px">
     <thead><tr>
       <th style="width:34px;text-align:center"><input type="checkbox" id="visitSelectAll" onchange="toggleVisitSelectAll(this)"></th>
-      <th>联系时间</th><th>客户</th><th>联系人</th><th>手机号</th><th>签到事件</th>
+      <th>联系时间</th><th>客户</th><th>联系人</th><th>签到事件</th>
       <th>员工</th><th>部门</th><th>签到地址</th><th>备注</th>
       <th style="min-width:130px">拜访结果</th><th style="min-width:200px">卡点说明</th>
     </tr></thead>
@@ -6710,18 +6710,13 @@ function renderVisitTable() {
         const vrColor = getVisitResultColor(vr);
         const vrBg = getVisitResultBg(vr);
         const checked = selectedVisitIds.has(r.id) ? 'checked' : '';
-        // 签到事件下拉选项（固定配置项；若当前值不在配置中，则追加该项避免丢失显示）
-        const fixedEvents = getSigninEvents();
-        let signinEventList = fixedEvents.slice();
-        if (se && !signinEventList.includes(se)) signinEventList = signinEventList.concat([se]);
-        const signinOpts = signinEventList.map(ev => `<option value="${ev.replace(/"/g,'&quot;')}" ${ev === se ? 'selected' : ''}>${ev}</option>`).join('');
+        const seHtml = se ? se.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '<span style="color:var(--gray-400)">未设置</span>';
         return `<tr data-id="${r.id}">
           <td style="text-align:center"><input type="checkbox" class="visit-row-cb" data-id="${r.id}" ${checked} onchange="onVisitSelect('${r.id}', this.checked)"></td>
           <td>${r.contactTime || ''}</td>
           <td>${r.customer || ''}</td>
           <td>${r.contactPerson || ''}</td>
-          <td>${r.phone || ''}</td>
-          <td><select class="form-control form-control-sm" onchange="onVisitEdit('${r.id}','signinEvent',this.value)" title="点击修改签到事件（选项来自表单配置-签到事件配置）"><option value="">未设置</option>${signinOpts}</select></td>
+          <td class="signin-event-cell" style="white-space:normal;word-break:break-word;vertical-align:top;cursor:pointer" title="点击修改签到事件（选项来自表单配置-签到事件配置）" onclick="openSigninEventModal('${r.id}')">${seHtml}</td>
           <td>${r.employee || ''}</td>
           <td>${r.department || ''}</td>
           <td style="max-width:300px;white-space:normal;word-break:break-word;line-height:1.45;vertical-align:top" title="${(r.signinAddress || '').replace(/"/g,'&quot;')}">${r.signinAddress || ''}</td>
@@ -6740,14 +6735,11 @@ function renderVisitTable() {
   // Restore select values（签到事件在第6列、拜访结果在第11列）
   pageRecords.forEach(r => {
     const vr = visitEditBuffer[r.id]?.visitResult !== undefined ? visitEditBuffer[r.id].visitResult : (r.visitResult || '');
-    const se = visitEditBuffer[r.id]?.signinEvent !== undefined ? visitEditBuffer[r.id].signinEvent : (r.signinEvent || '');
     const row = c.querySelector(`tr[data-id="${r.id}"]`);
     if (row) {
-      const vrTd = row.querySelector('td:nth-child(11)');
+      const vrTd = row.querySelector('td:nth-child(10)');
       const vrSel = vrTd ? vrTd.querySelector('select') : null;
       if (vrSel) vrSel.value = vr;
-      const seSel = row.querySelector('td:nth-child(6) select');
-      if (seSel) seSel.value = se;
     }
   });
   // Sync select-all checkbox state（仅当前页）
@@ -6758,6 +6750,29 @@ function renderVisitTable() {
   }
   updateVisitBatchBar();
   updateVisitSaveBar();
+}
+
+function openSigninEventModal(recordId) {
+  const r = cloudData.visitRecords.find(x => x.id === recordId);
+  if (!r) return;
+  const cur = visitEditBuffer[recordId]?.signinEvent !== undefined ? visitEditBuffer[recordId].signinEvent : (r.signinEvent || '');
+  const fixedEvents = getSigninEvents();
+  let list = fixedEvents.slice();
+  if (cur && !list.includes(cur)) list = list.concat([cur]);
+  const opts = list.map(ev => `<option value="${ev.replace(/"/g,'&quot;')}" ${ev === cur ? 'selected' : ''}>${ev}</option>`).join('');
+  showModal('修改签到事件', `<form onsubmit="return saveSigninEventModal(event,'${recordId}')" style="margin:0">
+    <div style="margin-bottom:10px;font-size:13px;color:var(--gray-600)">${r.contactTime || ''} · ${r.customer || ''} · ${r.employee || ''}</div>
+    <div class="form-group"><label>签到事件</label><select class="form-control" id="signinEventFull">${opts}</select></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="submit" class="btn btn-primary">保存</button></div>
+  </form>`);
+}
+function saveSigninEventModal(e, id) {
+  e.preventDefault();
+  const v = document.getElementById('signinEventFull').value;
+  onVisitEdit(id, 'signinEvent', v);
+  closeModal();
+  renderVisitTable();
+  return false;
 }
 
 function showVisitRemarkModal(recordId) {
@@ -6843,7 +6858,7 @@ function onVisitEdit(recordId, field, value) {
   if (field === 'visitResult') {
     const row = document.querySelector(`tr[data-id="${recordId}"]`);
     if (row) {
-      const td = row.querySelector('td:nth-child(11)');
+      const td = row.querySelector('td:nth-child(10)');
       const select = td?.querySelector('select');
       const color = getVisitResultColor(value);
       const bg = getVisitResultBg(value);
@@ -8187,13 +8202,13 @@ function exportVisitData() {
   else if (fResult) records = records.filter(r => (r.visitResult || '') === fResult);
   if (!records.length) { showToast('当前筛选条件下没有可导出的拜访数据', 'warning'); return; }
   records.sort((a, b) => normContactTime(b.contactTime).localeCompare(normContactTime(a.contactTime)));
-  const headers = ['联系时间', '客户', '联系人', '手机号', '签到事件', '员工', '部门', '签到地址', '备注', '拜访结果', '卡点说明'];
+  const headers = ['联系时间', '客户', '联系人', '签到事件', '员工', '部门', '签到地址', '备注', '拜访结果', '卡点说明'];
   const aoa = [headers];
   records.forEach(r => {
     const vr = visitEditBuffer[r.id]?.visitResult !== undefined ? visitEditBuffer[r.id].visitResult : (r.visitResult || '');
     const se = visitEditBuffer[r.id]?.signinEvent !== undefined ? visitEditBuffer[r.id].signinEvent : (r.signinEvent || '');
     const bn = visitEditBuffer[r.id]?.blockerNote !== undefined ? visitEditBuffer[r.id].blockerNote : (r.blockerNote || '');
-    aoa.push([r.contactTime || '', r.customer || '', r.contactPerson || '', r.phone || '', se, r.employee || '', r.department || '', r.signinAddress || '', (r.remark || '').replace(/\n/g, ' '), vr, bn]);
+    aoa.push([r.contactTime || '', r.customer || '', r.contactPerson || '', se, r.employee || '', r.department || '', r.signinAddress || '', (r.remark || '').replace(/\n/g, ' '), vr, bn]);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
