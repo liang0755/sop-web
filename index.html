@@ -9111,6 +9111,106 @@ let csPageSize = 20;
 let csMonths = []; // 客户汇总月份多选（'01'~'12'）；空数组=全部月份
 let csSortState = null; // 客户汇总排序状态：{ col: 'docMonth'|'salesperson'|'amount'|'team'|'customerSource'|'category'|'customerProfile', dir: 'asc'|'desc' }；null=默认按年/月+销售员+客户 升序
 
+// ===== 客户来源汇总 / 客户画像汇总 / 销售签约分析 的团队&人员筛选 =====
+// 团队筛选（空=全部）；人员多选（空数组=全部）
+const sbTeamFilters = { src: '', profile: '', sig: '' };
+const sbPersonFilters = { src: [], profile: [] };
+// 全部团队（来自记录的 team + 用户 department，跨年稳定）
+function sbAllTeams() {
+  const teams = new Set();
+  (cloudData.salesRecords || []).forEach(r => {
+    const sp = (r.salesperson || '').trim(); if (!sp) return;
+    const t = r.team || getSalesTeam(sp); if (t) teams.add(t);
+  });
+  (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
+  return [...teams].sort((a, b) => a.localeCompare(b, 'zh'));
+}
+// 全部销售员（来自记录，跨年稳定）
+function sbAllPersons() {
+  const set = new Set();
+  (cloudData.salesRecords || []).forEach(r => { const sp = (r.salesperson || '').trim(); if (sp) set.add(sp); });
+  return [...set].sort((a, b) => a.localeCompare(b, 'zh'));
+}
+function sbTeamFilterHtml(prefix) {
+  const selected = sbTeamFilters[prefix] || '';
+  const opts = sbAllTeams().map(t => `<option value="${esc(t)}" ${t === selected ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  return `<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">团队</label><select class="form-control" onchange="sbTeamFilterChange('${prefix}', this.value)"><option value="">全部团队</option>${opts}</select></div>`;
+}
+function sbPersonPanelHtml(prefix, labelText) {
+  return `
+  <div class="form-group" style="position:relative">
+    <label style="font-size:12px;color:var(--gray-500)">人员</label>
+    <button type="button" class="form-control" id="${prefix}PersonBtn" onclick="toggleSbPersonPanel('${prefix}')" style="text-align:left;cursor:pointer;color:var(--gray-700)">${labelText}</button>
+    <div id="${prefix}PersonPanel" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:240px;max-height:340px;overflow:auto;padding:10px">
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <input type="text" class="form-control form-control-sm" id="${prefix}PersonSearch" placeholder="搜索销售姓名" oninput="renderSbPersonPanel('${prefix}')" style="flex:1;min-width:0">
+        <button type="button" class="btn btn-sm btn-outline" onclick="sbPersonSelectAll('${prefix}')">全选</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="sbPersonClear('${prefix}')">清空</button>
+      </div>
+      <div id="${prefix}PersonList"></div>
+    </div>
+  </div>`;
+}
+function sbPersonLabel(prefix) {
+  const arr = sbPersonFilters[prefix] || [];
+  if (!arr.length) return '全部人员';
+  const lbl = '已选 ' + arr.length + ' 人';
+  return arr.length <= 3 ? lbl + '：' + arr.join('、') : lbl;
+}
+function toggleSbPersonPanel(prefix, force) {
+  const p = document.getElementById(prefix + 'PersonPanel');
+  if (!p) return;
+  if (typeof force === 'boolean') p.style.display = force ? 'block' : 'none';
+  else p.style.display = p.style.display === 'block' ? 'none' : 'block';
+  if (p.style.display === 'block') { renderSbPersonPanel(prefix); const s = document.getElementById(prefix + 'PersonSearch'); if (s) s.value = ''; }
+}
+function renderSbPersonPanel(prefix) {
+  const list = sbAllPersons();
+  const q = (document.getElementById(prefix + 'PersonSearch') ? document.getElementById(prefix + 'PersonSearch').value : '').trim();
+  const box = document.getElementById(prefix + 'PersonList');
+  if (!box) return;
+  const filtered = q ? list.filter(n => n.indexOf(q) >= 0) : list;
+  if (!filtered.length) { box.innerHTML = '<div style="padding:8px;color:var(--gray-400);font-size:12px">无匹配人员</div>'; return; }
+  const arr = sbPersonFilters[prefix] || [];
+  box.innerHTML = filtered.map(n => {
+    const chk = arr.indexOf(n) >= 0 ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:4px;font-size:13px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background='transparent'"><input type="checkbox" ${chk} onchange='sbPersonToggle("${prefix}", ${JSON.stringify(n)})'> ${esc(n)}</label>`;
+  }).join('');
+}
+function sbPersonToggle(prefix, name) {
+  const arr = sbPersonFilters[prefix]; if (!arr) return;
+  const i = arr.indexOf(name);
+  if (i >= 0) arr.splice(i, 1); else arr.push(name);
+  const btn = document.getElementById(prefix + 'PersonBtn'); if (btn) btn.innerHTML = sbPersonLabel(prefix);
+  sbPersonRefresh(prefix);
+}
+function sbPersonSelectAll(prefix) {
+  const q = (document.getElementById(prefix + 'PersonSearch') ? document.getElementById(prefix + 'PersonSearch').value : '').trim();
+  const list = sbAllPersons().filter(n => !q || n.indexOf(q) >= 0);
+  const set = new Set(sbPersonFilters[prefix]); list.forEach(n => set.add(n));
+  sbPersonFilters[prefix] = [...set];
+  const btn = document.getElementById(prefix + 'PersonBtn'); if (btn) btn.innerHTML = sbPersonLabel(prefix);
+  renderSbPersonPanel(prefix); sbPersonRefresh(prefix);
+}
+function sbPersonClear(prefix) {
+  sbPersonFilters[prefix] = [];
+  const btn = document.getElementById(prefix + 'PersonBtn'); if (btn) btn.innerHTML = sbPersonLabel(prefix);
+  renderSbPersonPanel(prefix); sbPersonRefresh(prefix);
+}
+function sbPersonRefresh(prefix) {
+  if (prefix === 'src') refreshSalesBoardSource();
+  else if (prefix === 'profile') refreshSalesBoardProfile();
+}
+function sbTeamFilterChange(prefix, val) {
+  sbTeamFilters[prefix] = val;
+  sbTeamRefresh(prefix);
+}
+function sbTeamRefresh(prefix) {
+  if (prefix === 'src') refreshSalesBoardSource();
+  else if (prefix === 'profile') refreshSalesBoardProfile();
+  else if (prefix === 'sig') { const y = document.getElementById('sigYear') ? document.getElementById('sigYear').value : new Date().getFullYear().toString(); renderSalesSigningTable(y); }
+}
+
 async function renderSalesBoard() {
   const html = `
     <div class="summary-tabs" style="margin-bottom:20px">
@@ -9229,6 +9329,8 @@ function renderSalesBoardSource() {
       <div class="card-header"><h4>🏷️ 客户来源汇总</h4><span style="font-size:12px;color:var(--gray-500)">按年显示，横向1-12月，每月统计客户数与业绩</span></div>
       <div class="card-body"><div class="filter-bar">
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="srcYear" onchange="refreshSalesBoardSource()">${yearOpts}</select></div>
+        ${sbTeamFilterHtml('src')}
+        ${sbPersonPanelHtml('src', sbPersonLabel('src'))}
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesBoardSource()">重置为今年</button></div>
         <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportSourceSummary()">📤 导出</button></div>
       </div></div>
@@ -9253,7 +9355,17 @@ function refreshSalesBoardSource() {
 }
 
 function aggregateSourceSummary(year) {
-  const filtered = cloudData.salesRecords.filter(r => (r.docMonth || '').startsWith(year));
+  let filtered = cloudData.salesRecords.filter(r => (r.docMonth || '').startsWith(year));
+  // 团队 + 人员筛选
+  const tf = sbTeamFilters.src, pf = sbPersonFilters.src;
+  if (tf || (pf && pf.length)) {
+    filtered = filtered.filter(r => {
+      const sp = (r.salesperson || '').trim();
+      if (pf && pf.length && pf.indexOf(sp) < 0) return false;
+      if (tf && (r.team || getSalesTeam(sp)) !== tf) return false;
+      return true;
+    });
+  }
   // 第一步：按客户汇总数据维度聚合（年月 × 销售员 × 客户）
   const groups = {};
   filtered.forEach(r => {
@@ -9396,6 +9508,8 @@ function renderSalesBoardProfile() {
       <div class="card-header"><h4>👤 客户画像汇总</h4><span style="font-size:12px;color:var(--gray-500)">按年显示，横向1-12月，每月统计客户数与业绩</span></div>
       <div class="card-body"><div class="filter-bar">
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="profileYear" onchange="refreshSalesBoardProfile()">${yearOpts}</select></div>
+        ${sbTeamFilterHtml('profile')}
+        ${sbPersonPanelHtml('profile', sbPersonLabel('profile'))}
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesBoardProfile()">重置为今年</button></div>
         <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportProfileSummary()">📤 导出</button></div>
       </div></div>
@@ -9420,7 +9534,17 @@ function refreshSalesBoardProfile() {
 }
 
 function aggregateProfileSummary(year) {
-  const filtered = cloudData.salesRecords.filter(r => (r.docMonth || '').startsWith(year));
+  let filtered = cloudData.salesRecords.filter(r => (r.docMonth || '').startsWith(year));
+  // 团队 + 人员筛选
+  const tf = sbTeamFilters.profile, pf = sbPersonFilters.profile;
+  if (tf || (pf && pf.length)) {
+    filtered = filtered.filter(r => {
+      const sp = (r.salesperson || '').trim();
+      if (pf && pf.length && pf.indexOf(sp) < 0) return false;
+      if (tf && (r.team || getSalesTeam(sp)) !== tf) return false;
+      return true;
+    });
+  }
   // 第一步：按客户汇总数据维度聚合（年月 × 销售员 × 客户）
   const groups = {};
   filtered.forEach(r => {
@@ -9537,6 +9661,7 @@ function renderSalesBoardSigning() {
       <div class="card-body">
         <div class="filter-bar">
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="sigYear" onchange="renderSalesSigningTable(this.value)">${yearOpts}</select></div>
+          ${sbTeamFilterHtml('sig')}
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesSigningYear()">重置为今年</button></div>
           <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportSalesSigning()">📤 导出 Excel</button></div>
         </div>
@@ -9557,7 +9682,8 @@ function resetSalesSigningYear() {
 function renderSalesSigningTable(year) {
   const wrap = document.getElementById('sigTableWrap');
   if (!wrap) return;
-  const users = getActiveSalesUsers();
+  let users = getActiveSalesUsers();
+  if (sbTeamFilters.sig) users = users.filter(u => (getSalesTeam(u.name) || '') === sbTeamFilters.sig);
   const { result, groupOrder, months } = aggregateSalesSigning(year);
   if (!users.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无在岗销售成员</div>'; return; }
   const ng = groupOrder.length;
@@ -9601,7 +9727,8 @@ function renderSalesSigningTable(year) {
 function exportSalesSigning() {
   const year = document.getElementById('sigYear') ? document.getElementById('sigYear').value : new Date().getFullYear().toString();
   if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面', 'error'); return; }
-  const users = getActiveSalesUsers();
+  let users = getActiveSalesUsers();
+  if (sbTeamFilters.sig) users = users.filter(u => (getSalesTeam(u.name) || '') === sbTeamFilters.sig);
   const { result, groupOrder, months } = aggregateSalesSigning(year);
   if (!users.length) { showToast('无在岗销售成员', 'error'); return; }
   // 表头：销售 / 月(colspan N) ... / 合计(colspan N)
