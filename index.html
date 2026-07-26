@@ -118,6 +118,11 @@ tr:hover td{background:var(--gray-50)}
 .channel-chip{flex-shrink:0;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:500;background:var(--gray-100);color:var(--gray-600);border:1px solid var(--gray-200);cursor:pointer;transition:all .15s;white-space:nowrap}
 .channel-chip:hover,.channel-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
 .channel-chip .chip-count{font-size:10px;opacity:.7;margin-left:4px}
+/* Visit quick-date chips (replaces dropdown) */
+.visit-quick-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.visit-quick-chip{padding:4px 12px;border-radius:14px;font-size:12px;font-weight:500;background:var(--gray-100);color:var(--gray-600);border:1px solid var(--gray-200);cursor:pointer;transition:all .15s;white-space:nowrap;line-height:1.6}
+.visit-quick-chip:hover{background:var(--gray-200);border-color:var(--gray-300)}
+.visit-quick-chip.active{background:var(--primary);color:#fff;border-color:var(--primary);font-weight:600}
 /* Floating submit bar — always visible at bottom of viewport */
 .sticky-submit-bar{position:fixed;bottom:0;left:220px;right:0;background:#fff;border-top:1px solid var(--gray-200);padding:12px 16px;box-shadow:0 -2px 12px rgba(0,0,0,.1);z-index:100;display:flex;gap:12px;justify-content:center}
 .sticky-submit-bar .btn{flex:0 1 auto;min-width:120px;max-width:200px}
@@ -6616,9 +6621,9 @@ async function renderVisitData() {
         <div class="form-group"><label>部门</label><select class="form-control" id="visitFDept" onchange="resetVisitPage()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}">${d}</option>`).join('')}</select></div>
         <div class="form-group"><label>销售</label><select class="form-control" id="visitFPerson" onchange="resetVisitPage()"><option value="">全部人员</option>${persons.map(p => `<option value="${p}">${p}</option>`).join('')}</select></div>
         <div class="form-group"><label>拜访结果</label><select class="form-control" id="visitFResult" onchange="resetVisitPage()"><option value="">全部</option>${batchResultOpts}<option value="empty">⚠️ 未填写结果</option><option value="filled">已填写结果</option></select></div>
-        <div class="form-group"><label>快捷筛选</label><select class="form-control" id="visitFQuickDate" onchange="applyVisitQuickDateFilter(this)"><option value="">选择时间范围</option><option value="today">今天</option><option value="yesterday">昨天</option><option value="thisWeek">本周</option><option value="lastWeek">上周</option><option value="thisMonth">本月</option><option value="lastMonth">上月</option><option value="thisYear">今年</option></select></div>
-        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}" onchange="document.getElementById('visitFQuickDate').value=''"></div>
-        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}" onchange="document.getElementById('visitFQuickDate').value=''"></div>
+        <div class="form-group" style="min-width:440px"><label>快捷筛选</label><div id="visitFQuickDateChips" class="visit-quick-chips"><button type="button" class="visit-quick-chip" data-type="" onclick="applyVisitQuickDateFilter('')">全部</button><button type="button" class="visit-quick-chip" data-type="today" onclick="applyVisitQuickDateFilter('today')">今天</button><button type="button" class="visit-quick-chip" data-type="yesterday" onclick="applyVisitQuickDateFilter('yesterday')">昨天</button><button type="button" class="visit-quick-chip" data-type="thisWeek" onclick="applyVisitQuickDateFilter('thisWeek')">本周</button><button type="button" class="visit-quick-chip" data-type="lastWeek" onclick="applyVisitQuickDateFilter('lastWeek')">上周</button><button type="button" class="visit-quick-chip" data-type="thisMonth" onclick="applyVisitQuickDateFilter('thisMonth')">本月</button><button type="button" class="visit-quick-chip" data-type="lastMonth" onclick="applyVisitQuickDateFilter('lastMonth')">上月</button><button type="button" class="visit-quick-chip" data-type="thisYear" onclick="applyVisitQuickDateFilter('thisYear')">今年</button></div></div>
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}" onchange="setVisitQuickDateActive('')"></div>
+        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}" onchange="setVisitQuickDateActive('')"></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="resetVisitPage()">🔍 查询</button></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-outline" onclick="exportVisitData()">📤 导出</button></div>
         <div class="form-group"><label>每页</label><select class="form-control" id="visitPageSize" onchange="onVisitPageSizeChange()"><option value="30"${visitPageSize===30?' selected':''}>30</option><option value="50"${visitPageSize===50?' selected':''}>50</option><option value="100"${visitPageSize===100?' selected':''}>100</option><option value="200"${visitPageSize===200?' selected':''}>200</option></select></div>
@@ -8482,8 +8487,8 @@ function getQuickDateRange(type){
   if (type === 'lastWeek') { const lastMonday = new Date(monday.getTime()-7*86400000); const lastSunday = new Date(monday.getTime()-1*86400000); return { start: ymd(lastMonday), end: ymd(lastSunday) }; }
   return { start: '', end: '' };
 }
-function applyVisitQuickDateFilter(sel){
-  const type = sel?.value;
+function applyVisitQuickDateFilter(type){
+  setVisitQuickDateActive(type||'');
   if (!type) return;
   const range = getQuickDateRange(type);
   const startInput = document.getElementById('visitFStart');
@@ -8491,6 +8496,13 @@ function applyVisitQuickDateFilter(sel){
   if (startInput) startInput.value = range.start;
   if (endInput) endInput.value = range.end;
   resetVisitPage();
+}
+function setVisitQuickDateActive(type){
+  const wrap = document.getElementById('visitFQuickDateChips');
+  if (!wrap) return;
+  wrap.querySelectorAll('.visit-quick-chip').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.type === (type||''));
+  });
 }
 // 联系时间规范化：把 CSV 的 `2026/07/10 15:56` / `2026.07.10` / `2026年07月10日` 等统一成 `2026-07-10 15:56`
 // 解决斜杠格式导致日期筛选/排序/统计判断错误的问题（部分 CSV 直接以斜杠导出）
