@@ -6620,6 +6620,7 @@ async function renderVisitData() {
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}" onchange="document.getElementById('visitFQuickDate').value=''"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}" onchange="document.getElementById('visitFQuickDate').value=''"></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="resetVisitPage()">🔍 查询</button></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-outline" onclick="exportVisitData()">📤 导出</button></div>
         <div class="form-group"><label>每页</label><select class="form-control" id="visitPageSize" onchange="onVisitPageSizeChange()"><option value="30"${visitPageSize===30?' selected':''}>30</option><option value="50"${visitPageSize===50?' selected':''}>50</option><option value="100"${visitPageSize===100?' selected':''}>100</option><option value="200"${visitPageSize===200?' selected':''}>200</option></select></div>
       </div>
     </div></div>
@@ -8163,6 +8164,38 @@ function downloadCsv(filename, headers, rows){
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   showToast('已导出：' + filename, 'success');
 }
+// 拜访数据明细 → 导出 Excel（跟随部门/人员/结果/起止日期/快捷日期筛选，套用未保存的编辑缓冲）
+function exportVisitData() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面后重试', 'error'); return; }
+  const s = document.getElementById('visitFStart')?.value || '';
+  const e = document.getElementById('visitFEnd')?.value || '';
+  const fDept = document.getElementById('visitFDept')?.value || '';
+  const fPerson = document.getElementById('visitFPerson')?.value || '';
+  const fResult = document.getElementById('visitFResult')?.value || '';
+  let records = [...cloudData.visitRecords];
+  if (s) records = records.filter(r => normContactTime(r.contactTime).split(' ')[0] >= s);
+  if (e) records = records.filter(r => normContactTime(r.contactTime).split(' ')[0] <= e);
+  if (fDept) records = records.filter(r => normDeptKey(r.department) === normDeptKey(fDept));
+  if (fPerson) records = records.filter(r => r.employee === fPerson);
+  if (fResult === 'empty') records = records.filter(r => !r.visitResult);
+  else if (fResult === 'filled') records = records.filter(r => !!r.visitResult);
+  else if (fResult) records = records.filter(r => (r.visitResult || '') === fResult);
+  if (!records.length) { showToast('当前筛选条件下没有可导出的拜访数据', 'warning'); return; }
+  records.sort((a, b) => normContactTime(b.contactTime).localeCompare(normContactTime(a.contactTime)));
+  const headers = ['联系时间', '客户', '联系人', '手机号', '签到事件', '员工', '部门', '签到地址', '备注', '拜访结果', '卡点说明'];
+  const aoa = [headers];
+  records.forEach(r => {
+    const vr = visitEditBuffer[r.id]?.visitResult !== undefined ? visitEditBuffer[r.id].visitResult : (r.visitResult || '');
+    const se = visitEditBuffer[r.id]?.signinEvent !== undefined ? visitEditBuffer[r.id].signinEvent : (r.signinEvent || '');
+    const bn = visitEditBuffer[r.id]?.blockerNote !== undefined ? visitEditBuffer[r.id].blockerNote : (r.blockerNote || '');
+    aoa.push([r.contactTime || '', r.customer || '', r.contactPerson || '', r.phone || '', se, r.employee || '', r.department || '', r.signinAddress || '', (r.remark || '').replace(/\n/g, ' '), vr, bn]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '拜访数据');
+  XLSX.writeFile(wb, '拜访数据_' + (s || '起') + '_' + (e || '止') + '.xlsx');
+  showToast('已导出 ' + records.length + ' 条拜访数据（筛选结果）', 'success');
+}
 function visitExportFilename(tabLabel, tableLabel, s, e){
   const cond = (s && e) ? (s + '至' + e) : '全部区间';
   return '拜访统计_' + tabLabel + '_' + tableLabel + '_' + cond + '.csv';
@@ -8946,7 +8979,12 @@ async function renderSalesDetail() {
     </div>
   </div>
   <div class="card">
-    <div class="card-header"><h4>📋 业绩明细（共 ${totalRows} 条${Object.values(f).some(v => v) ? '，已筛选' : ''}${blankCount > 0 ? '；已过滤 ' + blankCount + ' 条空白记录' : ''}）</h4>${canEdit && blankCount > 0 ? `<button class="btn btn-outline btn-sm" onclick="cleanupBlankSalesRecords()">🧹 清理 ${blankCount} 条空白记录</button>` : ''}</div>
+    <div class="card-header"><h4>📋 业绩明细（共 ${totalRows} 条${Object.values(f).some(v => v) ? '，已筛选' : ''}${blankCount > 0 ? '；已过滤 ' + blankCount + ' 条空白记录' : ''}）</h4>
+      <div style="display:flex;gap:8px">
+        ${canEdit && blankCount > 0 ? `<button class="btn btn-outline btn-sm" onclick="cleanupBlankSalesRecords()">🧹 清理 ${blankCount} 条空白记录</button>` : ''}
+        <button class="btn btn-outline btn-sm" onclick="exportSalesDetailCsv()">📤 导出</button>
+      </div>
+    </div>
     <div class="card-body">
       ${canEdit ? `<div class="sticky-submit-bar" id="salesBatchBar" style="display:none">
         <span id="salesSelCount" style="align-self:center">已选 0 条</span>
@@ -8980,6 +9018,35 @@ function resetSalesFilters() {
   salesDetailFilters = { start:'', end:'', team:'', salesperson:'', customer:'' };
   salesDetailPage = 1;
   renderSalesDetail();
+}
+
+// 业绩明细 → 导出 Excel（跟随 开始/结束日期、部门、人员、客户模糊、年份多选 筛选；复用空白记录剔除逻辑）
+function exportSalesDetailCsv() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面后重试', 'error'); return; }
+  const f = salesDetailFilters;
+  const meaningful = cloudData.salesRecords.filter(r => !isBlankSalesRecord(r));
+  const base = meaningful.filter(r => {
+    const d = (r.docDate || '');
+    if (f.start && d && d < f.start) return false;
+    if (f.end && d && d > f.end) return false;
+    if (f.team && (r.team || '') !== f.team) return false;
+    if (f.salesperson && (r.salesperson || '') !== f.salesperson) return false;
+    if (f.customer) { const c = (r.customer || '').toLowerCase(); if (!c.includes(f.customer.toLowerCase())) return false; }
+    return true;
+  });
+  const all = base.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
+  const allYears = [...new Set(all.map(r => (r.docMonth || '').slice(0, 4)))].filter(Boolean).sort((a, b) => b.localeCompare(a));
+  const selYears = (summaryYearSel && summaryYearSel.size) ? allYears.filter(y => summaryYearSel.has(y)) : allYears;
+  const rows = all.filter(r => selYears.includes((r.docMonth || '').slice(0, 4)));
+  if (!rows.length) { showToast('当前筛选条件下没有可导出的业绩明细', 'warning'); return; }
+  const headers = ['销售员', '团队/门店', '单据日期', '折后金额', '客户名称', '商品名称', '单据编号', '单据类别', '状态'];
+  const aoa = [headers];
+  rows.forEach(r => aoa.push([r.salesperson || '', r.team || '', r.docDate || '', toNum(r.amount), r.customer || '', r.productName || '', r.docNo || '', r.docType || '', r.status || '']));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '业绩明细');
+  XLSX.writeFile(wb, '业绩明细_' + (f.start || '起') + '_' + (f.end || '止') + '.xlsx');
+  showToast('已导出 ' + rows.length + ' 条业绩明细（筛选结果）', 'success');
 }
 
 async function cleanupBlankSalesRecords() {
@@ -12537,6 +12604,7 @@ function renderSalesPerf() {
           ${isMatrix ? `
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="perfMFrom" onchange="perfMonthFrom=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select></div>
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="perfMTo" onchange="perfMonthTo=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfMonthTo?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <button class="btn btn-success btn-sm" onclick="exportPerfMatrixXlsx()">📥 导出矩阵Excel</button>
           ` : `
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="perfMonth" onchange="perfSingleMonth=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
           <button class="btn btn-outline btn-sm" onclick="refreshPerfSingle()">刷新计算</button>
@@ -12617,6 +12685,53 @@ function refreshPerfMatrix() {
   h += '</tbody>';
   const tbl = document.getElementById('perfTable');
   if (tbl) tbl.innerHTML = h;
+}
+
+// 销售绩效看板矩阵 → 导出 Excel（跟随 销售多选/团队/排序/起始月-结束月 筛选）
+function exportPerfMatrixXlsx() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面后重试', 'error'); return; }
+  const year = document.getElementById('perfYear') ? document.getElementById('perfYear').value : perfYear;
+  const statusMap = buildUserStatusMap();
+  const records = cloudData.salesRecords || [];
+  const spSet = new Set();
+  records.forEach(r => {
+    const dm = r.docMonth || '';
+    if (dm.slice(0, 4) !== year) return;
+    const sp = (r.salesperson || '').trim();
+    if (!sp) return;
+    if (statusMap[sp] !== '在职') return;
+    spSet.add(sp);
+  });
+  const months = [];
+  for (let m = perfMonthFrom; m <= perfMonthTo; m++) months.push(m);
+  const cfg = getPerfConfig();
+  const baseMap = buildSalesBaseForYear(year);
+  const lastM = months.length ? months[months.length - 1] : perfMonthTo;
+  let rows = [...spSet].filter(perfFilterSp).map(sp => {
+    const rec = getPerfRecord(year, sp, lastM);
+    return { sp, team: getSalesTeam(sp) || '', lastScore: getFinalScore(rec, cfg, year, sp, lastM) };
+  });
+  if (perfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  else if (perfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.sp.localeCompare(b.sp, 'zh'));
+  else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
+  if (!rows.length) { showToast('当前无可导出的绩效矩阵数据', 'warning'); return; }
+  const header = ['销售', '团队'].concat(months.map(m => m + '月(职级/评分)'));
+  const aoa = [header];
+  rows.forEach(row => {
+    const line = [row.sp, row.team || '-'];
+    months.forEach(m => {
+      const level = getSalesLevel(year, row.sp, m, baseMap);
+      const rec = getPerfRecord(year, row.sp, m);
+      const score = getFinalScore(rec, cfg, year, row.sp, m);
+      line.push((level || '—') + ' / ' + score.toFixed(2));
+    });
+    aoa.push(line);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '绩效看板矩阵');
+  XLSX.writeFile(wb, `销售绩效看板矩阵_${year}年${perfMonthFrom}-${perfMonthTo}月.xlsx`);
+  showToast('已导出绩效看板矩阵（' + rows.length + ' 人）', 'success');
 }
 
 function refreshPerfSingle() {
@@ -12970,6 +13085,7 @@ function renderM0Perf(mount) {
           ${isMatrix ? `
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="m0PerfMFrom" onchange="m0PerfMonthFrom=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select></div>
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="m0PerfMTo" onchange="m0PerfMonthTo=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfMonthTo?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <button class="btn btn-success btn-sm" onclick="exportM0PerfMatrixXlsx()">📥 导出矩阵Excel</button>
           ` : `
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="m0PerfMonth" onchange="m0PerfSingleMonth=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
           <button class="btn btn-outline btn-sm" onclick="refreshM0PerfSingle()">刷新计算</button>
@@ -13029,6 +13145,43 @@ function refreshM0PerfMatrix() {
   h += '</tbody>';
   const tbl = document.getElementById('m0PerfTable');
   if (tbl) tbl.innerHTML = h;
+}
+
+// M0 绩效看板矩阵 → 导出 Excel（跟随 M0人员多选/团队/排序/起始月-结束月 筛选）
+function exportM0PerfMatrixXlsx() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面后重试', 'error'); return; }
+  const year = document.getElementById('m0PerfYear') ? document.getElementById('m0PerfYear').value : m0PerfYear;
+  const m0List = m0SpActiveList();
+  const months = [];
+  for (let m = m0PerfMonthFrom; m <= m0PerfMonthTo; m++) months.push(m);
+  const cfg = getM0PerfConfig();
+  const lastM = months.length ? months[months.length - 1] : m0PerfMonthTo;
+  let rows = m0List.filter(m0PerfFilterSp).map(m0 => {
+    const rec = getM0PerfRecord(year, m0, lastM);
+    return { m0, team: getSalesTeam(m0) || '', lastScore: getFinalScore(rec, cfg, year, m0, lastM) };
+  });
+  if (m0PerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.m0.localeCompare(b.m0, 'zh'));
+  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.m0.localeCompare(b.m0, 'zh'));
+  else rows.sort((a, b) => a.m0.localeCompare(b.m0, 'zh'));
+  if (!rows.length) { showToast('当前无可导出的 M0 绩效矩阵数据', 'warning'); return; }
+  const header = ['M0人员', '团队'].concat(months.map(m => m + '月(职级/评分)'));
+  const aoa = [header];
+  rows.forEach(row => {
+    const line = [row.m0, row.team || '-'];
+    months.forEach(m => {
+      const gradeRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, row.m0, m)]) || {};
+      const level = gradeRec.grade || '—';
+      const rec = getM0PerfRecord(year, row.m0, m);
+      const score = getFinalScore(rec, cfg, year, row.m0, m);
+      line.push(level + ' / ' + score.toFixed(2));
+    });
+    aoa.push(line);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'M0绩效看板矩阵');
+  XLSX.writeFile(wb, `M0绩效看板矩阵_${year}年${m0PerfMonthFrom}-${m0PerfMonthTo}月.xlsx`);
+  showToast('已导出 M0 绩效看板矩阵（' + rows.length + ' 人）', 'success');
 }
 function refreshM0PerfSingle() {
   const year = document.getElementById('m0PerfYear') ? document.getElementById('m0PerfYear').value : m0PerfYear;
@@ -13507,6 +13660,7 @@ function renderMgrPerf() {
           ${isMatrix ? `
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="mgrPerfMFrom" onchange="mgrPerfMonthFrom=parseInt(this.value,10);mgrPerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mgrPerfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select></div>
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="mgrPerfMTo" onchange="mgrPerfMonthTo=parseInt(this.value,10);mgrPerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mgrPerfMonthTo?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <button class="btn btn-success btn-sm" onclick="exportMgrPerfMatrixXlsx()">📥 导出矩阵Excel</button>
           ` : `
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="mgrPerfMonth" onchange="mgrPerfSingleMonth=parseInt(this.value,10);mgrPerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mgrPerfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
           <button class="btn btn-outline btn-sm" onclick="refreshMgrPerfSingle()">刷新计算</button>
@@ -13568,6 +13722,41 @@ function refreshMgrPerfMatrix() {
   h += '</tbody>';
   const tbl = document.getElementById('mgrPerfTable');
   if (tbl) tbl.innerHTML = h;
+}
+
+// 管理绩效看板矩阵 → 导出 Excel（跟随 管理者多选/团队/排序/起始月-结束月 筛选）
+function exportMgrPerfMatrixXlsx() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载，请刷新页面后重试', 'error'); return; }
+  const year = document.getElementById('mgrPerfYear') ? document.getElementById('mgrPerfYear').value : mgrPerfYear;
+  const mgrList = mgrSpActiveList();
+  const months = [];
+  for (let m = mgrPerfMonthFrom; m <= mgrPerfMonthTo; m++) months.push(m);
+  const cfg = getMgrPerfConfig();
+  const lastM = months.length ? months[months.length - 1] : mgrPerfMonthTo;
+  let rows = mgrList.filter(mgrPerfFilterSp).map(mgr => {
+    const rec = getMgrPerfRecord(year, mgr, lastM);
+    return { mgr, team: getSalesTeam(mgr) || '', lastScore: getFinalScore(rec, cfg, year, mgr, lastM) };
+  });
+  if (mgrPerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.mgr.localeCompare(b.mgr, 'zh'));
+  else if (mgrPerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.mgr.localeCompare(b.mgr, 'zh'));
+  else rows.sort((a, b) => a.mgr.localeCompare(b.mgr, 'zh'));
+  if (!rows.length) { showToast('当前无可导出的管理绩效矩阵数据', 'warning'); return; }
+  const header = ['管理者', '团队'].concat(months.map(m => m + '月(评分)'));
+  const aoa = [header];
+  rows.forEach(row => {
+    const line = [row.mgr, row.team || '-'];
+    months.forEach(m => {
+      const rec = getMgrPerfRecord(year, row.mgr, m);
+      const score = getFinalScore(rec, cfg, year, row.mgr, m);
+      line.push(score.toFixed(2));
+    });
+    aoa.push(line);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '管理绩效看板矩阵');
+  XLSX.writeFile(wb, `管理绩效看板矩阵_${year}年${mgrPerfMonthFrom}-${mgrPerfMonthTo}月.xlsx`);
+  showToast('已导出管理绩效看板矩阵（' + rows.length + ' 人）', 'success');
 }
 function refreshMgrPerfSingle() {
   const year = document.getElementById('mgrPerfYear') ? document.getElementById('mgrPerfYear').value : mgrPerfYear;
