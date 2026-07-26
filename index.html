@@ -6719,7 +6719,7 @@ function renderVisitTable() {
           <td><select class="form-control form-control-sm" onchange="onVisitEdit('${r.id}','signinEvent',this.value)" title="点击修改签到事件（选项来自表单配置-签到事件配置）"><option value="">未设置</option>${signinOpts}</select></td>
           <td>${r.employee || ''}</td>
           <td>${r.department || ''}</td>
-          <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.signinAddress || '').replace(/"/g,'&quot;')}">${r.signinAddress || ''}</td>
+          <td style="max-width:300px;white-space:normal;word-break:break-word;line-height:1.45;vertical-align:top" title="${(r.signinAddress || '').replace(/"/g,'&quot;')}">${r.signinAddress || ''}</td>
           <td class="remark-cell ${r.remark ? '' : 'empty'}" ${r.remark ? `onclick="showVisitRemarkModal('${r.id}')"` : ''}>${(r.remark || '').substring(0,50).replace(/\n/g,' ')}${(r.remark||'').length>50?'...':''}</td>
           <td style="border-left:4px solid ${vrColor || 'transparent'};background:${vrBg}">
             <select class="form-control form-control-sm" style="border-color:${vrColor};font-weight:${vr?'600':'400'};color:${vrColor || 'inherit'}" onchange="onVisitEdit('${r.id}','visitResult',this.value)">
