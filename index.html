@@ -307,9 +307,20 @@ tr:hover td{background:var(--gray-50)}
 
   /* Filter bar stacks vertically */
   .filter-bar{flex-direction:column;gap:8px;align-items:stretch}
-  .filter-bar .form-group{min-width:100%}
+  /* !important 覆盖各 form-group 内联的 min-width（如拜访数据"快捷筛选" min-width:440px、业绩明细"客户" min-width:160px），避免移动端横向溢出 */
+  .filter-bar .form-group{min-width:100%!important;width:100%!important}
   .filter-bar .form-group label{font-size:12px}
   .filter-bar .btn{width:100%;justify-content:center}
+
+  /* 业绩明细：年份汇总块在移动端纵向堆叠（年标签 / 统计卡 / 部门业绩） */
+  .year-summary-row{flex-direction:column;gap:10px}
+  .year-stats{display:flex;flex-wrap:wrap;gap:8px;width:100%!important}
+  .year-teams{width:100%!important}
+  .year-stats .stat-box{flex:1 1 30%}
+  /* 人员多选浮层：窄屏不超出视口右侧 */
+  [id$="PersonPanel"]{max-width:calc(100vw - 24px)}
+  /* 快捷筛选 chips 容器占满宽度，自动换行 */
+  .visit-quick-chips{width:100%}
 
   /* Channel form grid: 2 columns for number fields, full width for textarea/computed */
   .channel-form-grid{grid-template-columns:repeat(2,1fr);gap:10px 12px}
@@ -319,7 +330,7 @@ tr:hover td{background:var(--gray-50)}
   .channel-form-grid .computed-field{font-size:14px!important;padding:9px 12px;white-space:normal}
 
   /* Sticky bar: full width on mobile (sidebar is hidden) */
-  .sticky-submit-bar{left:0}
+  .sticky-submit-bar{left:0;flex-wrap:wrap}
   .sticky-submit-bar .btn{max-width:none;flex:1}
 
   /* Channel chips horizontal scroll */
