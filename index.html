@@ -73,20 +73,20 @@ th{background:var(--gray-50);padding:11px 14px;text-align:left;font-weight:600;c
 td{padding:10px 14px;border-bottom:1px solid var(--gray-100);color:var(--gray-700)}
 tr:hover td{background:var(--gray-50)}
 .table-wrap{overflow-x:auto}
-/* 绩效看板：相邻 sticky 冻结列在 border-collapse:collapse 下会出现亚像素缝隙，改用 separate+0 间距消除（本表仅 border-bottom 无竖边，视觉不变） */
-#perfTable{border-collapse:separate;border-spacing:0}
-/* 冻结列底部空隙+漏底修复：
-   sticky 单元格在表格布局中不再按行高自动撑高（行高由同行多行内容单元格决定），
-   导致冻结列只显示自己内容高度，底部露出整行底色造成视觉断层+空隙。
-   强制 height:100% + box-sizing:border-box 让冻结列填满行高覆盖到行底边线。
-   兼容写法：用属性选择器同时覆盖 .perf-freeze 类和其他行内 style 写的 sticky 单元格。 */
+/* 冻结列底部空隙+漏底修复（销售/M0/管理单月绩效看板 + M0 升降级看板）：
+   这些表行内有两行内容单元格（描述输入框 + 要求输入框），行高由它们撑高；
+   而带 position:sticky 的冻结列在 border-collapse:collapse 下 Chrome 不会自动撑满行高，
+   导致冻结列只显示自身 1 行内容高度，底部露出整行底色 → 空隙+漏底。
+   根因修复：给这些表加 class="sticky-cols"，改用 border-collapse:separate;border-spacing:0，
+   让 sticky 单元格正常撑满整行高度（本表仅 border-bottom 无竖边，视觉不变）。
+   height:100% 兜底 + box-sizing 让个别浏览器更稳；hover 时 !important 覆盖内联 #fff 让冻结列随行变灰。 */
+.sticky-cols{border-collapse:separate;border-spacing:0}
 [style*="position:sticky"][style*="left"],
 .perf-freeze{
   height:100%;
   box-sizing:border-box;
   vertical-align:middle;
 }
-/* 冻结列背景需与同行非冻结列同步 hover：内联 background:#fff 优先级高于普通规则，用 !important 覆盖 */
 tr:hover > [style*="position:sticky"][style*="left"],
 tr:hover > .perf-freeze{
   background:var(--gray-50) !important;
@@ -7982,7 +7982,7 @@ function renderM0VisitStats() {
     periods.forEach(p => trow += `<td style="text-align:center;font-weight:700;color:#16a34a">${colTotals[p.key] || 0}</td>`);
     trow += `<td style="text-align:center;font-weight:800;background:#FFF8EE;color:#dc2626">${grand}</td>`;
     body += `<tr>${trow}</tr>`;
-    matrixHtml = `<div class="table-wrap"><table class="table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    matrixHtml = `<div class="table-wrap"><table class="table sticky-cols"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   } else {
     matrixHtml = '<div class="empty-state"><div class="icon">📭</div>所选范围内暂无「' + esc(channel) + '」陪访数据</div>';
   }
@@ -12761,7 +12761,7 @@ function renderSalesPerf() {
         </div>
         <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：矩阵展示每位在职销售每月的销售职级（联动销售评级看板）与绩效评分，评分按区间着色（<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>）。' : '说明：单月绩效看板中，演示考核项的「完成情况」默认自动取自拜访数据「自拓演示」归类汇总（显示「自动」，手动修改后点 ↺ 可重置回自动值）；每行描述文字、考核要求、完成情况、加分次数、在职天数、总评均可单独编辑保存；【绩效评分】可手动修改（点 ↺ 重置为公式自动值）；绩效评分（含各项封顶/总分封顶规则）与绩效基数由公式实时计算。「最终保存」可生成冻结快照，不受后续表单配置修改影响。'}</div>
         ${!isMatrix && perfViewSnapshot ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">📌 当前查看「最终保存」冻结快照${snapInfo}${snapExists ? '，不受表单配置修改影响；编辑已停用。' : '，但本月暂无快照数据，已回退为实时计算。'}点击「📷 返回实时」回到实时计算。</div>` : ''}
-        <div class="table-wrap"><table id="perfTable"></table></div>
+        <div class="table-wrap"><table id="perfTable" class="sticky-cols"></table></div>
         `}
       </div>
     </div>`;
@@ -13240,7 +13240,7 @@ function renderM0Perf(mount) {
         <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：M0 绩效看板矩阵展示每位 M0 人员每月的 M0 职级（联动 M0 评级看板）与绩效评分，评分按区间着色（<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>）。' : '说明：M0 单月绩效看板参考「销售单月绩效看板」，考核项均为<b>手动录入</b>（不自动带入自拓演示）。每行描述文字、考核要求、完成情况、加分次数、在职天数、总评均可单独编辑保存；【绩效评分】可手动修改（点 ↺ 重置为公式自动值）；绩效基数、奖金由公式实时计算。「最终保存」可生成冻结快照，不受后续表单配置修改影响。'}</div>
         ${!isMatrix && m0PerfViewSnapshot ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">📌 当前查看「最终保存」冻结快照${m0SnapInfo}${m0SnapExists ? '，不受表单配置修改影响；编辑已停用。' : '，但本月暂无快照数据，已回退为实时计算。'}点击「📷 返回实时」回到实时计算。</div>` : ''}
         ${!m0SpActiveList().length ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">⚠️ 尚未在「销售评级看板 → M0 计算范围」中配置任何 M0 分组，M0 绩效看板无数据可显示。</div>` : ''}
-        <div class="table-wrap"><table id="m0PerfTable"></table></div>`;
+        <div class="table-wrap"><table id="m0PerfTable" class="sticky-cols"></table></div>`;
   if (document.getElementById('m0PerfYear')) document.getElementById('m0PerfYear').value = m0PerfYear;
   m0PerfRefresh();
 }
@@ -13818,7 +13818,7 @@ function renderMgrPerf() {
         <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明：管理绩效矩阵展示每位管理者每月的绩效评分（管理者无职级之分），评分按区间着色（<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>）。' : '说明：管理单月绩效看板参考「销售单月绩效看板」，考核项均为<b>手动录入</b>（不自动带入自拓演示）。每行描述文字、考核要求、完成情况、加分次数、在职天数、总评均可单独编辑保存；【绩效评分】可手动修改（点 ↺ 重置为公式自动值）；绩效基数默认 5000（可在「表单配置 → 管理绩效配置」修改）、奖金由公式实时计算。「最终保存」可生成冻结快照，不受后续表单配置修改影响。'}</div>
         ${!isMatrix && mgrPerfViewSnapshot ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">📌 当前查看「最终保存」冻结快照${snapInfo}${snapExists ? '，不受表单配置修改影响；编辑已停用。' : '，但本月暂无快照数据，已回退为实时计算。'}点击「📷 返回实时」回到实时计算。</div>` : ''}
         ${!mgrSpActiveList().length ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">⚠️ 当前系统中暂无「管理者（manager）」角色且在职的用户，管理绩效看板无数据可显示。请在「用户管理」中将相关人员设置为管理者角色。</div>` : ''}
-        <div class="table-wrap"><table id="mgrPerfTable"></table></div>
+        <div class="table-wrap"><table id="mgrPerfTable" class="sticky-cols"></table></div>
       </div>
     </div>`;
   if (document.getElementById('mgrPerfYear')) document.getElementById('mgrPerfYear').value = mgrPerfYear;
