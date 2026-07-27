@@ -598,7 +598,6 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 <div id="modalContainer"></div>
 <div class="toast-container" id="toastContainer"></div>
 
-<script defer src="xlsx.full.min.js"></script>
 <script>
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
@@ -1174,6 +1173,29 @@ function doLogout() {
   document.getElementById('appLayout').classList.add('hidden');
 }
 
+// 表格组件(XLSX/SheetJS)按需加载：登录页零成本，进入应用后的加载中转圈阶段才拉取。
+// 优先本地 bundled 文件(离线可用)，失败回退 CDN；幂等(同一 Promise，重复调用不重复注入)。
+let _xlsxLoadingPromise = null;
+function ensureXLSX() {
+  if (typeof XLSX !== 'undefined') return Promise.resolve();
+  if (_xlsxLoadingPromise) return _xlsxLoadingPromise;
+  _xlsxLoadingPromise = new Promise((resolve, reject) => {
+    const inject = (src, ok, fail) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = ok;
+      s.onerror = fail;
+      document.head.appendChild(s);
+    };
+    inject('xlsx.full.min.js',
+      () => resolve(),
+      () => inject('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+        () => resolve(),
+        () => reject(new Error('XLSX load failed'))));
+  });
+  return _xlsxLoadingPromise;
+}
+
 async function showApp() {
   // Wait for config data (formConfig, brandConfig, etc.) to finish loading
   if (_coreDataPromise) { try { await _coreDataPromise; } catch(e){} }
@@ -1190,6 +1212,7 @@ async function showApp() {
     }
     if (formBox) formBox.style.display = 'none';
     await loadReportData();
+    try { await ensureXLSX(); } catch(e) { console.warn('表格组件加载失败:', e && e.message); }
     finishLoadingCountdown();
     if (loadingEl) loadingEl.style.display = 'none';
     if (formBox) formBox.style.display = '';
@@ -14144,6 +14167,7 @@ function applyMgrPerfBatchStandard() {
         }
         if (formBox) formBox.style.display = 'none';
         await loadReportData();
+        try { await ensureXLSX(); } catch(e) { console.warn('表格组件加载失败:', e && e.message); }
         if (loadingEl) loadingEl.style.display = 'none';
         if (formBox) formBox.style.display = '';
       }
