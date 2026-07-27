@@ -598,7 +598,7 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 <div id="modalContainer"></div>
 <div class="toast-container" id="toastContainer"></div>
 
-<script src="xlsx.full.min.js"></script>
+<script defer src="xlsx.full.min.js"></script>
 <script>
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
@@ -642,7 +642,71 @@ async function loadUsersOnly() {
 }
 
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) — background, non-blocking
+// ---------- 核心配置本地缓存：加速复访（stale-while-revalidate，类报表缓存） ----------
+const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_v1';
+function saveCoreConfigCache() {
+  try {
+    const payload = { t: Date.now(), v: 1,
+      formConfig: cloudData.formConfig, brandConfig: cloudData.brandConfig,
+      departments: cloudData.departments, aiConfig: cloudData.aiConfig,
+      roleConfig: cloudData.roleConfig, visitConfig: cloudData.visitConfig,
+      honorRecords: cloudData.honorRecords };
+    const s = JSON.stringify(payload);
+    if (s.length > 2 * 1024 * 1024) return; // 过大不缓存，避免撑爆 localStorage
+    localStorage.setItem(CORE_CONFIG_CACHE_KEY, s);
+  } catch(e) {}
+}
+function loadCoreConfigCache() {
+  try {
+    const raw = localStorage.getItem(CORE_CONFIG_CACHE_KEY);
+    if (!raw) return false;
+    const p = JSON.parse(raw);
+    if (!p || p.v !== 1 || typeof p.t !== 'number') return false;
+    cloudData.formConfig = p.formConfig || cloudData.formConfig;
+    cloudData.brandConfig = p.brandConfig || cloudData.brandConfig;
+    cloudData.departments = p.departments || cloudData.departments;
+    cloudData.aiConfig = p.aiConfig || cloudData.aiConfig;
+    cloudData.roleConfig = p.roleConfig || cloudData.roleConfig;
+    cloudData.visitConfig = p.visitConfig || cloudData.visitConfig;
+    cloudData.honorRecords = p.honorRecords || cloudData.honorRecords;
+    return true;
+  } catch(e) { return false; }
+}
+function reapplyCoreConfigMigrations() {
+  const fc = cloudData.formConfig;
+  if (!fc) return;
+  if (!fc.signinCategories || !fc.signinCategories.length) fc.signinCategories = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.signinCategories));
+  if (!fc.signinEvents || !fc.signinEvents.length) fc.signinEvents = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.signinEvents));
+  if (!fc.customerTags || typeof fc.customerTags !== 'object') fc.customerTags = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.customerTags));
+  else { ['customerSource','category','customerProfile'].forEach(k => { if (!Array.isArray(fc.customerTags[k])) fc.customerTags[k] = []; }); if (!fc.customerTags.customerSourceGroups || typeof fc.customerTags.customerSourceGroups !== 'object') fc.customerTags.customerSourceGroups = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.customerTags.customerSourceGroups)); }
+  if (typeof fc.customerSummaryNote !== 'string') fc.customerSummaryNote = '';
+  if (!fc.teamTargets || typeof fc.teamTargets !== 'object') fc.teamTargets = {};
+  if (!fc.performanceConfig || typeof fc.performanceConfig !== 'object') fc.performanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.performanceConfig));
+  fc.performanceConfig = normalizePerfConfig(fc.performanceConfig);
+  if (!fc.performanceBase || typeof fc.performanceBase !== 'object') fc.performanceBase = {};
+  if (!fc.m0GradeConfig || !Array.isArray(fc.m0GradeConfig)) fc.m0GradeConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0GradeConfig));
+  if (!fc.m0PerformanceConfig || typeof fc.m0PerformanceConfig !== 'object') fc.m0PerformanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.m0PerformanceConfig));
+  fc.m0PerformanceConfig = normalizePerfConfig(fc.m0PerformanceConfig);
+  if (!fc.mgrPerformanceConfig || typeof fc.mgrPerformanceConfig !== 'object') fc.mgrPerformanceConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG.mgrPerformanceConfig));
+  fc.mgrPerformanceConfig = normalizePerfConfig(fc.mgrPerformanceConfig);
+  migrateMgrPerfConfig();
+  migrateM0PerfConfig();
+  if (fc.mgrPerformanceBase === undefined || fc.mgrPerformanceBase === null) fc.mgrPerformanceBase = DEFAULT_FORM_CONFIG.mgrPerformanceBase;
+  if (!fc.m0Config || !Array.isArray(fc.m0Config.groups)) fc.m0Config = { groups: [] };
+}
+// 核心配置加载：命中本地缓存则先秒开 UI（后台静默刷新）；否则拉取最新
 async function loadCoreData() {
+  try {
+    if (loadCoreConfigCache()) {
+      reapplyCoreConfigMigrations(); // 重新套用归一化，兼容后续代码迁移
+      isCloudAvailable = true;
+      loadCoreDataFresh().catch(e => console.warn('core config background refresh failed:', e && e.message));
+      return;
+    }
+  } catch(e) {}
+  await loadCoreDataFresh();
+}
+async function loadCoreDataFresh() {
   try {
     const [fRes, bRes, dRes, aRes, rRes, vRes, hRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
@@ -787,6 +851,7 @@ async function loadCoreData() {
     const hrData = hRes.ok ? await hRes.json() : null;
     cloudData.honorRecords = hrData || {};
     normalizeHonorRecords();
+    saveCoreConfigCache(); // 缓存本次拉取到的（已迁移）核心配置，加速复访
     isCloudAvailable = true;
   } catch(e) {
     console.warn('Core config fetch failed:', e.message);
