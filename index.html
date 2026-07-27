@@ -796,15 +796,14 @@ async function loadCoreDataFresh() {
     if (!rcData) {
       try { await fetch(FB_BASE + '/roleConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.roleConfig)}); } catch(e) {}
     }
-    // Migration: restrict visit permissions to management roles only (admin, manager)
+    // Migration: 对 roleConfig 做字段补全（不强制剥夺任何权限），仅保证新权限键存在、超级管理员恒为全开
     if (cloudData.roleConfig && cloudData.roleConfig.roles) {
       let roleChanged = false;
       cloudData.roleConfig.roles.forEach(role => {
-        if (role.key !== 'admin' && role.key !== 'manager') {
-          if (role.permissions && role.permissions.visitData === true) { role.permissions.visitData = false; roleChanged = true; }
-          if (role.permissions && role.permissions.visitStats === true) { role.permissions.visitStats = false; roleChanged = true; }
-          if (role.permissions && role.permissions.mgrReport === true) { role.permissions.mgrReport = false; roleChanged = true; }
-        }
+        // 注：早期版本曾在此强制把非管理角色的 visitData/visitStats/mgrReport 置为 false，
+        // 导致在角色权限页手动授予成员的拜访类权限在下次加载时被回滚覆盖写回 Firebase。现已移除该强制限制，
+        // 成员是否拥有拜访类权限完全由 roleConfig 持久化配置决定；loadRoleScopedData 的 needVisit 门控
+        // 保证「无权限成员」仍不加载 visitRecords，不影响登录加载速度。
         // Ensure mgrReport exists on all roles
         if (role.permissions && role.permissions.mgrReport === undefined) {
           role.permissions.mgrReport = (role.key === 'admin' || role.key === 'manager');
@@ -3643,6 +3642,7 @@ async function saveRoleConfig() {
       body: JSON.stringify(cloudData.roleConfig)
     });
     showToast('角色权限配置已保存！', 'success');
+    saveCoreConfigCache(); // 同步刷新本地缓存，避免下次加载先命中旧缓存短暂显示未授权态
     // Update nav visibility for current user
     updateNavVisibility();
   } catch(e) {
