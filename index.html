@@ -8091,11 +8091,14 @@ async function renderVisitStats() {
     </div>
     <div class="card" style="margin-bottom:20px"><div class="card-body">
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap" id="visitDateBtns">
+        <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('today', this)">今天</button>
         <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('yesterday', this)">昨天</button>
         <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('thisWeek', this)">本周</button>
         <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('lastWeek', this)">上周</button>
         <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('thisMonth', this)">本月</button>
-        <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('thisYear', this)">本年</button>
+        <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('lastMonth', this)">上月</button>
+        <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('thisYear', this)">今年</button>
+        <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('lastYear', this)">去年</button>
         <button class="btn btn-sm btn-outline active" onclick="setVisitDateRange('custom', this)">自定义</button>
       </div>
       <div class="filter-bar">
@@ -8120,7 +8123,9 @@ function setVisitDateRange(type, btn) {
   const now = new Date();
   let start, end;
   const todayStr = localYMD(now);
-  if (type === 'yesterday') {
+  if (type === 'today') {
+    start = end = todayStr;
+  } else if (type === 'yesterday') {
     const y = new Date(now); y.setDate(y.getDate() - 1);
     start = end = localYMD(y);
   } else if (type === 'thisWeek') {
@@ -8134,8 +8139,16 @@ function setVisitDateRange(type, btn) {
     start = localYMD(monday); end = localYMD(sunday);
   } else if (type === 'thisMonth') {
     start = localYMD(new Date(now.getFullYear(), now.getMonth(), 1)); end = todayStr;
+  } else if (type === 'lastMonth') {
+    const y = now.getFullYear(), m = now.getMonth();
+    start = localYMD(new Date(y, m - 1, 1));
+    end = localYMD(new Date(y, m, 0));
   } else if (type === 'thisYear') {
     start = localYMD(new Date(now.getFullYear(), 0, 1)); end = todayStr;
+  } else if (type === 'lastYear') {
+    const y = now.getFullYear();
+    start = localYMD(new Date(y - 1, 0, 1));
+    end = localYMD(new Date(y - 1, 11, 31));
   }
   if (start) document.getElementById('visitStatsStart').value = start;
   if (end) document.getElementById('visitStatsEnd').value = end;
