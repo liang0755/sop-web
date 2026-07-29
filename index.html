@@ -8837,11 +8837,41 @@ async function importSalesFile(file) {
     const get = (r, name) => (r[name] == null ? '' : r[name]);
     // 查重 key = 商品名称(A列) + '|' + 单据编号(W列)；仅当「商品名称」与「单据编号」两者都相同才判定为重复并过滤（避免同一单据多商品行被误删）
     const _dupKey = e => ((e.productName || '') + '|' + (e.docNo || '')).trim();
-    const existingKeys = new Set(cloudData.salesRecords.map(_dupKey).filter(Boolean));
-    const batchKeys = new Set();
-    let total = rows.length, kept = 0, filtered = 0, dup = 0;
+    // 现有记录按查重 key 建索引：命中已有记录时改为「覆盖更新」而非跳过
+    const existingById = new Map();
+    cloudData.salesRecords.forEach(r => { const k = _dupKey(r); if (k) existingById.set(k, r); });
+    let total = rows.length, filtered = 0, added = 0, updated = 0, batchMerged = 0;
     const corrected = { 'KA 一部（江浙沪区域）': 0, 'KA 二部（广东区域）': 0, 'KA 三部（全国区域）': 0 };
     const toAdd = [];
+    const toUpdate = []; // {id, rec}
+    const processing = new Map(); // 本批按 key 跟踪（同文件内重复行合并到同一条）
+    // 覆盖合并：src 为导入行原始字段；空白单元格(导入值为空)不覆盖目标原值
+    function applySalesCover(target, src) {
+      const out = Object.assign({}, target);
+      const cov = (f) => { const v = src[f]; if (v != null && String(v).trim() !== '') out[f] = String(v).trim(); };
+      cov('salesperson');
+      cov('docType');
+      cov('status');
+      cov('customer');
+      cov('productName');
+      cov('docNo');
+      // 门店/团队：导入行门店有效才覆盖
+      if (src.storeRaw) { out.storeRaw = src.storeRaw; out.team = src.team; }
+      // 单据日期：空白不覆盖；有值则同步 docMonth
+      if (src.docDate != null && String(src.docDate).trim() !== '') {
+        out.docDate = String(src.docDate).trim();
+        out.docMonth = salesMonthOf(out.docDate);
+      }
+      // 金额/毛利润：原单元格为空才不覆盖；填写了任何值(含 0)即覆盖
+      if (src.amountRaw !== '') out.amount = toNum(src.amountRaw);
+      if (src.grossRaw !== '') out.grossProfit = toNum(src.grossRaw);
+      // 以下字段由用户在「客户汇总数据」手动配置，导入留空则不覆盖原值
+      cov('customerSource');
+      cov('category');
+      cov('customerProfile');
+      out.raw = src.raw || target.raw;
+      return out;
+    }
     for (const r of rows) {
       const storeRaw = String(get(r, '销售员所属门店') || '').trim();
       if (!storeRaw.startsWith('KA-')) { filtered++; continue; }
@@ -8850,48 +8880,82 @@ async function importSalesFile(file) {
       const docNo = String(get(r, '单据编号') || '').trim();
       const productName = String(get(r, '商品名称') || '').trim();
       const key = productName + '|' + docNo;
-      if (existingKeys.has(key) || batchKeys.has(key)) { dup++; continue; }
-      batchKeys.add(key);
-      const docDate = String(get(r, '单据日期') || '');
-      const rec = {
-        id: genId(),
+      // 导入行源字段（保留原始空白信息，用于「空白不覆盖」判断）
+      const src = {
         salesperson: String(get(r, '销售员') || '').trim(),
-        storeRaw: storeRaw,
-        team: team,
-        docDate: docDate,
-        docMonth: salesMonthOf(docDate),
-        amount: toNum(get(r, '折后金额')),
-        grossProfit: toNum(get(r, '毛利润')),
-        productName: String(get(r, '商品名称') || '').trim(),
-        docNo: docNo,
+        storeRaw: storeRaw, team: team,
+        docDate: get(r, '单据日期'),
+        amountRaw: String(get(r, '折后金额') || '').trim(),
+        grossRaw: String(get(r, '毛利润') || '').trim(),
+        productName: productName, docNo: docNo,
         docType: String(get(r, '单据类别') || '').trim(),
         status: String(get(r, '状态') || '').trim(),
         customer: String(get(r, '客户') || '').trim(),
-        // 客户来源/品类/客户画像：不允许自动填充，留空由用户在「客户汇总数据」手动选择配置项
-        customerSource: '',
-        category: '',
-        customerProfile: '',
-        raw: r,
-        createdAt: new Date().toISOString()
+        customerSource: String(get(r, '客户来源') || '').trim(),
+        category: String(get(r, '品类') || '').trim(),
+        customerProfile: String(get(r, '客户画像') || '').trim(),
+        raw: r
       };
-      toAdd.push(rec);
-      kept++;
+      if (processing.has(key)) {
+        // 同一文件内重复行：合并覆盖到已处理的同一条记录
+        const e = processing.get(key);
+        e.rec = applySalesCover(e.rec, src);
+        batchMerged++;
+        continue;
+      }
+      if (existingById.has(key)) {
+        // 命中已有记录：查重验证通过 → 直接覆盖更新（空白不覆盖）
+        const existing = existingById.get(key);
+        const merged = applySalesCover(existing, src);
+        processing.set(key, { rec: merged });
+        toUpdate.push({ id: existing.id, rec: merged });
+        updated++;
+        continue;
+      }
+      // 全新记录
+      const docDate = String(get(r, '单据日期') || '');
+      const newRec = {
+        id: genId(),
+        salesperson: src.salesperson,
+        storeRaw: storeRaw, team: team,
+        docDate: docDate, docMonth: salesMonthOf(docDate),
+        amount: toNum(src.amountRaw), grossProfit: toNum(src.grossRaw),
+        productName: productName, docNo: docNo,
+        docType: src.docType, status: src.status, customer: src.customer,
+        // 客户来源/品类/客户画像：不允许自动填充，留空由用户在「客户汇总数据」手动选择配置项
+        customerSource: '', category: '', customerProfile: '',
+        raw: r, createdAt: new Date().toISOString()
+      };
+      processing.set(key, { rec: newRec });
+      toAdd.push(newRec);
+      added++;
     }
     if (toAdd.length) {
       for (let i = 0; i < toAdd.length; i++) {
         await apiCreate('salesRecords', toAdd[i]);
-        updateImportOverlay('正在写入业绩数据…', `第 ${i + 1} / ${toAdd.length} 条`);
+        updateImportOverlay('正在写入业绩数据…', `新增 第 ${i + 1} / ${toAdd.length} 条`);
       }
       cloudData.salesRecords = cloudData.salesRecords.concat(toAdd);
-      saveReportsCache();
     }
+    if (toUpdate.length) {
+      for (let i = 0; i < toUpdate.length; i++) {
+        await apiUpdate('salesRecords', toUpdate[i].id, toUpdate[i].rec);
+        updateImportOverlay('正在更新业绩数据…', `覆盖更新 第 ${i + 1} / ${toUpdate.length} 条`);
+      }
+      toUpdate.forEach(({ id, rec }) => {
+        const idx = cloudData.salesRecords.findIndex(x => x.id === id);
+        if (idx >= 0) cloudData.salesRecords[idx] = Object.assign({}, cloudData.salesRecords[idx], rec);
+      });
+    }
+    saveReportsCache();
     hideImportOverlay();
     salesDetailPage = 1;
     showModal('导入完成', `<div class="import-note">
       <div>📄 文件共 <b>${total}</b> 行</div>
       <div>🔽 过滤非 KA 部门整行：<span class="no">${filtered}</span> 行</div>
-      <div>✅ 保留 KA 部门：<span class="ok">${kept}</span> 行</div>
-      <div>⚠️ 跳过重复：<span class="no">${dup}</span> 行</div>
+      <div>➕ 新增：<span class="ok">${added}</span> 行</div>
+      <div>♻️ 查重覆盖更新：<span class="ok">${updated}</span> 行</div>
+      <div>🔁 同文件重复行合并：<span class="no">${batchMerged}</span> 行</div>
       <div>🔄 门店校正：一部 ×${corrected['KA 一部（江浙沪区域）'] || 0} / 二部 ×${corrected['KA 二部（广东区域）'] || 0} / 三部 ×${corrected['KA 三部（全国区域）'] || 0}</div>
     </div><div class="modal-footer"><button class="btn btn-primary" onclick="closeModal()">确定</button></div>`);
     renderSalesDetail();
@@ -9108,7 +9172,7 @@ async function renderSalesDetail() {
       <div class="import-note">
         <div>📄 导入说明：系统仅保留 <b>KA 部门</b> 数据。导入时校验表头「销售员所属门店」，自动过滤非 KA 整行，并按规则校正门店名称。</div>
         <div>🔄 门店校正：KA-KA华东大区→<b>KA 一部（江浙沪区域）</b>；KA-KA全国大区→<b>KA 三部（全国区域）</b>；KA-KA华南大区→<b>KA 二部（广东区域）</b>。</div>
-        <div>⚠️ 查重规则：仅当「商品名称」与「单据编号」两者都相同才判定为重复并跳过（同一单据的多个商品行不会被误过滤）。</div>
+        <div>⚠️ 查重规则：仅当「商品名称」与「单据编号」两者都相同才判定为重复，将<b>直接覆盖更新</b>已有记录（同一单据多个商品行互不干扰）；覆盖时<b>空白单元格不会清空原值</b>，仅导入有内容的字段生效。</div>
       </div>
       <input type="file" id="salesFilePick" accept=".xlsx,.xls,.csv" style="display:none" onchange="onSalesFilePicked(event)">
     </div>
