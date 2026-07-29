@@ -4693,15 +4693,16 @@ function buildAIContext() {
   const teamPerformanceSummary = {};
   Object.keys(teamTargets).forEach(year => {
     Object.keys(teamTargets[year] || {}).forEach(tm => {
-      if (!teamPerformanceSummary[tm]) teamPerformanceSummary[tm] = { byMonth: {} };
+      if (!teamPerformanceSummary[tm]) teamPerformanceSummary[tm] = { byYear: {} };
+      if (!teamPerformanceSummary[tm].byYear[year]) teamPerformanceSummary[tm].byYear[year] = { byMonth: {} };
       Object.keys(teamTargets[year][tm] || {}).forEach(mo => {
         const target = toNum(teamTargets[year][tm][mo]);
         const perf = (teamPerfByTM[tm] && teamPerfByTM[tm][year + '-' + mo]) || { amount: 0, grossProfit: 0, count: 0 };
         const amt = Math.round(toNum(perf.amount) * 100) / 100;
         const hc = toNum((teamHeadcount[year] && teamHeadcount[year][tm] && teamHeadcount[year][tm][mo]) || 0);
-        teamPerformanceSummary[tm].byMonth[mo] = {
-          target: target,
-          amount: amt,
+        teamPerformanceSummary[tm].byYear[year].byMonth[mo] = {
+          target: target,                                          // 月目标金额（来自 teamTargets，管理设定）
+          amount: amt,                                             // 实际完成业绩金额（来自 salesRecords 同团队同月汇总）
           grossProfit: Math.round(toNum(perf.grossProfit) * 100) / 100,
           completionRate: target > 0 ? Math.round(amt / target * 1000) / 10 : null,
           headcount: hc,
@@ -4843,7 +4844,7 @@ function buildAISystemMessage() {
     + '- 当用户的问题涉及「拜访 / 客户拜访 / 签到 / 卡点 / 拜访结果 / 客户跟进 / 谁去了哪些客户 / 各签到事件分布 / 拜访转化」等拜访类话题时，必须使用 visitRecords 与 visitSummary 进行分析，绝不要用日报/周报数据来回答拜访类问题。\n'
     + '- 日报/周报数据(dailyReports/weeklyReports)只用于业绩指标分析（新增线索、建联、AB意向、成交、金额、完成率等），不要把它当作拜访数据。\n'
     + '- visitSummary 已按拜访结果、签到事件、员工、部门、月份做了汇总统计，做整体分析时优先引用 visitSummary，需要逐条明细时再查 visitRecords。\n'
-    + '- 当用户的问题涉及「业绩 / 销售 / 销售额 / 折后金额 / 团队业绩 / 销售员业绩 / 毛利润 / 各月销售趋势 / KA 各团队业绩对比」等业绩类话题时，必须使用 salesRecords 与 salesSummary 进行分析，绝不要用日报/周报数据（那是建联/线索口径，不是销售成交口径）来回答业绩类问题。\n'
+    + '- 当用户的问题涉及「业绩 / 销售 / 销售额 / 折后金额 / 完成业绩 / 团队业绩（完成金额）/ 销售员业绩 / 毛利润 / 各月销售趋势 / KA 各团队业绩对比」等业绩类话题时，必须使用 salesRecords 与 salesSummary 分析「完成业绩（实际成交金额）」，绝不要用日报/周报数据（那是建联/线索口径，不是销售成交口径）来回答；若还需对比"目标"，必须再结合 teamPerformanceSummary 的 target 字段，切勿把 salesSummary 的 amount 当作目标。\n'
     + '- salesSummary 已按销售员、团队、月份、单据类别做了汇总统计（含金额合计与笔数），做整体分析时优先引用 salesSummary，需要逐条明细时再查 salesRecords；金额单位为元，退货单通常为负值，净额业绩 = 销售单金额 − 退货单金额。\n\n'
     + '数据字段说明：\n'
     + '- newLeads(新增精准线索数): 数量\n'
@@ -4885,7 +4886,7 @@ function buildAISystemMessage() {
     + '【数据来源路由补充】\n'
     + '- 当用户的问题涉及「管理周报 / 周工作总结 / 部门周报 / 管理视角的拜访汇总 / 某部门某周的拜访情况」时，必须使用 mgrReports 与 visitSnapshot 回答。\n'
     + '- 当用户的问题涉及「客户来源 / 客户画像 / 品类 / 各类客户业绩分布」时，优先引用 customerSummary（基于销售记录的客户标签聚合）。\n'
-    + '- 当用户的问题涉及「团队目标 / 团队月目标 / 目标完成率 / 团队业绩 / 团队人效（人均产能）/ 团队人数」时，必须使用 teamPerformanceSummary（已含 目标/业绩/完成率/人数/人效）或 teamTargets/teamHeadcount 回答，不要用销售员个人业绩代替团队维度。\n'
+    + '- 当用户的问题涉及「团队目标 / 团队月目标 / 目标金额 / 目标完成率 / 团队业绩（目标 vs 完成对比）/ 团队人效（人均产能）/ 团队人数」时，必须使用 teamPerformanceSummary（按 团队→年→月 三层嵌套，含 target目标金额 / amount实际完成业绩 / completionRate完成率 / headcount人数 / efficiency人效）或 teamTargets/teamHeadcount 回答，绝不要用销售员个人业绩代替团队维度，也绝不要把 salesSummary 的"完成业绩(amount)"误当成"目标(target)"。\n'
     + '- 当用户的问题涉及「销售绩效 / 考核项得分 / 绩效评分 / 绩效基数 / 加分项」时，必须使用 performanceRecords 与 performanceConfig 回答。\n'
     + '- 当用户的问题涉及「销售评级 / 升降级 / 评级 / 职级」时，必须使用 gradeRecords（key=年_销售_月）与 gradeConfig 回答。\n'
     + '- 当用户的问题涉及「M0 绩效 / M0 考核 / M0 得分」时，必须使用 m0PerformanceRecords 与 m0PerformanceConfig 回答；涉及「M0 评级 / M0 升降级」时使用 m0Records 与 m0Config 回答。\n'
@@ -4893,8 +4894,9 @@ function buildAISystemMessage() {
     + '- 当用户的问题涉及「荣誉激励 / 奖项 / 获奖人 / 奖金 / 销冠 / 攻坚奖 / 营销端冠军 / 团队冠军」时，必须使用 honorRecords 回答（按月份聚合的奖项与获奖人员/奖金/成就/备注）。\n'
     + '- 当用户的问题涉及「销售签约分析 / 各销售按来源分组的业绩矩阵 / 某销售某月某来源业绩 / 自拓/线索/其他 来源分组业绩对比」时，先看 customerTags.customerSourceGroups（{组名:[客户来源项]}）确定分组归属，再用 salesRecords 按 salesperson/docMonth/customerSource 汇总各 (月×组) 业绩。「销售」口径：在岗 + 非 admin/manager/viewer + 非 M0。\n'
     + '- customerTags 字段: customerSource/category/customerProfile 三个选项数组 + customerSourceGroups 分组映射({组名:[客户来源项]})。未配置分组时所有客户来源归入「其他」。\n'
-    + '- 团队业绩统计(teamPerformanceSummary)字段:\n'
-    + '  - byMonth[月份]: { target(月目标金额), amount(实际业绩金额), grossProfit(毛利), completionRate(完成率%, 目标为0时为null), headcount(团队人数), efficiency(人效=业绩÷人数, 人数为0时为null) }\n'
+    + '- 团队业绩统计(teamPerformanceSummary)字段（按 团队→年→月 三层嵌套，请先按 currentYear/lastYear 定位年份再读月份）:\n'
+    + '  - 结构: teamPerformanceSummary[团队].byYear[年份].byMonth[月份] = { target(月目标金额, 来自 teamTargets), amount(实际完成业绩金额, 来自 salesRecords 同团队同月汇总), grossProfit(毛利), completionRate(完成率% = amount÷target, 目标为0时为null), headcount(团队人数, 来自 teamHeadcount), efficiency(人效=amount÷headcount, 人数为0时为null) }\n'
+    + '  - ⚠️ 区分要点: target = 目标（管理设定，teamTargets），amount = 完成业绩（实际销售成交，salesRecords）。两者完全不同，回答时务必分别标注「目标」与「完成业绩」，不可混用；completionRate = 完成业绩 ÷ 目标。\n'
     + '- 销售绩效(performanceRecords)字段: key=年_销售_月，含 workingDays(在职天数)/comment(总评)/base(基数)/items(各考核项:{actual完成,standard要求,score得分,text描述})/bonus(加分项次数)\n'
     + '- 销售评级(gradeRecords)字段: key=年_销售_月，含 grade(当月职级)/prevGrade(上月职级)/promote(升级/降级/保持/新入职等状态)/note(备注)\n'
     + '- M0绩效(m0PerformanceRecords)字段: key=年_M0_月，结构同销售绩效但全为手动考核项，无自拓演示自动计数\n'
