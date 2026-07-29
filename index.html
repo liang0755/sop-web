@@ -9150,7 +9150,7 @@ async function renderSalesDetail() {
   if (salesDetailPage < 1) salesDetailPage = 1;
   const startIdx = (salesDetailPage - 1) * salesDetailPageSize;
   const recs = all.slice(startIdx, startIdx + salesDetailPageSize);
-  const colCount = 9 + (canEdit ? 2 : 0);
+  const colCount = 8 + (canEdit ? 2 : 0);
   // 筛选下拉选项
   const teams = [...new Set(cloudData.salesRecords.map(r => r.team).filter(Boolean))].sort();
   const teamOpts = teams.map(t => `<option value="${esc(t)}" ${t === f.team ? 'selected' : ''}>${esc(t)}</option>`).join('');
@@ -9166,7 +9166,6 @@ async function renderSalesDetail() {
     <td>${esc(r.productName)}</td>
     <td>${esc(r.docNo)}</td>
     <td>${esc(r.docType)}</td>
-    <td>${esc(r.status)}</td>
     ${canEdit ? `<td><button class="btn btn-outline btn-sm" onclick="editSalesRecord('${r.id}')">编辑</button> <button class="btn btn-danger btn-sm" onclick="deleteSalesRecord('${r.id}')">删除</button></td>` : ''}
   </tr>`).join('');
   const pager = `
@@ -9233,7 +9232,7 @@ async function renderSalesDetail() {
       </div>` : ''}
       <div class="table-wrap"><table><thead><tr>
         ${canEdit ? `<th style="width:36px"><input type="checkbox" id="salesSelectAll" onchange="toggleSalesSelectAll(this)" ${recs.length && recs.every(r => selectedSalesIds.has(r.id)) ? 'checked' : ''}></th>` : ''}
-        <th>销售员</th><th>团队/门店</th><th>单据日期</th><th class="num">折后金额</th><th>客户名称</th><th>商品名称</th><th>单据编号</th><th>单据类别</th><th>状态</th>${canEdit ? '<th>操作</th>' : ''}
+        <th>销售员</th><th>团队/门店</th><th>单据日期</th><th class="num">折后金额</th><th>客户名称</th><th>商品名称</th><th>单据编号</th><th>单据类别</th>${canEdit ? '<th>操作</th>' : ''}
       </tr></thead><tbody>${rowsHtml || `<tr><td colspan="${colCount}" style="text-align:center;color:var(--gray-400);padding:30px">暂无数据，请导入或新增</td></tr>`}</tbody></table></div>${pager}
     </div>
   </div>`;
@@ -9278,9 +9277,9 @@ function exportSalesDetailCsv() {
   const selYears = (summaryYearSel && summaryYearSel.size) ? allYears.filter(y => summaryYearSel.has(y)) : allYears;
   const rows = all.filter(r => selYears.includes((r.docMonth || '').slice(0, 4)));
   if (!rows.length) { showToast('当前筛选条件下没有可导出的业绩明细', 'warning'); return; }
-  const headers = ['销售员', '团队/门店', '单据日期', '折后金额', '客户名称', '商品名称', '单据编号', '单据类别', '状态'];
+  const headers = ['销售员', '团队/门店', '单据日期', '折后金额', '客户名称', '商品名称', '单据编号', '单据类别'];
   const aoa = [headers];
-  rows.forEach(r => aoa.push([r.salesperson || '', r.team || '', r.docDate || '', toNum(r.amount), r.customer || '', r.productName || '', r.docNo || '', r.docType || '', r.status || '']));
+  rows.forEach(r => aoa.push([r.salesperson || '', r.team || '', r.docDate || '', toNum(r.amount), r.customer || '', r.productName || '', r.docNo || '', r.docType || '']));
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '业绩明细');
