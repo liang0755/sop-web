@@ -8781,7 +8781,7 @@ function toNum(x) { if (x == null || x === '') return 0; if (typeof x === 'numbe
 // ===== 业绩 / 用户 模块状态 =====
 let salesDetailPage = 1;
 let salesDetailPageSize = 20;
-let salesDetailFilters = { start:'', end:'', team:'', salesperson:'', customer:'' };
+let salesDetailFilters = { start:'', end:'', team:'', salesperson:'', customer:'', docType:'' };
 const selectedSalesIds = new Set();
 let sbSortState = {};          // 各看板独立排序状态：{ [tid]: { col: 'total'|'YYYY-MM', dir: 'asc'|'desc' } }，避免看板间排序联动
 let sbLastYearTeamMap = {};    // 团队 -> { 'YYYY-MM': 金额 }（上一年，用于同比）
@@ -9090,6 +9090,7 @@ async function renderSalesDetail() {
     if (f.team && (r.team || '') !== f.team) return false;
     if (f.salesperson && (r.salesperson || '') !== f.salesperson) return false;
     if (f.customer) { const c = (r.customer || '').toLowerCase(); if (!c.includes(f.customer.toLowerCase())) return false; }
+    if (f.docType && (r.docType || '') !== f.docType) return false;
     return true;
   });
   const all = base.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
@@ -9156,6 +9157,8 @@ async function renderSalesDetail() {
   const teamOpts = teams.map(t => `<option value="${esc(t)}" ${t === f.team ? 'selected' : ''}>${esc(t)}</option>`).join('');
   const sps = [...new Set(cloudData.salesRecords.map(r => r.salesperson).filter(Boolean))].sort();
   const spOpts = sps.map(s => `<option value="${esc(s)}" ${s === f.salesperson ? 'selected' : ''}>${esc(s)}</option>`).join('');
+  const docTypes = [...new Set(cloudData.salesRecords.map(r => r.docType).filter(Boolean))].sort();
+  const dtOpts = docTypes.map(t => `<option value="${esc(t)}" ${t === f.docType ? 'selected' : ''}>${esc(t)}</option>`).join('');
   const rowsHtml = recs.map(r => `<tr>
     ${canEdit ? `<td><input type="checkbox" class="sales-row-cb" data-id="${r.id}" ${selectedSalesIds.has(r.id) ? 'checked' : ''} onchange="onSalesSelect('${r.id}', this.checked)"></td>` : ''}
     <td>${esc(r.salesperson) || '-'}</td>
@@ -9204,6 +9207,7 @@ async function renderSalesDetail() {
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="sfEnd" value="${f.end}" onchange="applySalesFilters()"></div>
         <div class="form-group"><label>部门 / 门店</label><select class="form-control" id="sfTeam" onchange="applySalesFilters()"><option value="">全部</option>${teamOpts}</select></div>
         <div class="form-group"><label>人员</label><select class="form-control" id="sfSales" onchange="applySalesFilters()"><option value="">全部</option>${spOpts}</select></div>
+        <div class="form-group"><label>单据类别</label><select class="form-control" id="sfDocType" onchange="applySalesFilters()"><option value="">全部</option>${dtOpts}</select></div>
         <div class="form-group"><label>客户（模糊搜索）</label><input type="text" class="form-control" id="sfCustomer" value="${f.customer}" placeholder="输入客户名关键词" onchange="applySalesFilters()" style="min-width:160px"></div>
         <div class="form-group"><button type="button" class="btn btn-outline btn-sm" onclick="resetSalesFilters()">重置</button></div>
       </div>
@@ -9248,12 +9252,13 @@ function applySalesFilters() {
   salesDetailFilters.end = (document.getElementById('sfEnd').value || '').trim();
   salesDetailFilters.team = document.getElementById('sfTeam').value || '';
   salesDetailFilters.salesperson = document.getElementById('sfSales').value || '';
+  salesDetailFilters.docType = document.getElementById('sfDocType').value || '';
   salesDetailFilters.customer = (document.getElementById('sfCustomer').value || '').trim();
   salesDetailPage = 1;
   renderSalesDetail();
 }
 function resetSalesFilters() {
-  salesDetailFilters = { start:'', end:'', team:'', salesperson:'', customer:'' };
+  salesDetailFilters = { start:'', end:'', team:'', salesperson:'', customer:'', docType:'' };
   salesDetailPage = 1;
   renderSalesDetail();
 }
@@ -9270,6 +9275,7 @@ function exportSalesDetailCsv() {
     if (f.team && (r.team || '') !== f.team) return false;
     if (f.salesperson && (r.salesperson || '') !== f.salesperson) return false;
     if (f.customer) { const c = (r.customer || '').toLowerCase(); if (!c.includes(f.customer.toLowerCase())) return false; }
+    if (f.docType && (r.docType || '') !== f.docType) return false;
     return true;
   });
   const all = base.slice().sort((a, b) => (b.docDate || '').localeCompare(a.docDate || ''));
