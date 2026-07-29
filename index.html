@@ -7950,6 +7950,8 @@ function renderM0VisitStats() {
   reports.forEach(r => (r.channels || []).forEach(ch => { if (ch.channel) channelSet.add(ch.channel); }));
   const channelOpts = [...channelSet].sort().map(n => `<option value="${esc(n)}" ${n === channel ? 'selected' : ''}>${esc(n)}</option>`).join('');
   const rows = computeM0VisitRows();
+  const fRows = m0vPersonFilter === 'all' ? rows : rows.filter(r => r.m0 === m0vPersonFilter);
+  const allM0s = [...new Set(rows.map(r => r.m0))].sort((a, b) => a.localeCompare(b, 'zh'));
   // periods
   const periods = [];
   if (m0vMode === 'month') {
@@ -7975,14 +7977,14 @@ function renderM0VisitStats() {
   // matrix: m0 -> period -> sum
   const m0Set = [];
   const m0Map = {};
-  rows.forEach(r => {
+  fRows.forEach(r => {
     if (!m0Map[r.m0]) { m0Map[r.m0] = {}; m0Set.push(r.m0); }
     const pk = m0vMode === 'month' ? r.date.slice(0, 7) : m0vWeekKey(r.date).key;
     m0Map[r.m0][pk] = (m0Map[r.m0][pk] || 0) + r.cnt;
   });
   m0Set.sort((a, b) => a.localeCompare(b, 'zh'));
-  const totalVisits = rows.length;
-  const totalCnt = rows.reduce((a, r) => a + r.cnt, 0);
+  const totalVisits = fRows.length;
+  const totalCnt = fRows.reduce((a, r) => a + r.cnt, 0);
   const m0Count = m0Set.length;
   const avg = m0Count ? (totalCnt / m0Count).toFixed(2) : '0.00';
   // matrix html
@@ -8015,7 +8017,7 @@ function renderM0VisitStats() {
     matrixHtml = '<div class="empty-state"><div class="icon">📭</div>所选范围内暂无「' + esc(channel) + '」陪访数据</div>';
   }
   // detail
-  const persons = [...m0Set];
+  const persons = allM0s;
   const personOpts = '<option value="all" ' + (m0vPersonFilter === 'all' ? 'selected' : '') + '>全部 M0</option>' + persons.map(p => `<option value="${esc(p)}" ${p === m0vPersonFilter ? 'selected' : ''}>${esc(p)}</option>`).join('');
   const detailRows = m0vPersonFilter === 'all' ? rows : rows.filter(r => r.m0 === m0vPersonFilter);
   let dbody = detailRows.map(r => `<tr><td style="white-space:nowrap">${r.date}</td><td style="white-space:nowrap">${esc(r.m0)}</td><td style="text-align:center;font-weight:600">${r.cnt}</td><td style="max-width:420px;white-space:pre-wrap">${esc(r.issues).replace(/\n/g, '<br>')}</td></tr>`).join('');
@@ -8034,6 +8036,10 @@ function renderM0VisitStats() {
         <div style="display:flex;align-items:center;gap:6px">
           <label style="font-size:12px;color:var(--gray-500)">渠道</label>
           <select class="form-control form-control-sm" style="width:auto" onchange="onM0VisitChannelChange(this)">${channelOpts}</select>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:12px;color:var(--gray-500)">人员</label>
+          <select class="form-control form-control-sm" style="width:auto" onchange="setM0vPerson(this.value)">${personOpts}</select>
         </div>
         <div style="display:flex;gap:4px">
           <button class="btn btn-sm ${m0vMode==='week'?'btn-primary':'btn-outline'}" onclick="setM0vMode('week')">按周</button>
