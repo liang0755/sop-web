@@ -14064,8 +14064,8 @@ function refreshMgrPerfSingle() {
   else rows.sort((a, b) => a.mgr.localeCompare(b.mgr, 'zh'));
 
   let h = '<thead><tr>';
-  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:120px;white-space:nowrap">管理者</th>';
-  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:120px;z-index:3;background:#fff;text-align:left;width:140px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">团队</th>';
+  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:110px;white-space:nowrap">管理者</th>';
+  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:110px;z-index:3;background:#fff;text-align:left;width:130px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">团队</th>';
   items.forEach(it => {
     h += `<th colspan="3" style="text-align:center;background:#FAEEDA">${esc(it.name)}（${it.weight || 0}%）</th>`;
   });
@@ -14090,8 +14090,8 @@ function refreshMgrPerfSingle() {
     const rec0 = cloudData.mgrPerformanceRecords[k] || {};
     const isManualScore = (rec0.finalScore !== undefined && rec0.finalScore !== null && rec0.finalScore !== '');
     h += `<tr>`;
-    h += `<td class="perf-freeze" style="position:sticky;left:0;z-index:2;background:#fff;white-space:nowrap;width:120px">${esc(row.mgr)}${userStatusBadge(row.mgr, statusMap)}</td>`;
-    h += `<td class="perf-freeze" style="position:sticky;left:120px;z-index:2;background:#fff;white-space:nowrap;width:140px;box-shadow:2px 0 0 0 var(--gray-200)">${esc(row.team)}</td>`;
+    h += `<td class="perf-freeze" style="position:sticky;left:0;z-index:2;background:#fff;white-space:nowrap;width:110px">${esc(row.mgr)}${userStatusBadge(row.mgr, statusMap)}</td>`;
+    h += `<td class="perf-freeze" style="position:sticky;left:110px;z-index:2;background:#fff;white-space:nowrap;width:130px;box-shadow:2px 0 0 0 var(--gray-200)">${esc(row.team)}</td>`;
     d.items.forEach(x => {
       const it = x.it, ik = it.key;
       const stdCell = d.frozen
