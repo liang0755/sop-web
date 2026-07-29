@@ -12000,9 +12000,9 @@ function refreshSalesGradeSingle() {
   } else {
     rows.sort((a, b) => (b.roll[month] || 0) - (a.roll[month] || 0) || a.sp.localeCompare(b.sp, 'zh'));
   }
-  let h = `<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（在职）</span></th><th>上月职级</th><th>团队</th><th class="num">${month}月 评级业绩<br><span style="font-weight:400;font-size:10px;color:var(--gray-400)">滚动3月</span></th><th>评级</th><th style="text-align:center">升降级</th><th>备注</th></tr></thead><tbody>`;
+  let h = `<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">（在职）</span></th><th>团队</th><th class="num">${month}月 评级业绩<br><span style="font-weight:400;font-size:10px;color:var(--gray-400)">滚动3月</span></th><th>本月评级</th><th style="text-align:center">升降级</th><th>备注</th><th>上月评级</th><th>上月备注</th></tr></thead><tbody>`;
   if (!rows.length) {
-    h += `<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售的业绩数据</td></tr>`;
+    h += `<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售的业绩数据</td></tr>`;
   }
   rows.forEach(row => {
     const v = row.roll[month];
@@ -12014,16 +12014,23 @@ function refreshSalesGradeSingle() {
     const grade = (p && p.grade !== undefined) ? (p.grade === GRADE_AUTO ? auto : p.grade) : (rec.grade || auto);
     const note = (p && p.note !== undefined) ? p.note : (rec.note || '');
     let prevGrade = '—';
+    let prevNote = '';
     if (month > 1) {
       const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
       const pp = sgPending[gradeKey(year, row.sp, month - 1)];
-      prevGrade = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? autoGrade(row.roll[month - 1], levels) : pp.grade) : (prevRec.grade || autoGrade(row.roll[month - 1], levels));
+      const prevRoll = row.roll[month - 1] || 0;
+      const prevAuto = autoGrade(prevRoll, levels);
+      const prevGradeVal = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? prevAuto : pp.grade) : (prevRec.grade || prevAuto);
+      prevGrade = prevGradeVal || '—';
+      prevNote = (pp && pp.note !== undefined) ? pp.note : (prevRec.note || '');
     }
     let upFlag = '<span style="color:var(--gray-400)">—</span>';
     if (month > 1) {
       const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
       const pp = sgPending[gradeKey(year, row.sp, month - 1)];
-      const prevGradeForChg = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? autoGrade(row.roll[month - 1], levels) : pp.grade) : (prevRec.grade || autoGrade(row.roll[month - 1], levels));
+      const prevRoll = row.roll[month - 1] || 0;
+      const prevAuto = autoGrade(prevRoll, levels);
+      const prevGradeForChg = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? prevAuto : pp.grade) : (prevRec.grade || prevAuto);
       const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGradeForChg, levels);
       if (ci > pi) upFlag = '<span style="color:#16a34a;font-weight:600">▲升级</span>';
       else if (ci < pi) upFlag = '<span style="color:#dc2626;font-weight:600">▼降级</span>';
@@ -12035,12 +12042,13 @@ function refreshSalesGradeSingle() {
     const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600">●暂存</span> ` : '';
     const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
     h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`
-       + `<td style="text-align:center">${esc(prevGrade)}</td>`
        + `<td>${esc(row.team) || '-'}</td>`
        + `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div></td>`
        + `<td>${badge}<div style="display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:24px;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div></td>`
        + `<td style="text-align:center">${upFlag}</td>`
        + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:12px;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="sgStage('${k}', {note:this.value})">${esc(note)}</textarea></td>`
+       + `<td style="text-align:center">${esc(prevGrade)}</td>`
+       + `<td><div style="font-size:12px;color:var(--gray-600);white-space:pre-wrap;max-width:240px;max-height:60px;overflow:auto;padding:2px 4px;background:var(--gray-50);border-radius:3px">${esc(prevNote) || '<span style="color:var(--gray-300)">—</span>'}</div></td>`
        + `</tr>`;
   });
   h += '</tbody>';
@@ -12084,22 +12092,23 @@ function exportSalesGradeSingle() {
   const aoa = [];
   aoa.push([`单月评级看板 · ${year}年${month}月（滚动3个月评级业绩）`]);
   aoa.push(['说明：评级业绩 = 该销售员当月及前2个月业绩之和；评级按表单配置自动评定或手动覆盖；升降级为当月评级对比上月评级；备注为手动填写']);
-  aoa.push(['销售员', '上月职级', '团队', '评级业绩(滚动3月)', '单月业绩', '评级', '升降级', '备注']);
+  aoa.push(['销售员', '团队', '评级业绩(滚动3月)', '本月评级', '升降级', '备注', '上月评级', '上月备注']);
   rows.forEach(row => {
     const v = Math.round(row.roll[month]);
-    const single = Math.round(row.single[month] || 0);
     const auto = autoGrade(v, levels);
     const k = gradeKey(year, row.sp, month);
     const grade = sgEffectiveGrade(k, auto);
     let prevGrade = '—';
+    let prevNote = '';
     let chg = '—';
     if (month > 1) {
       const prevK = gradeKey(year, row.sp, month - 1);
       prevGrade = sgEffectiveGrade(prevK, autoGrade(Math.round(row.roll[month - 1]), levels));
+      prevNote = sgEffectiveNote(prevK);
       const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
       chg = ci > pi ? '▲升级' : (ci < pi ? '▼降级' : '持平');
     }
-    aoa.push([row.sp, prevGrade, row.team || '', v, single, grade, chg, sgEffectiveNote(k)]);
+    aoa.push([row.sp, row.team || '', v, grade, chg, sgEffectiveNote(k), prevGrade, prevNote]);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
