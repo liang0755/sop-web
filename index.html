@@ -8974,6 +8974,25 @@ async function saveSalesRecord(e, id) {
   return false;
 }
 
+// 业绩明细：销售员列行内直接修改并即时保存（PATCH 局部更新，不影响该记录其他字段）
+async function updateSalesRecordSalesperson(id, inputEl) {
+  const val = (inputEl.value || '').trim();
+  const r = cloudData.salesRecords.find(x => x.id === id);
+  if (!r) { inputEl.value = ''; return; }
+  const old = r.salesperson || '';
+  if (val === old) return; // 无变化不保存
+  try {
+    await apiUpdate('salesRecords', id, { salesperson: val });
+    r.salesperson = val;
+    saveReportsCache();
+    showToast('销售员已更新', 'success');
+    renderSalesDetail(); // 刷新筛选下拉(spOpts)与汇总，保证名称一致
+  } catch (e) {
+    inputEl.value = old;
+    showToast('更新失败: ' + e.message, 'error');
+  }
+}
+
 async function deleteSalesRecord(id) {
   if (!confirm('确定删除该业绩记录？')) return;
   try {
@@ -9076,7 +9095,7 @@ async function renderSalesDetail() {
   const spOpts = sps.map(s => `<option value="${esc(s)}" ${s === f.salesperson ? 'selected' : ''}>${esc(s)}</option>`).join('');
   const rowsHtml = recs.map(r => `<tr>
     ${canEdit ? `<td><input type="checkbox" class="sales-row-cb" data-id="${r.id}" ${selectedSalesIds.has(r.id) ? 'checked' : ''} onchange="onSalesSelect('${r.id}', this.checked)"></td>` : ''}
-    <td>${esc(r.salesperson) || '-'}</td>
+    <td>${canEdit ? `<input class="form-control form-control-sm" style="min-width:96px;width:120px;font-size:12px" value="${esc(r.salesperson)}" data-spid="${r.id}" onchange="updateSalesRecordSalesperson('${r.id}', this)" title="失焦即保存">` : (esc(r.salesperson) || '-')}</td>
     <td><span class="badge badge-team">${esc(r.team) || '-'}</span></td>
     <td>${esc(r.docDate) || '-'}</td>
     <td class="num">${fmtSalesMoney(toNum(r.amount))}</td>
