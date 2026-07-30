@@ -11165,6 +11165,47 @@ function gradeRankIndex(name, levels) {
   const idx = sorted.findIndex(l => l.name === name);
   return idx >= 0 ? idx : 0;
 }
+// 销售升降级看板：相对上月职级的自动评级（每月最多升降一级）
+// 降级：本月滚动业绩 < 当前级别 demote 保底线 → 降1级
+// 升级：本月滚动业绩 >= 上一级 promote 下界 → 升1级
+// 首月(无上月)：用绝对业绩评级(autoGrade)做种子；手动覆盖的级别也作为次月基准
+function sgComputeGrades(roll, levels, year, sp) {
+  const sorted = [...levels].sort((a, b) => (a.promote || 0) - (b.promote || 0));
+  const n = sorted.length;
+  const res = {};
+  if (n === 0) {
+    for (let m = 1; m <= 12; m++) res[m] = { autoRank: 0, effRank: 0, autoName: '', effName: '' };
+    return res;
+  }
+  let chainRank = null; // 上月有效职级名次（首月为 null → 用绝对评级种子）
+  for (let m = 1; m <= 12; m++) {
+    const v = roll[m] || 0;
+    const k = gradeKey(year, sp, m);
+    const rec = (cloudData.gradeRecords && cloudData.gradeRecords[k]) || {};
+    const p = sgPending[k];
+    let autoRank;
+    if (chainRank == null) {
+      autoRank = gradeRankIndex(autoGrade(v, levels), levels);
+    } else {
+      let idx = chainRank;
+      if (idx < n - 1 && v >= (sorted[idx + 1].promote || 0)) idx++;
+      else if (idx > 0 && v < (sorted[idx].demote || 0)) idx--;
+      autoRank = idx;
+    }
+    let effName;
+    if (p && p.grade !== undefined) {
+      effName = (p.grade === GRADE_AUTO) ? sorted[autoRank].name : p.grade;
+    } else if (rec.grade) {
+      effName = rec.grade;
+    } else {
+      effName = sorted[autoRank].name;
+    }
+    const effRank = gradeRankIndex(effName, levels);
+    res[m] = { autoRank, effRank, autoName: sorted[autoRank].name, effName };
+    chainRank = effRank; // 次月相对本月有效职级（含手动覆盖）
+  }
+  return res;
+}
 function gradeKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
 function saveGradeByKey(key, patch) {
   if (!cloudData.gradeRecords) cloudData.gradeRecords = {};
@@ -11900,24 +11941,23 @@ function refreshSalesGrade() {
   const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
   rows.forEach(row => {
     h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td><td>${esc(row.team) || '-'}</td>`;
+    const rowGrades = sgComputeGrades(row.roll, levels, year, row.sp);
     months.forEach(m => {
       const v = row.roll[m];
       colTot[m] += v;
       const single = row.single[m] || 0;
-      const auto = autoGrade(v, levels);
+      const auto = rowGrades[m].autoName;
       const k = gradeKey(year, row.sp, m);
       const rec = (cloudData.gradeRecords && cloudData.gradeRecords[k]) || {};
       const p = sgPending[k];
-      const grade = (p && p.grade !== undefined) ? (p.grade === GRADE_AUTO ? auto : p.grade) : (rec.grade || auto);
+      const grade = rowGrades[m].effName;
       const note = (p && p.note !== undefined) ? p.note : (rec.note || '');
       let upFlag = '<span style="color:var(--gray-400)">—</span>';
       if (m === 1) {
         upFlag = '<span style="color:var(--gray-400)">—</span>';
       } else {
-        const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, m - 1)]) || {};
-        const pp = sgPending[gradeKey(year, row.sp, m - 1)];
-        const prevGrade = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? autoGrade(row.roll[m - 1], levels) : pp.grade) : (prevRec.grade || autoGrade(row.roll[m - 1], levels));
-        const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
+        const prevGrade = rowGrades[m - 1].effName;
+        const ci = rowGrades[m].effRank, pi = rowGrades[m - 1].effRank;
         if (ci > pi) upFlag = '<span style="color:#16a34a">▲升级</span>';
         else if (ci < pi) upFlag = '<span style="color:#dc2626">▼降级</span>';
         else upFlag = '<span style="color:var(--gray-400)">—</span>';
@@ -11982,16 +12022,16 @@ function exportSalesGrade() {
   aoa.push(head);
   rows.forEach(row => {
     const r = [row.sp, row.team || ''];
+    const rowGrades = sgComputeGrades(row.roll, levels, year, row.sp);
     months.forEach(m => {
       const v = Math.round(row.roll[m]);
-      const auto = autoGrade(v, levels);
+      const auto = rowGrades[m].autoName;
       const k = gradeKey(year, row.sp, m);
-      const grade = sgEffectiveGrade(k, auto);
+      const grade = rowGrades[m].effName;
       let chg = '';
       if (m > 1) {
-        const prevK = gradeKey(year, row.sp, m - 1);
-        const prevGrade = sgEffectiveGrade(prevK, autoGrade(Math.round(row.roll[m - 1]), levels));
-        const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
+        const prevGrade = rowGrades[m - 1].effName;
+        const ci = rowGrades[m].effRank, pi = rowGrades[m - 1].effRank;
         chg = ci > pi ? '▲升级' : (ci < pi ? '▼降级' : '持平');
       }
       r.push(v, grade, chg, sgEffectiveNote(k));
@@ -12044,33 +12084,20 @@ function refreshSalesGradeSingle() {
     h += `<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售的业绩数据</td></tr>`;
   }
   rows.forEach(row => {
+    const rowGrades = sgComputeGrades(row.roll, levels, year, row.sp);
     const v = row.roll[month];
     const single = row.single[month] || 0;
-    const auto = autoGrade(v, levels);
+    const auto = rowGrades[month].autoName;
     const k = gradeKey(year, row.sp, month);
     const rec = (cloudData.gradeRecords && cloudData.gradeRecords[k]) || {};
     const p = sgPending[k];
-    const grade = (p && p.grade !== undefined) ? (p.grade === GRADE_AUTO ? auto : p.grade) : (rec.grade || auto);
+    const grade = rowGrades[month].effName;
     const note = (p && p.note !== undefined) ? p.note : (rec.note || '');
-    let prevGrade = '—';
-    let prevNote = '';
-    if (month > 1) {
-      const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
-      const pp = sgPending[gradeKey(year, row.sp, month - 1)];
-      const prevRoll = row.roll[month - 1] || 0;
-      const prevAuto = autoGrade(prevRoll, levels);
-      const prevGradeVal = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? prevAuto : pp.grade) : (prevRec.grade || prevAuto);
-      prevGrade = prevGradeVal || '—';
-      prevNote = (pp && pp.note !== undefined) ? pp.note : (prevRec.note || '');
-    }
+    let prevGrade = (month > 1) ? rowGrades[month - 1].effName : '—';
+    let prevNote = (month > 1) ? sgEffectiveNote(gradeKey(year, row.sp, month - 1)) : '';
     let upFlag = '<span style="color:var(--gray-400)">—</span>';
     if (month > 1) {
-      const prevRec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, row.sp, month - 1)]) || {};
-      const pp = sgPending[gradeKey(year, row.sp, month - 1)];
-      const prevRoll = row.roll[month - 1] || 0;
-      const prevAuto = autoGrade(prevRoll, levels);
-      const prevGradeForChg = (pp && pp.grade !== undefined) ? (pp.grade === GRADE_AUTO ? prevAuto : pp.grade) : (prevRec.grade || prevAuto);
-      const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGradeForChg, levels);
+      const ci = rowGrades[month].effRank, pi = rowGrades[month - 1].effRank;
       if (ci > pi) upFlag = '<span style="color:#16a34a;font-weight:600">▲升级</span>';
       else if (ci < pi) upFlag = '<span style="color:#dc2626;font-weight:600">▼降级</span>';
       else upFlag = '<span style="color:var(--gray-400)">持平</span>';
@@ -12133,18 +12160,16 @@ function exportSalesGradeSingle() {
   aoa.push(['说明：评级业绩 = 该销售员当月及前2个月业绩之和；评级按表单配置自动评定或手动覆盖；升降级为当月评级对比上月评级；备注为手动填写']);
   aoa.push(['销售员', '团队', '评级业绩(滚动3月)', '本月评级', '升降级', '备注', '上月评级', '上月备注']);
   rows.forEach(row => {
+    const rowGrades = sgComputeGrades(row.roll, levels, year, row.sp);
     const v = Math.round(row.roll[month]);
-    const auto = autoGrade(v, levels);
+    const auto = rowGrades[month].autoName;
     const k = gradeKey(year, row.sp, month);
-    const grade = sgEffectiveGrade(k, auto);
-    let prevGrade = '—';
-    let prevNote = '';
+    const grade = rowGrades[month].effName;
+    let prevGrade = (month > 1) ? rowGrades[month - 1].effName : '—';
+    let prevNote = (month > 1) ? sgEffectiveNote(gradeKey(year, row.sp, month - 1)) : '';
     let chg = '—';
     if (month > 1) {
-      const prevK = gradeKey(year, row.sp, month - 1);
-      prevGrade = sgEffectiveGrade(prevK, autoGrade(Math.round(row.roll[month - 1]), levels));
-      prevNote = sgEffectiveNote(prevK);
-      const ci = gradeRankIndex(grade, levels), pi = gradeRankIndex(prevGrade, levels);
+      const ci = rowGrades[month].effRank, pi = rowGrades[month - 1].effRank;
       chg = ci > pi ? '▲升级' : (ci < pi ? '▼降级' : '持平');
     }
     aoa.push([row.sp, row.team || '', v, grade, chg, sgEffectiveNote(k), prevGrade, prevNote]);
@@ -12412,11 +12437,11 @@ function buildSalesBaseForYear(year) {
 function getSalesLevel(year, sp, m, baseMap) {
   const bm = baseMap || buildSalesBaseForYear(year);
   const b = bm[sp] || {};
-  let roll = 0;
-  for (let k = Math.max(1, m - 2); k <= m; k++) roll += (b[k] || 0);
+  const roll = {};
+  for (let mm = 1; mm <= 12; mm++) { let s = 0; for (let k = Math.max(1, mm - 2); k <= mm; k++) s += (b[k] || 0); roll[mm] = s; }
   const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
-  const rec = (cloudData.gradeRecords && cloudData.gradeRecords[gradeKey(year, sp, m)]) || {};
-  return rec.grade || autoGrade(roll, levels);
+  const grades = sgComputeGrades(roll, levels, year, sp);
+  return (grades[m] && grades[m].effName) || '';
 }
 
 function getSalesTeam(sp) {
