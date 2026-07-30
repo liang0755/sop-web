@@ -11219,6 +11219,27 @@ function saveGradeRefresh(key, patch) {
   else if (salesGradeTab === 'matrix') refreshSalesGrade();
 }
 
+// ===== 销售评级看板·页面备注（与月份无关、全局唯一、存云端）=====
+// 节点：formConfig/boardNotes/{salesSingleMonth, m0SingleMonth}
+function sgBoardNoteKey() {
+  return salesGradeTab === 'm0single' ? 'm0SingleMonth' : 'salesSingleMonth';
+}
+function sgBoardNoteGet(key) {
+  const fc = cloudData.formConfig || {};
+  return (fc.boardNotes && fc.boardNotes[key]) || '';
+}
+let sgBoardNoteSaveTimer = null;
+function sgBoardNoteSave(key, val) {
+  if (!cloudData.formConfig) cloudData.formConfig = {};
+  if (!cloudData.formConfig.boardNotes) cloudData.formConfig.boardNotes = {};
+  cloudData.formConfig.boardNotes[key] = val;
+  if (sgBoardNoteSaveTimer) clearTimeout(sgBoardNoteSaveTimer);
+  sgBoardNoteSaveTimer = setTimeout(() => {
+    apiUpdate('formConfig', 'boardNotes', cloudData.formConfig.boardNotes)
+      .catch(e => showToast('备注保存失败: ' + e.message, 'error'));
+  }, 600);
+}
+
 // ===== 销售评级看板：暂存 + 最终保存（支持按月份自动填充、手动改后恢复自动）=====
 const GRADE_AUTO = '__AUTO__';          // 哨兵：恢复为自动评级（最终保存时清除手动值）
 let sgPending = {};                      // key -> { grade: 字符串|GRADE_AUTO, note: 字符串 }
@@ -11458,6 +11479,16 @@ function renderSalesGrade() {
               <option value="team" ${salesGradeSortBy==='team'?'selected':''}>按团队+姓名</option>
             </select>
           </div>`}
+          ${(salesGradeTab==='single'||salesGradeTab==='m0single')?(function(){
+            const k = sgBoardNoteKey();
+            const v = sgBoardNoteGet(k);
+            return `<div class="form-group" style="flex:1;min-width:260px;max-width:520px">
+              <label style="font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:6px">📝 页面备注 <span style="color:var(--gray-400);font-weight:400">（全局唯一，与月份无关，输入即自动存云端）</span></label>
+              <textarea class="form-control" id="sgBoardNote" rows="1" placeholder="可填写本期复核要点、关注事项、考核口径说明等"
+                oninput="sgBoardNoteSave(sgBoardNoteKey(), this.value)"
+                style="resize:vertical;min-height:34px;max-height:160px;font-size:13px;line-height:1.5;font-family:inherit">${v}</textarea>
+            </div>`;
+          })():''}
         </div>
         ${isM0 ? `<div id="m0ConfigPanel" style="${m0ConfigPanelOpen?'':'display:none'};margin:6px 0 10px;padding:12px;border:1px solid var(--gray-200);border-radius:8px;background:var(--gray-50)">${renderM0ConfigPanel()}</div>` : ''}
         <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${sgNoteText()}</div>
