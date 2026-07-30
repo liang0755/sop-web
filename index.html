@@ -11484,9 +11484,9 @@ function renderSalesGrade() {
             const v = sgBoardNoteGet(k);
             return `<div class="form-group" style="flex:1;min-width:260px;max-width:520px">
               <label style="font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:6px">📝 页面备注 <span style="color:var(--gray-400);font-weight:400">（全局唯一，与月份无关，输入即自动存云端）</span></label>
-              <textarea class="form-control" id="sgBoardNote" rows="1" placeholder="可填写本期复核要点、关注事项、考核口径说明等"
+              <textarea class="form-control" id="sgBoardNote" rows="3" placeholder="可填写本期复核要点、关注事项、考核口径说明等"
                 oninput="sgBoardNoteSave(sgBoardNoteKey(), this.value)"
-                style="resize:vertical;min-height:34px;max-height:160px;font-size:13px;line-height:1.5;font-family:inherit">${v}</textarea>
+                style="resize:vertical;min-height:102px;max-height:300px;font-size:13px;line-height:1.5;font-family:inherit">${v}</textarea>
             </div>`;
           })():''}
         </div>
