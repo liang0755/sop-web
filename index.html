@@ -10699,27 +10699,74 @@ function renderSalesBoardTable(tid, key) {
       h += `</tr>`;
     }
   });
-  h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
-  let gt = 0, gTgt = 0;
-  if (key === 'team') { rowsArr.forEach(row => months.forEach(m => { gTgt += (teamTargets[row.k] && teamTargets[row.k][m.slice(5)]) || 0; })); }
-  months.forEach(m => { gt += (colTot[m] || 0); h += `<td class="num">${fmtSalesMoney(colTot[m] || 0)}</td>`; });
-  let gtCell = fmtSalesMoney(gt);
-  if (key === 'team' && gTgt > 0) {
-    const gr = gt / gTgt * 100;
-    gtCell += `<div style="font-size:11px;margin-top:3px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(gTgt)}</div><div style="font-size:11px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">完成 ${gr.toFixed(1)}%</div>`;
-  }
-  let gtDyn = '';
+  // 合计行：拆为 3 个子 tr（目标 → 同比 → 完成率），按 sbShowYoy 控制显隐
+  let gt = 0;
+  const colTgt = {};
+  rowsArr.forEach(row => {
+    months.forEach(m => {
+      const tg = (teamTargets[row.k] && teamTargets[row.k][m.slice(5)]) || 0;
+      colTgt[m] = (colTgt[m] || 0) + tg;
+    });
+  });
+  const gTgt = months.reduce((s, m) => s + (colTgt[m] || 0), 0);
+  months.forEach(m => { gt += (colTot[m] || 0); });
+  const colLy = {};
+  months.forEach(m => {
+    const lyKey = lyMonth(m);
+    let s = 0;
+    Object.keys(sbLastYearTeamMap).forEach(k => { s += sbLastYearTeamMap[k][lyKey] || 0; });
+    colLy[m] = s;
+  });
+  h += '</tbody><tfoot>';
+
+  // 子行 1：目标（每月目标合计 + 全年目标合计）
+  h += '<tr class="total-row"><td>合计 / 目标</td>';
+  months.forEach(m => {
+    const tgv = colTgt[m] || 0;
+    h += `<td class="num" style="white-space:nowrap;font-weight:600;color:${tgv > 0 ? 'var(--gray-700)' : 'var(--gray-400)'}">${tgv > 0 ? fmtSalesMoney(tgv) : '—'}</td>`;
+  });
+  h += `<td class="num" style="white-space:nowrap;font-weight:700;color:${gTgt > 0 ? 'var(--gray-700)' : 'var(--gray-400)'}">${gTgt > 0 ? fmtSalesMoney(gTgt) : '—'}</td>`;
+  if (sbShowYoy) h += '<td class="dyoy-cell"></td>';
+  h += '</tr>';
+
+  // 子行 2：同比（受 sbShowYoy 控制；每月同比 + 累计同比）
   if (sbShowYoy) {
+    h += '<tr class="total-row"><td>合计 / 同比</td>';
+    months.forEach(m => {
+      const thisM = colTot[m] || 0, lastM = colLy[m] || 0;
+      if (lastM > 0) {
+        const g = (thisM - lastM) / lastM * 100;
+        h += `<td class="num dyoy-cell" style="white-space:nowrap"><div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}">${g >= 0 ? '+' : ''}${g.toFixed(1)}%</div></td>`;
+      } else {
+        h += `<td class="num dyoy-cell"><span class="yoy-none">— 同比</span></td>`;
+      }
+    });
     const gDynThis = rowsArr.reduce((s, r) => s + (r.dynThis || 0), 0);
     const gDynLast = rowsArr.reduce((s, r) => s + (r.dynLast || 0), 0);
     if (gDynLast > 0) {
       const gg = (gDynThis - gDynLast) / gDynLast * 100;
-      gtDyn = `<td class="dyoy-cell"><div class="${gg >= 0 ? 'yoy-pos' : 'yoy-neg'}">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}%</div><div class="dyoy-sub">今年 ${fmtSalesMoney(gDynThis)}</div><div class="dyoy-sub">去年 ${fmtSalesMoney(gDynLast)}</div></td>`;
+      h += `<td class="num dyoy-cell"><div class="${gg >= 0 ? 'yoy-pos' : 'yoy-neg'}">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}%</div><div class="dyoy-sub">今年 ${fmtSalesMoney(gDynThis)}</div><div class="dyoy-sub">去年 ${fmtSalesMoney(gDynLast)}</div></td>`;
     } else {
-      gtDyn = `<td class="dyoy-cell"><span class="yoy-none">— 同比</span></td>`;
+      h += `<td class="num dyoy-cell"><span class="yoy-none">— 同比</span></td>`;
     }
+    h += '<td></td></tr>';
   }
-  h += `<td class="num">${gtCell}</td>${gtDyn}</tr></tfoot>`;
+
+  // 子行 3：完成率（每月完成率 + 全年完成率）
+  h += '<tr class="total-row"><td>合计 / 完成率</td>';
+  months.forEach(m => {
+    const a = colTot[m] || 0, tg = colTgt[m] || 0;
+    if (tg > 0) {
+      const r = a / tg * 100;
+      h += `<td class="num" style="white-space:nowrap;font-weight:600;color:${r >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">${r.toFixed(1)}%</td>`;
+    } else {
+      h += `<td class="num" style="white-space:nowrap;color:var(--gray-400)">—</td>`;
+    }
+  });
+  const gr = gTgt > 0 ? (gt / gTgt * 100) : 0;
+  h += `<td class="num" style="white-space:nowrap;font-weight:700;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">${gTgt > 0 ? gr.toFixed(1) + '%' : '—'}</td>`;
+  if (sbShowYoy) h += '<td class="dyoy-cell"></td>';
+  h += '</tr></tfoot>';
   document.getElementById(tid).innerHTML = h;
 }
 
@@ -10918,12 +10965,22 @@ function exportSalesBoard2() {
     arr.push(row.dt); arr.push(row.dl); arr.push(dyPct(row.dy));
     aoa.push(arr);
   });
-  const totalRow = ['合计']; let gAct = 0, gTgt = 0;
-  months.forEach(m => { const a = colAct[m] || 0, tg = colTgt[m] || 0; gAct += a; gTgt += tg; totalRow.push(a); totalRow.push(tg); totalRow.push(pct(a, tg)); });
-  totalRow.push(gAct); totalRow.push(gTgt); totalRow.push(pct(gAct, gTgt));
+  // 合计行在 Excel 中也拆为 3 行：目标 / 同比 / 完成率（与看板一致）
+  let gAct = 0, gTgt = 0;
+  months.forEach(m => { gAct += (colAct[m] || 0); gTgt += (colTgt[m] || 0); });
   let gDt = 0, gDl = 0; rows.forEach(r => { gDt += r.dt; gDl += r.dl; });
-  totalRow.push(gDt); totalRow.push(gDl); totalRow.push(dyPct(gDl > 0 ? (gDt - gDl) / gDl * 100 : null));
-  aoa.push(totalRow);
+  // 计算每月去年合计（用 lyMonth 与 sbLastYearTeamMap）
+  const colLy = {};
+  months.forEach(m => {
+    const lyKey = lyMonth(m);
+    let s = 0;
+    Object.keys(sbLastYearTeamMap).forEach(k => { s += sbLastYearTeamMap[k][lyKey] || 0; });
+    colLy[m] = s;
+  });
+  const tgtRow = ['合计 / 目标']; months.forEach(m => { tgtRow.push(colTgt[m] || 0); }); tgtRow.push(gTgt);
+  const yoyRow = ['合计 / 同比']; months.forEach(m => { const a = colAct[m] || 0, lt = colLy[m] || 0; yoyRow.push(lt > 0 ? Math.round((a - lt) / lt * 1000) / 10 : '—'); }); yoyRow.push(gDl > 0 ? Math.round((gDt - gDl) / gDl * 1000) / 10 : '—');
+  const rateRow = ['合计 / 完成率']; months.forEach(m => { const a = colAct[m] || 0, tg = colTgt[m] || 0; rateRow.push(tg > 0 ? Math.round(a / tg * 1000) / 10 + '%' : '—'); }); rateRow.push(gTgt > 0 ? Math.round(gAct / gTgt * 1000) / 10 + '%' : '—');
+  aoa.push(tgtRow); aoa.push(yoyRow); aoa.push(rateRow);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const merges = []; let ci = 1; months.forEach(() => { merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ci += 3; }); merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ci += 3; merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ws['!merges'] = merges;
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '团队业绩统计');
