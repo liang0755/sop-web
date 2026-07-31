@@ -14029,15 +14029,26 @@ function renderMgrPerf() {
 }
 
 // ===== 管理绩效附件留存 =====
-// 节点：formConfig/mgrPerfAttachments/{year}_{month}_{team} -> {title, note, images:[base64], updatedAt, updatedBy}
+// 数据结构：formConfig/mgrPerfAttachments/{year}_{month}_{team}/
+//   records: { recId: {title, images:[base64], updatedAt, updatedBy} }
+// 兼容旧版单条结构 {title, note, images} -> 自动按 legacy_id 包成一条记录。
 // 仅管理员可编辑。图片本地压缩到宽 1200px JPEG（≤~300KB）后转 base64 存 RTDB。
 let mgrPerfAttachMonth = new Date().getMonth() + 1;
 function mgrPerfAttachKey(year, month, team) {
   return String(year) + '_' + String(month).padStart(2, '0') + '_' + team;
 }
-function mgrPerfAttachGet(year, month, team) {
+function mgrPerfAttachGetRecords(year, month, team) {
   const data = (cloudData.formConfig && cloudData.formConfig.mgrPerfAttachments) || {};
-  return data[mgrPerfAttachKey(year, month, team)] || null;
+  const entry = data[mgrPerfAttachKey(year, month, team)];
+  if (!entry) return [];
+  if (entry.records && typeof entry.records === 'object') {
+    return Object.entries(entry.records).map(([id, r]) => ({ id, title: r.title || '', images: r.images || [], updatedAt: r.updatedAt || 0, updatedBy: r.updatedBy || '' }));
+  }
+  // 旧版单条结构兜底
+  if (entry.title || entry.note || (entry.images && entry.images.length)) {
+    return [{ id: 'legacy', title: entry.title || '', images: entry.images || [], updatedAt: entry.updatedAt || 0, updatedBy: entry.updatedBy || '' }];
+  }
+  return [];
 }
 function mgrPerfAttachTeams() {
   const teams = new Set();
@@ -14045,6 +14056,34 @@ function mgrPerfAttachTeams() {
   (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
   return [...teams].sort((a, b) => a.localeCompare(b, 'zh'));
 }
+async function mgrPerfAttachSaveRecord(year, month, team, recId, rec) {
+  if (!cloudData.formConfig) cloudData.formConfig = {};
+  if (!cloudData.formConfig.mgrPerfAttachments) cloudData.formConfig.mgrPerfAttachments = {};
+  const key = mgrPerfAttachKey(year, month, team);
+  if (!cloudData.formConfig.mgrPerfAttachments[key]) cloudData.formConfig.mgrPerfAttachments[key] = {};
+  const node = cloudData.formConfig.mgrPerfAttachments[key];
+  // 旧版单条结构兜底迁移：把 {title, note, images} 包成 records.legacy
+  if (!node.records && (node.title || node.note || (node.images && node.images.length))) {
+    node.records = { legacy: { title: node.title || '', images: node.images || [], updatedAt: node.updatedAt || 0, updatedBy: node.updatedBy || '' } };
+    delete node.title; delete node.note; delete node.images; delete node.updatedAt; delete node.updatedBy;
+  }
+  if (!node.records) node.records = {};
+  node.records[recId] = rec;
+  await apiUpdate('formConfig', 'mgrPerfAttachments', cloudData.formConfig.mgrPerfAttachments);
+}
+async function mgrPerfAttachDelRecord(year, month, team, recId) {
+  const key = mgrPerfAttachKey(year, month, team);
+  if (!cloudData.formConfig.mgrPerfAttachments || !cloudData.formConfig.mgrPerfAttachments[key]) return;
+  const node = cloudData.formConfig.mgrPerfAttachments[key];
+  if (node.records && node.records[recId]) {
+    delete node.records[recId];
+    if (Object.keys(node.records).length === 0) delete cloudData.formConfig.mgrPerfAttachments[key];
+  } else if (recId === 'legacy') {
+    delete cloudData.formConfig.mgrPerfAttachments[key];
+  }
+  await apiUpdate('formConfig', 'mgrPerfAttachments', cloudData.formConfig.mgrPerfAttachments);
+}
+
 // 图片压缩：最长边 1200px、JPEG 0.85
 function compressImageToBase64(file, maxWidth, quality) {
   return new Promise((resolve, reject) => {
@@ -14070,6 +14109,16 @@ function compressImageToBase64(file, maxWidth, quality) {
   });
 }
 
+// 点击图片预览（深色背景居中，任意位置点击关闭）
+function showMgrAttachPreview(src) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;cursor:zoom-out';
+  overlay.innerHTML = '<img src="' + src + '" style="max-width:92vw;max-height:92vh;object-fit:contain;box-shadow:0 0 40px rgba(0,0,0,.5);border-radius:6px">';
+  overlay.addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
+}
+
+// 列表页：每条记录一行；同团队用 rowspan 合并首列；团队末尾追加「+ 新增记录」
 function renderMgrPerfAttachmentsTab() {
   const curYear = new Date().getFullYear().toString();
   if (!mgrPerfYear || mgrPerfYearOptions().indexOf('value="' + mgrPerfYear + '"') < 0) mgrPerfYear = curYear;
@@ -14077,28 +14126,53 @@ function renderMgrPerfAttachmentsTab() {
   const monthOpts = [1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${m===mgrPerfAttachMonth?'selected':''}>${m}月</option>`).join('');
   const teams = mgrPerfAttachTeams();
   const year = mgrPerfYear, month = mgrPerfAttachMonth;
-  const rows = teams.map(team => {
-    const rec = mgrPerfAttachGet(year, month, team);
-    const imgCount = rec && rec.images ? rec.images.length : 0;
-    const hasNote = rec && (rec.note || rec.title);
-    let status;
-    if (imgCount > 0 && hasNote) status = `<span style="color:#16a34a;font-weight:600">📎 ${imgCount} 图 + 文字</span>`;
-    else if (imgCount > 0) status = `<span style="color:#0ea5e9;font-weight:600">📷 ${imgCount} 张图片</span>`;
-    else if (hasNote) status = `<span style="color:#0891b2;font-weight:600">📝 仅有文字</span>`;
-    else status = `<span style="color:var(--gray-400)">未登记</span>`;
-    const upd = rec && rec.updatedAt ? new Date(rec.updatedAt).toLocaleString('zh-CN') : '—';
-    const by = rec && rec.updatedBy ? ` <span style="color:var(--gray-400)">（${esc(rec.updatedBy)}）</span>` : '';
-    return `<tr>
-      <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100);font-weight:600">${esc(team)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100)">${status}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100)">${rec && rec.title ? esc(rec.title) : '<span style="color:var(--gray-400)">—</span>'}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100);font-size:12px;color:var(--gray-500)">${upd}${by}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100);text-align:right;white-space:nowrap">
-        ${isAdmin ? `<button class="btn btn-sm ${rec ? 'btn-outline' : 'btn-primary'}" onclick="openMgrAttachEditor('${esc(team)}')">${rec ? '✏️ 编辑' : '➕ 登记'}</button>` : ''}
-        ${rec && isAdmin ? ` <button class="btn btn-sm btn-outline" style="color:#dc2626" onclick="delMgrAttach('${esc(team)}')">🗑</button>` : ''}
-      </td>
-    </tr>`;
-  }).join('');
+
+  const rows = [];
+  let totalRecords = 0;
+  teams.forEach(team => {
+    const recs = mgrPerfAttachGetRecords(year, month, team);
+    const safeTeam = esc(team);
+    if (!recs.length) {
+      // 没有任何记录：仅一行，团队列 + 一个「+ 新增记录」按钮
+      rows.push(`<tr>
+        <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100);font-weight:600">${safeTeam}</td>
+        <td colspan="3" style="padding:10px 12px;border-bottom:1px solid var(--gray-100);color:var(--gray-400)">本团队本月暂未登记</td>
+        <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100);text-align:right;white-space:nowrap">${isAdmin ? `<button class="btn btn-sm btn-primary" onclick="openMgrAttachEditor('${safeTeam}', null)">➕ 新增记录</button>` : ''}</td>
+      </tr>`);
+      return;
+    }
+    totalRecords += recs.length;
+    recs.forEach((r, idx) => {
+      const safeId = esc(r.id);
+      const titleHtml = r.title ? esc(r.title) : '<span style="color:var(--gray-400)">（无标题）</span>';
+      const upd = r.updatedAt ? new Date(r.updatedAt).toLocaleString('zh-CN') : '—';
+      const by = r.updatedBy ? ` <span style="color:var(--gray-400)">（${esc(r.updatedBy)}）</span>` : '';
+      // 缩略图横向排列（最多前 5 张 + 「+N」超出）
+      const imgs = r.images || [];
+      const visibleImgs = imgs.slice(0, 5);
+      const more = imgs.length - visibleImgs.length;
+      const thumbs = visibleImgs.length
+        ? visibleImgs.map((s, i) => `<img src="${s}" data-preview="${i}" data-rid="${safeId}" data-team="${safeTeam}" style="width:46px;height:46px;object-fit:cover;border:1px solid var(--gray-200);border-radius:4px;cursor:zoom-in;background:#f1f5f9">`).join('') +
+          (more > 0 ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:46px;height:46px;border:1px solid var(--gray-200);border-radius:4px;background:#f1f5f9;color:var(--gray-500);font-size:12px;font-weight:600">+${more}</span>` : '')
+        : '<span style="color:var(--gray-400);font-size:12px">无图片</span>';
+      const teamCell = idx === 0 ? `<td style="padding:10px 12px;border-bottom:1px solid var(--gray-100);font-weight:600;vertical-align:top" rowspan="${recs.length}">${safeTeam}<div style="font-size:11px;color:var(--gray-400);font-weight:400;margin-top:2px">${recs.length} 条记录</div></td>` : '';
+      rows.push(`<tr>
+        ${teamCell}
+        <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100);vertical-align:top">${titleHtml}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100);vertical-align:top"><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${thumbs}</div></td>
+        <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100);vertical-align:top;font-size:12px;color:var(--gray-500);white-space:nowrap">${upd}${by}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid var(--gray-100);vertical-align:top;text-align:right;white-space:nowrap">
+          ${isAdmin ? `<button class="btn btn-sm btn-outline" onclick="openMgrAttachEditor('${safeTeam}', '${safeId}')">✏️ 编辑</button> <button class="btn btn-sm btn-outline" style="color:#dc2626" onclick="delMgrAttachRecord('${safeTeam}', '${safeId}')">🗑</button>` : ''}
+        </td>
+      </tr>`);
+    });
+    if (isAdmin) {
+      rows.push(`<tr>
+        <td colspan="4" style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${isAdmin ? `<button class="btn btn-sm btn-primary" onclick="openMgrAttachEditor('${safeTeam}', null)">➕ 新增记录</button>` : ''}</td>
+      </tr>`);
+    }
+  });
+
   document.getElementById('contentBody').innerHTML = `
     <div class="card">
       <div class="card-header">
@@ -14116,50 +14190,62 @@ function renderMgrPerfAttachmentsTab() {
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" onchange="mgrPerfYear=this.value;renderMgrPerf()">${mgrPerfYearOptions()}</select></div>
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" onchange="mgrPerfAttachMonth=parseInt(this.value,10);renderMgrPerf()">${monthOpts}</select></div>
           <div style="font-size:12px;color:var(--gray-500);margin-left:auto;align-self:center">
-            共 <b>${teams.length}</b> 个团队 · 当前仅显示 <b>${year}年${month}月</b> 的附件
+            共 <b>${teams.length}</b> 个团队 · <b>${totalRecords}</b> 条记录 · 当前仅显示 <b>${year}年${month}月</b>
           </div>
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">说明：管理绩效附件留存支持按「团队 + 月」登记文字与图片佐证（最多 10 张/团队）。图片自动压缩到宽 1200px JPEG（≤~300KB）后转 base64 存云端；拖动图片到上传区或点击选择均可。${isAdmin ? '你是管理员，可以新增/编辑/删除。' : '当前账号仅可查看，不可编辑。'}</div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">说明：管理绩效附件留存按「团队 + 月」分类，每个团队每月可挂多条记录，每条记录包含标题和图片（最多 10 张）。图片自动压缩到宽 1200px JPEG（≤~300KB）后转 base64 存云端；拖动到上传区或点击选择均可。点击列表中的小图可放大预览。${isAdmin ? '你是管理员，可以新增/编辑/删除。' : '当前账号仅可查看，不可编辑。'}</div>
         <div class="table-wrap"><table class="sticky-cols" style="min-width:100%">
           <thead><tr style="background:var(--gray-50)">
-            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:160px">团队</th>
-            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:140px">状态</th>
-            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200)">标题</th>
-            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:200px">最后更新</th>
+            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:160px;vertical-align:top">团队</th>
+            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:240px">标题</th>
+            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200)">图片</th>
+            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:180px">最后更新</th>
             <th style="padding:10px 12px;text-align:right;border-bottom:1px solid var(--gray-200);width:160px">操作</th>
           </tr></thead>
-          <tbody>${rows || '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--gray-400)">暂无团队</td></tr>'}</tbody>
+          <tbody>${rows.join('') || '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--gray-400)">暂无团队</td></tr>'}</tbody>
         </table></div>
       </div>
     </div>`;
+
+  // 绑定列表缩略图点击预览（事件代理）
+  const tbody = document.querySelector('#contentBody tbody');
+  if (tbody) {
+    tbody.querySelectorAll('img[data-preview]').forEach(img => {
+      img.addEventListener('click', (e) => {
+        const team = img.dataset.team, rid = img.dataset.rid;
+        const recs = mgrPerfAttachGetRecords(mgrPerfYear, mgrPerfAttachMonth, team);
+        const rec = recs.find(r => r.id === rid);
+        if (rec && rec.images && rec.images.length) showMgrAttachPreview(rec.images[parseInt(img.dataset.preview, 10)]);
+      });
+    });
+  }
 }
 
-function openMgrAttachEditor(team) {
+function openMgrAttachEditor(team, recId) {
   const year = mgrPerfYear;
   const month = mgrPerfAttachMonth;
-  const rec = mgrPerfAttachGet(year, month, team) || {};
-  const editingImages = (rec.images || []).slice();
+  const isEdit = !!recId;
+  const recs = mgrPerfAttachGetRecords(year, month, team);
+  const existing = isEdit ? recs.find(r => r.id === recId) : null;
+  const editingImages = existing ? existing.images.slice() : [];
+  const titleVal = existing ? (existing.title || '') : '';
   const overlay = document.createElement('div');
   overlay.id = 'mgrAttachEditor';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center';
   overlay.innerHTML = `
     <div style="background:#fff;border-radius:12px;width:min(720px,94vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.2)">
       <div style="padding:14px 18px;border-bottom:1px solid var(--gray-200);display:flex;align-items:center;justify-content:space-between">
-        <div style="font-size:15px;font-weight:600">📎 管理绩效附件留存 · <span style="color:#2563eb">${esc(team)}</span> · ${year}年${month}月</div>
+        <div style="font-size:15px;font-weight:600">📎 ${isEdit ? '编辑附件' : '新增附件'} · <span style="color:#2563eb">${esc(team)}</span> · ${year}年${month}月</div>
         <button type="button" id="mgrAttachClose" style="border:none;background:transparent;font-size:22px;cursor:pointer;color:var(--gray-500);line-height:1">×</button>
       </div>
       <div style="padding:16px 18px;overflow:auto;flex:1">
         <div style="margin-bottom:12px">
-          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">标题（可选）</label>
-          <input type="text" id="mgrAttachTitle" class="form-control" placeholder="例：Q3 复盘会议纪要" value="${esc(rec.title || '')}" maxlength="100">
-        </div>
-        <div style="margin-bottom:12px">
-          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">文字描述</label>
-          <textarea id="mgrAttachNote" class="form-control" rows="4" placeholder="记录本期要点、考核口径、问题跟进等..." style="resize:vertical;font-family:inherit;line-height:1.5">${esc(rec.note || '')}</textarea>
+          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">标题</label>
+          <input type="text" id="mgrAttachTitle" class="form-control" placeholder="例：Q3 复盘会议纪要" value="${esc(titleVal)}" maxlength="100">
         </div>
         <div>
           <label style="font-size:12px;color:var(--gray-500);display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span>图片 <span style="color:var(--gray-400)">（最多 10 张，拖动或点击上传）</span></span>
+            <span>图片 <span style="color:var(--gray-400)">（最多 10 张，拖动或点击上传，点击图片放大预览）</span></span>
             <span id="mgrAttachImgCount" style="font-weight:600;color:#2563eb">${editingImages.length}/10</span>
           </label>
           <div id="mgrAttachDrop" style="border:2px dashed #cbd5e1;border-radius:10px;padding:18px;text-align:center;background:#f8fafc;cursor:pointer;transition:all .15s">
@@ -14191,11 +14277,11 @@ function openMgrAttachEditor(team) {
     }
     grid.innerHTML = editingImages.map((img, i) => `
       <div style="position:relative;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden;background:#f1f5f9;aspect-ratio:1;display:flex;align-items:center;justify-content:center">
-        <img src="${img}" style="width:100%;height:100%;object-fit:cover;cursor:pointer" data-idx="${i}">
+        <img src="${img}" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in" data-prev="${i}">
         <button type="button" data-rm="${i}" style="position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;border:none;background:rgba(0,0,0,.6);color:#fff;cursor:pointer;font-size:14px;line-height:1;padding:0">×</button>
       </div>`).join('');
-    grid.querySelectorAll('img').forEach(img => {
-      img.addEventListener('click', () => window.open(img.src, '_blank'));
+    grid.querySelectorAll('img[data-prev]').forEach(img => {
+      img.addEventListener('click', () => showMgrAttachPreview(img.src));
     });
     grid.querySelectorAll('button[data-rm]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -14224,7 +14310,6 @@ function openMgrAttachEditor(team) {
     }
   }
 
-  // 拖动上传
   drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.style.background = '#e0ecff'; drop.style.borderColor = '#2563eb'; });
   drop.addEventListener('dragleave', () => { drop.style.background = '#f8fafc'; drop.style.borderColor = '#cbd5e1'; });
   drop.addEventListener('drop', (e) => {
@@ -14239,28 +14324,22 @@ function openMgrAttachEditor(team) {
     fileInput.value = '';
   });
 
-  // 关闭
   function close() { overlay.remove(); }
   overlay.querySelector('#mgrAttachClose').addEventListener('click', close);
   overlay.querySelector('#mgrAttachCancel').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
-  // 保存
   overlay.querySelector('#mgrAttachSave').addEventListener('click', async () => {
     const title = overlay.querySelector('#mgrAttachTitle').value.trim();
-    const note = overlay.querySelector('#mgrAttachNote').value.trim();
-    if (!title && !note && !editingImages.length) {
-      showToast('请至少填写标题/文字或上传图片', 'warning');
+    if (!title && !editingImages.length) {
+      showToast('请至少填写标题或上传图片', 'warning');
       return;
     }
-    const data = { title, note, images: editingImages, updatedAt: Date.now(), updatedBy: (currentUser && currentUser.name) || 'system' };
-    const key = mgrPerfAttachKey(year, month, team);
-    if (!cloudData.formConfig) cloudData.formConfig = {};
-    if (!cloudData.formConfig.mgrPerfAttachments) cloudData.formConfig.mgrPerfAttachments = {};
-    cloudData.formConfig.mgrPerfAttachments[key] = data;
+    const newId = isEdit ? recId : (Date.now() + '_' + Math.random().toString(36).slice(2, 6));
+    const rec = { title, images: editingImages, updatedAt: Date.now(), updatedBy: (currentUser && currentUser.name) || 'system' };
     try {
-      await apiUpdate('formConfig', 'mgrPerfAttachments', cloudData.formConfig.mgrPerfAttachments);
-      showToast('已保存', 'success');
+      await mgrPerfAttachSaveRecord(year, month, team, newId, rec);
+      showToast(isEdit ? '已更新' : '已新增', 'success');
       close();
       renderMgrPerf();
     } catch (e) {
@@ -14271,16 +14350,10 @@ function openMgrAttachEditor(team) {
   renderGrid();
 }
 
-async function delMgrAttach(team) {
-  if (!confirm('确定删除「' + team + '」在 ' + mgrPerfYear + '年' + mgrPerfAttachMonth + '月 的附件？此操作不可恢复。')) return;
-  const key = mgrPerfAttachKey(mgrPerfYear, mgrPerfAttachMonth, team);
-  if (!cloudData.formConfig || !cloudData.formConfig.mgrPerfAttachments || !cloudData.formConfig.mgrPerfAttachments[key]) {
-    showToast('该团队此月暂无附件', 'info');
-    return;
-  }
-  delete cloudData.formConfig.mgrPerfAttachments[key];
+async function delMgrAttachRecord(team, recId) {
+  if (!confirm('确定删除「' + team + '」的该附件记录？此操作不可恢复。')) return;
   try {
-    await apiUpdate('formConfig', 'mgrPerfAttachments', cloudData.formConfig.mgrPerfAttachments);
+    await mgrPerfAttachDelRecord(mgrPerfYear, mgrPerfAttachMonth, team, recId);
     showToast('已删除', 'success');
     renderMgrPerf();
   } catch (e) {
