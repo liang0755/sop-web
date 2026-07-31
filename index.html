@@ -10709,13 +10709,15 @@ function renderSalesBoardTable(tid, key) {
     gtCell += `<div style="font-size:11px;margin-top:3px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(gTgt)}</div><div style="font-size:11px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">完成 ${gr.toFixed(1)}%</div>`;
   }
   let gtDyn = '';
-  const gDynThis = rowsArr.reduce((s, r) => s + (r.dynThis || 0), 0);
-  const gDynLast = rowsArr.reduce((s, r) => s + (r.dynLast || 0), 0);
-  if (gDynLast > 0) {
-    const gg = (gDynThis - gDynLast) / gDynLast * 100;
-    gtDyn = `<td class="dyoy-cell"><div class="${gg >= 0 ? 'yoy-pos' : 'yoy-neg'}">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}%</div><div class="dyoy-sub">今年 ${fmtSalesMoney(gDynThis)}</div><div class="dyoy-sub">去年 ${fmtSalesMoney(gDynLast)}</div></td>`;
-  } else {
-    gtDyn = `<td class="dyoy-cell"><span class="yoy-none">— 同比</span></td>`;
+  if (sbShowYoy) {
+    const gDynThis = rowsArr.reduce((s, r) => s + (r.dynThis || 0), 0);
+    const gDynLast = rowsArr.reduce((s, r) => s + (r.dynLast || 0), 0);
+    if (gDynLast > 0) {
+      const gg = (gDynThis - gDynLast) / gDynLast * 100;
+      gtDyn = `<td class="dyoy-cell"><div class="${gg >= 0 ? 'yoy-pos' : 'yoy-neg'}">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}%</div><div class="dyoy-sub">今年 ${fmtSalesMoney(gDynThis)}</div><div class="dyoy-sub">去年 ${fmtSalesMoney(gDynLast)}</div></td>`;
+    } else {
+      gtDyn = `<td class="dyoy-cell"><span class="yoy-none">— 同比</span></td>`;
+    }
   }
   h += `<td class="num">${gtCell}</td>${gtDyn}</tr></tfoot>`;
   document.getElementById(tid).innerHTML = h;
