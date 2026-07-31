@@ -10699,7 +10699,7 @@ function renderSalesBoardTable(tid, key) {
       h += `</tr>`;
     }
   });
-  // 合计行：拆为 3 个子 tr（目标 → 同比 → 完成率），按 sbShowYoy 控制显隐
+  // 合计行：单 tr，合计单元格内 4 行堆叠（业绩 / 同比 / 目标 / 完成率）
   let gt = 0;
   const colTgt = {};
   rowsArr.forEach(row => {
@@ -10717,56 +10717,28 @@ function renderSalesBoardTable(tid, key) {
     Object.keys(sbLastYearTeamMap).forEach(k => { s += sbLastYearTeamMap[k][lyKey] || 0; });
     colLy[m] = s;
   });
-  h += '</tbody><tfoot>';
-
-  // 子行 1：目标（每月目标合计 + 全年目标合计）
-  h += '<tr class="total-row"><td>合计 / 目标</td>';
-  months.forEach(m => {
-    const tgv = colTgt[m] || 0;
-    h += `<td class="num" style="white-space:nowrap;font-weight:600;color:${tgv > 0 ? 'var(--gray-700)' : 'var(--gray-400)'}">${tgv > 0 ? fmtSalesMoney(tgv) : '—'}</td>`;
-  });
-  h += `<td class="num" style="white-space:nowrap;font-weight:700;color:${gTgt > 0 ? 'var(--gray-700)' : 'var(--gray-400)'}">${gTgt > 0 ? fmtSalesMoney(gTgt) : '—'}</td>`;
-  if (sbShowYoy) h += '<td class="dyoy-cell"></td>';
-  h += '</tr>';
-
-  // 子行 2：同比（受 sbShowYoy 控制；每月同比 + 累计同比）
+  h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
+  months.forEach(m => { h += `<td class="num">${fmtSalesMoney(colTot[m] || 0)}</td>`; });
+  let gtCell = fmtSalesMoney(gt);
+  if (key === 'team' && gTgt > 0) {
+    const gr = gt / gTgt * 100;
+    gtCell += `<div class="tgt-line" style="white-space:nowrap;font-weight:600;color:${gTgt > 0 ? 'var(--gray-700)' : 'var(--gray-400)'}">目标 ${fmtSalesMoney(gTgt)}</div>`
+            + `<div class="rate-line" style="white-space:nowrap;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">完成 ${gr.toFixed(1)}%</div>`;
+  }
+  let gtDyn = '';
   if (sbShowYoy) {
-    h += '<tr class="total-row"><td>合计 / 同比</td>';
-    months.forEach(m => {
-      const thisM = colTot[m] || 0, lastM = colLy[m] || 0;
-      if (lastM > 0) {
-        const g = (thisM - lastM) / lastM * 100;
-        h += `<td class="num dyoy-cell" style="white-space:nowrap"><div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}">${g >= 0 ? '+' : ''}${g.toFixed(1)}%</div></td>`;
-      } else {
-        h += `<td class="num dyoy-cell"><span class="yoy-none">— 同比</span></td>`;
-      }
-    });
     const gDynThis = rowsArr.reduce((s, r) => s + (r.dynThis || 0), 0);
     const gDynLast = rowsArr.reduce((s, r) => s + (r.dynLast || 0), 0);
     if (gDynLast > 0) {
       const gg = (gDynThis - gDynLast) / gDynLast * 100;
-      h += `<td class="num dyoy-cell"><div class="${gg >= 0 ? 'yoy-pos' : 'yoy-neg'}">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}%</div><div class="dyoy-sub">今年 ${fmtSalesMoney(gDynThis)}</div><div class="dyoy-sub">去年 ${fmtSalesMoney(gDynLast)}</div></td>`;
+      gtDyn = `<div class="dyoy-cell" style="white-space:nowrap">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}%`
+            + `<div class="dyoy-sub" style="white-space:nowrap">今年 ${fmtSalesMoney(gDynThis)}</div>`
+            + `<div class="dyoy-sub" style="white-space:nowrap">去年 ${fmtSalesMoney(gDynLast)}</div></div>`;
     } else {
-      h += `<td class="num dyoy-cell"><span class="yoy-none">— 同比</span></td>`;
+      gtDyn = `<div class Idle class="dyoy-cell" style="white-space:nowrap"><span class="yoy-none">— 同比</span></div>`;
     }
-    h += '<td></td></tr>';
   }
-
-  // 子行 3：完成率（每月完成率 + 全年完成率）
-  h += '<tr class="total-row"><td>合计 / 完成率</td>';
-  months.forEach(m => {
-    const a = colTot[m] || 0, tg = colTgt[m] || 0;
-    if (tg > 0) {
-      const r = a / tg * 100;
-      h += `<td class="num" style="white-space:nowrap;font-weight:600;color:${r >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">${r.toFixed(1)}%</td>`;
-    } else {
-      h += `<td class="num" style="white-space:nowrap;color:var(--gray-400)">—</td>`;
-    }
-  });
-  const gr = gTgt > 0 ? (gt / gTgt * 100) : 0;
-  h += `<td class="num" style="white-space:nowrap;font-weight:700;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">${gTgt > 0 ? gr.toFixed(1) + '%' : '—'}</td>`;
-  if (sbShowYoy) h += '<td class="dyoy-cell"></td>';
-  h += '</tr></tfoot>';
+  h += `<td class="num">${gtCell}${gtDyn}</td></tr></tfoot>`;
   document.getElementById(tid).innerHTML = h;
 }
 
