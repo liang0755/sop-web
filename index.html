@@ -10671,7 +10671,7 @@ function renderSalesBoardTable(tid, key) {
         const tgt = (teamTargets[row.k] && teamTargets[row.k][m.slice(5)]) || 0;
         if (tgt > 0) {
           const rate = v / tgt * 100;
-          cell += `<div style="font-size:11px;margin-top:2px;font-weight:600;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(tgt)} · 完成 ${rate.toFixed(1)}%</div>`;
+          cell += `<div style="font-size:11px;margin-top:2px;font-weight:600;white-space:nowrap;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(tgt)} · 完成 ${rate.toFixed(1)}%</div>`;
         } else {
           cell += `<div class="yoy-none">目标未设</div>`;
         }
@@ -11058,6 +11058,7 @@ function renderSalesBoardTableEff(tid, key) {
   const st = sbSortState[tid] || {};
   const sbSortCol = st.col || null;
   const sbSortDir = st.dir || 'desc';
+  // 占位：保留函数签名稳定
   const months = sbMonthList();
   const map = {};
   cloudData.salesRecords.forEach(r => {
@@ -11083,7 +11084,11 @@ function renderSalesBoardTableEff(tid, key) {
       return sbSortDir === 'asc' ? va - vb : vb - va;
     });
   } else {
-    rowsArr.sort((a, b) => b.t - a.t);
+    rowsArr.sort((a, b) => {
+      const ta = teamOrderRank(a.k), tb = teamOrderRank(b.k);
+      if (ta !== tb) return ta - tb;
+      return b.t - a.t;
+    });
   }
   let h = '<thead><tr><th>团队/门店</th>';
   months.forEach(m => {
