@@ -10717,8 +10717,30 @@ function renderSalesBoardTable(tid, key) {
     Object.keys(sbLastYearTeamMap).forEach(k => { s += sbLastYearTeamMap[k][lyKey] || 0; });
     colLy[m] = s;
   });
-  h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
-  months.forEach(m => { h += `<td class="num">${fmtSalesMoney(colTot[m] || 0)}</td>`; });
+h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
+  months.forEach(m => {
+    let cell = `<td class="num">${fmtSalesMoney(colTot[m] || 0)}`;
+    if (key === 'team') {
+      const lyv = (sbLastYearTeamMap[key] && sbLastYearTeamMap[key][lyMonth(m)]) ? sbLastYearTeamMap[key][lyMonth(m)] : 0;
+      if (sbShowYoy) {
+        if (lyv > 0) {
+          const g = (colTot[m] - lyv) / lyv * 100;
+          cell += `<div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${g >= 0 ? '+' : ''}${g.toFixed(1)}% 同比 </div>`;
+        } else {
+          cell += `<div class="yoy-none" style="white-space:nowrap">— 同比 </div>`;
+        }
+      }
+      const tgt = (teamTargets[key] && teamTargets[key][m.slice(5)]) || 0;
+      if (tgt > 0) {
+        const rate = colTot[m] / tgt * 100;
+        cell += `<div style="font-size:11px;margin-top:2px;font-weight:600;white-space:nowrap;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(tgt)}</div>`
+              + `<div style="font-size:11px;font-weight:600;white-space:nowrap;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">完成 ${rate.toFixed(1)}%`;
+        cell += `</div>`;
+      }
+      cell += `</td>`;
+      h += cell;
+    }
+  });
   let gtCell = fmtSalesMoney(gt);
   let gtDyn = '';
   if (sbShowYoy) {
@@ -10735,7 +10757,7 @@ function renderSalesBoardTable(tid, key) {
   if (key === 'team' && gTgt > 0) {
     const gr = gt / gTgt * 100;
     gtCell += `<div style="font-size:11px;margin-top:3px;font-weight:600;color:${gTgt > 0 ? 'var(--gray-700)' : 'var(--gray-400)'};white-space:nowrap">目标 ${fmtSalesMoney(gTgt)}</div>`
-            + `<div style="font-size:11px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'};white-space:nowrap">完成 ${gr.toFixed(1)}%</div>`;
+          + `<div style="font-size:11px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'};white-space:nowrap">完成 ${gr.toFixed(1)}%</div>`;
   }
   h += `<td class="num">${gtCell}</td></tr></tfoot>`;
   document.getElementById(tid).innerHTML = h;
