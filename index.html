@@ -8820,6 +8820,7 @@ const selectedSalesIds = new Set();
 let sbSortState = {};          // 各看板独立排序状态：{ [tid]: { col: 'total'|'YYYY-MM', dir: 'asc'|'desc' } }，避免看板间排序联动
 let sbLastYearTeamMap = {};    // 团队 -> { 'YYYY-MM': 金额 }（上一年，用于同比）
 let sbDynMode = 'year';        // 动态同比口径：'year'=年初(01)累计到结束月；'range'=仅当前显示区间(起始月→结束月)
+let sbShowYoy = true;          // 是否显示同比(动态同比)数据：false 时看板隐藏「动态同比」列与逐格同比提示
 let sbTargetDraft = {};        // 团队月目标编辑草稿：{ 团队: { '01'..'12': 金额 } }
 let sbTargetDraftYear = '';    // 当前草稿所属年份
 let sbTargetTeams = [];        // 目标编辑表的团队顺序（用于按行索引更新）
@@ -9602,6 +9603,12 @@ function renderSalesBoardStats() {
             <button type="button" id="segDynYear" class="seg-btn ${sbDynMode==='year'?'active':''}" onclick="sbSetDynMode('year')">年初累计</button>
             <button type="button" id="segDynRange" class="seg-btn ${sbDynMode==='range'?'active':''}" onclick="sbSetDynMode('range')">区间累计</button>
           </div>
+        </div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">同比显示</label>
+          <label class="switch" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="sbShowYoyChk" ${sbShowYoy?'checked':''} onchange="sbShowYoy=this.checked;renderSalesBoards()">
+            <span style="font-size:12px">显示同比数据</span>
+          </label>
         </div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="sbReset()">重置为全年</button></div>
       </div></div>
@@ -10564,6 +10571,7 @@ function sbSortBy(col, tid) {
 
 // 团队/销售员业绩「动态同比」单元格：年初(01)→显示范围结束月的今年累计 vs 去年同区间累计
 function dynYoyCellHTML(row) {
+  if (!sbShowYoy) return '';
   if (row.dynYoy == null) return `<td class="dyoy-cell"><span class="yoy-none">— 同比</span></td>`;
   const g = row.dynYoy;
   return `<td class="dyoy-cell">` +
@@ -10641,7 +10649,7 @@ function renderSalesBoardTable(tid, key) {
   h += `<th class="num sort-th${totAct}" onclick="sbSortBy('total', '${tid}')">合计<span class="sort-ind${totAct}">${totInd}</span></th>`;
   const dynInd = sbSortCol === 'dynyoy' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
   const dynAct = sbSortCol === 'dynyoy' ? ' active' : '';
-  h += `<th class="dyoy-th num sort-th${dynAct}" onclick="sbSortBy('dynyoy', '${tid}')">动态同比<span style="font-size:10px;font-weight:400;color:var(--gray-400)"> ${sbDynMode === 'year' ? '年初' : '区间'}→${sbStartM}–${sbEndM}月</span><span class="sort-ind${dynAct}">${dynInd}</span></th></tr></thead><tbody>`;
+  if (sbShowYoy) h += `<th class="dyoy-th num sort-th${dynAct}" onclick="sbSortBy('dynyoy', '${tid}')">动态同比<span style="font-size:10px;font-weight:400;color:var(--gray-400)"> ${sbDynMode === 'year' ? '年初' : '区间'}→${sbStartM}–${sbEndM}月</span><span class="sort-ind${dynAct}">${dynInd}</span></th>`;
   const colTot = {};
   rowsArr.forEach(row => {
     const label = key === 'team' ? `<span class="badge badge-team">${esc(row.k)}</span>` : (esc(row.k) + userStatusBadge(row.k, userMap));
@@ -10652,16 +10660,18 @@ function renderSalesBoardTable(tid, key) {
       let cell = `<td class="num">${fmtSalesMoney(v)}`;
       if (key === 'team') {
         const lyv = (sbLastYearTeamMap[row.k] && sbLastYearTeamMap[row.k][lyMonth(m)]) ? sbLastYearTeamMap[row.k][lyMonth(m)] : 0;
+        if (sbShowYoy) {
         if (lyv > 0) {
           const g = (v - lyv) / lyv * 100;
-          cell += `<div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${g >= 0 ? '+' : ''}${g.toFixed(1)}% 同比</div>`;
+          cell += `<div class="${g >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${g >= 0 ? '+' : ''}${g.toFixed(1)}% 同比 </div>`;
         } else {
-          cell += `<div class="yoy-none" style="white-space:nowrap">— 同比</div>`;
+          cell += `<div class="yoy-none" style="white-space:nowrap">— 同比 </div>`;
+        }
         }
         const tgt = (teamTargets[row.k] && teamTargets[row.k][m.slice(5)]) || 0;
         if (tgt > 0) {
           const rate = v / tgt * 100;
-          cell += `<div style="font-size:11px;margin-top:2px;font-weight:600;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">完成 ${rate.toFixed(1)}%</div>`;
+          cell += `<div style="font-size:11px;margin-top:2px;font-weight:600;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(tgt)} · 完成 ${rate.toFixed(1)}%</div>`;
         } else {
           cell += `<div class="yoy-none">目标未设</div>`;
         }
