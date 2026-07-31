@@ -10671,7 +10671,8 @@ function renderSalesBoardTable(tid, key) {
         const tgt = (teamTargets[row.k] && teamTargets[row.k][m.slice(5)]) || 0;
         if (tgt > 0) {
           const rate = v / tgt * 100;
-          cell += `<div style="font-size:11px;margin-top:2px;font-weight:600;white-space:nowrap;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(tgt)} · 完成 ${rate.toFixed(1)}%</div>`;
+          cell += `<div style="font-size:11px;margin-top:2px;font-weight:600;white-space:nowrap;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(tgt)}</div>`;
+          cell += `<div style="font-size:11px;margin-top:2px;font-weight:600;white-space:nowrap;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">完成 ${rate.toFixed(1)}%</div>`;
         } else {
           cell += `<div class="yoy-none">目标未设</div>`;
         }
