@@ -10720,25 +10720,24 @@ function renderSalesBoardTable(tid, key) {
   h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
   months.forEach(m => { h += `<td class="num">${fmtSalesMoney(colTot[m] || 0)}</td>`; });
   let gtCell = fmtSalesMoney(gt);
-  if (key === 'team' && gTgt > 0) {
-    const gr = gt / gTgt * 100;
-    gtCell += `<div class="tgt-line" style="white-space:nowrap;font-weight:600;color:${gTgt > 0 ? 'var(--gray-700)' : 'var(--gray-400)'}">目标 ${fmtSalesMoney(gTgt)}</div>`
-            + `<div class="rate-line" style="white-space:nowrap;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">完成 ${gr.toFixed(1)}%</div>`;
-  }
   let gtDyn = '';
   if (sbShowYoy) {
     const gDynThis = rowsArr.reduce((s, r) => s + (r.dynThis || 0), 0);
     const gDynLast = rowsArr.reduce((s, r) => s + (r.dynLast || 0), 0);
     if (gDynLast > 0) {
       const gg = (gDynThis - gDynLast) / gDynLast * 100;
-      gtDyn = `<div class="dyoy-cell" style="white-space:nowrap">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}%`
-            + `<div class="dyoy-sub" style="white-space:nowrap">今年 ${fmtSalesMoney(gDynThis)}</div>`
-            + `<div class="dyoy-sub" style="white-space:nowrap">去年 ${fmtSalesMoney(gDynLast)}</div></div>`;
+      gtDyn = `<div class="${gg >= 0 ? 'yoy-pos' : 'yoy-neg'}" style="white-space:nowrap">${gg >= 0 ? '+' : ''}${gg.toFixed(1)}% 同比 </div>`;
     } else {
-      gtDyn = `<div class Idle class="dyoy-cell" style="white-space:nowrap"><span class="yoy-none">— 同比</span></div>`;
+      gtDyn = `<div class="yoy-none" style="white-space:nowrap">— 同比 </div>`;
     }
   }
-  h += `<td class="num">${gtCell}${gtDyn}</td></tr></tfoot>`;
+  gtCell += gtDyn;
+  if (key === 'team' && gTgt > 0) {
+    const gr = gt / gTgt * 100;
+    gtCell += `<div style="font-size:11px;margin-top:3px;font-weight:600;color:${gTgt > 0 ? 'var(--gray-700)' : 'var(--gray-400)'};white-space:nowrap">目标 ${fmtSalesMoney(gTgt)}</div>`
+            + `<div style="font-size:11px;font-weight:600;color:${gr >= 100 ? 'var(--danger)' : 'var(--gray-500)'};white-space:nowrap">完成 ${gr.toFixed(1)}%</div>`;
+  }
+  h += `<td class="num">${gtCell}</td></tr></tfoot>`;
   document.getElementById(tid).innerHTML = h;
 }
 
