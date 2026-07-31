@@ -7936,7 +7936,7 @@ function computeM0VisitRows() {
       rows.push({ date: rd, m0: r.name || '未知', cnt, issues: (ch.issues || '').toString().trim() });
     });
   });
-  rows.sort((a, b) => a.date.localeCompare(b.date) || a.m0.localeCompare(b.m0, 'zh'));
+  rows.sort((a, b) => a.date.localeCompare(b.date) || teamOrderRank(a.m0) - teamOrderRank(b.m0));
   return rows;
 }
 function renderM0VisitStats() {
@@ -8714,7 +8714,7 @@ function renderMissingGrouped(missingUsers) {
     groups[dept].push(u.name);
   });
   // Sort departments alphabetically
-  const sortedDepts = Object.keys(groups).sort();
+  const sortedDepts = Object.keys(groups).sort((a, b) => teamOrderRank(a) - teamOrderRank(b));
   return sortedDepts.map(dept => {
     const names = groups[dept];
     return `<div class="missing-group" style="margin-bottom:10px;display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap">
@@ -9187,7 +9187,7 @@ async function renderSalesDetail() {
   const recs = all.slice(startIdx, startIdx + salesDetailPageSize);
   const colCount = 8 + (canEdit ? 2 : 0);
   // 筛选下拉选项
-  const teams = [...new Set(cloudData.salesRecords.map(r => r.team).filter(Boolean))].sort();
+  const teams = [...new Set(cloudData.salesRecords.map(r => r.team).filter(Boolean))].sort((a, b) => teamOrderRank(a) - teamOrderRank(b));
   const teamOpts = teams.map(t => `<option value="${esc(t)}" ${t === f.team ? 'selected' : ''}>${esc(t)}</option>`).join('');
   const sps = [...new Set(cloudData.salesRecords.map(r => r.salesperson).filter(Boolean))].sort();
   const spOpts = sps.map(s => `<option value="${esc(s)}" ${s === f.salesperson ? 'selected' : ''}>${esc(s)}</option>`).join('');
@@ -9468,7 +9468,7 @@ function sbAllTeams() {
     const t = r.team || getSalesTeam(sp); if (t) teams.add(t);
   });
   (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
-  return [...teams].sort((a, b) => a.localeCompare(b, 'zh'));
+  return [...teams].sort((a, b) => teamOrderRank(a) - teamOrderRank(b));
 }
 // 全部销售员（来自记录，跨年稳定）
 function sbAllPersons() {
@@ -10215,7 +10215,7 @@ function renderSalesBoardCustomer() {
   const def = csDefaultMonthState();
   const year = years.includes(def.year) ? def.year : (years.includes(curYear) ? curYear : (years[years.length - 1] || def.year));
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
-  const teams = [...new Set(records.map(r => r.team).filter(Boolean))].sort();
+  const teams = [...new Set(records.map(r => r.team).filter(Boolean))].sort((a, b) => teamOrderRank(a) - teamOrderRank(b));
   const teamOptsCs = ['<option value="">全部部门</option>'].concat(teams.map(t => `<option value="${esc(t)}">${esc(t)}</option>`)).join('');
   const sps = [...new Set(records.map(r => r.salesperson).filter(Boolean))].sort();
   const spOptsCs = ['<option value="">全部人员</option>'].concat(sps.map(s => `<option value="${esc(s)}">${esc(s)}</option>`)).join('');
@@ -11165,6 +11165,14 @@ function gradeRankIndex(name, levels) {
   const idx = sorted.findIndex(l => l.name === name);
   return idx >= 0 ? idx : 0;
 }
+// 团队名排序：默认按「第X部」数字顺序（一部→二部→三部→…→十部），其余排后
+function teamOrderRank(t) {
+  const m = (t || '').match(/第?\s*([一二三四五六七八九十]+)\s*部/);
+  if (!m) return 99;
+  const cn = m[1];
+  const map = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10};
+  return map[cn] || 99;
+}
 // 销售升降级看板：相对上月职级的自动评级（每月最多升降一级）
 // 降级：本月滚动业绩 < 当前级别 demote 保底线 → 降1级
 // 升级：本月滚动业绩 >= 上一级 promote 下界 → 升1级
@@ -11565,7 +11573,7 @@ function sgTeamOptions(year) {
   });
   // 也从未在职用户 departments 补充
   (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
-  return [...teams].sort((a, b) => a.localeCompare(b, 'zh')).map(t => `<option value="${esc(t)}" ${t === salesGradeTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  return [...teams].sort((a, b) => teamOrderRank(a) - teamOrderRank(b)).map(t => `<option value="${esc(t)}" ${t === salesGradeTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
 }
 function sgTeamFilterChange(val) {
   salesGradeTeamFilter = val;
@@ -11960,7 +11968,7 @@ function refreshSalesGrade() {
     return row;
   });
   if (salesGradeSortBy === 'team') {
-    rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+    rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
   } else {
     rows.sort((a, b) => b.roll[12] - a.roll[12] || a.sp.localeCompare(b.sp, 'zh'));
   }
@@ -12038,7 +12046,7 @@ function exportSalesGrade() {
     return row;
   });
   if (salesGradeSortBy === 'team') {
-    rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+    rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
   } else {
     rows.sort((a, b) => b.roll[12] - a.roll[12] || a.sp.localeCompare(b.sp, 'zh'));
   }
@@ -12106,7 +12114,7 @@ function refreshSalesGradeSingle() {
   const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
   const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
   if (salesGradeSortBy === 'team') {
-    rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+    rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
   } else {
     rows.sort((a, b) => (b.roll[month] || 0) - (a.roll[month] || 0) || a.sp.localeCompare(b.sp, 'zh'));
   }
@@ -12179,7 +12187,7 @@ function exportSalesGradeSingle() {
     return row;
   });
   if (salesGradeSortBy === 'team') {
-    rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+    rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
   } else {
     rows.sort((a, b) => (b.roll[month] || 0) - (a.roll[month] || 0) || a.sp.localeCompare(b.sp, 'zh'));
   }
@@ -12858,7 +12866,7 @@ function perfTeamOptions(year) {
     if (t) teams.add(t);
   });
   (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
-  return [...teams].sort((a, b) => a.localeCompare(b, 'zh')).map(t => `<option value="${esc(t)}" ${t === perfTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  return [...teams].sort((a, b) => teamOrderRank(a) - teamOrderRank(b)).map(t => `<option value="${esc(t)}" ${t === perfTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
 }
 function perfTeamFilterChange(val) { perfTeamFilter = val; perfRefresh(); }
 function perfSortChange(val) { perfSortBy = val; perfRefresh(); }
@@ -13005,7 +13013,7 @@ function refreshPerfMatrix() {
     const rec = getPerfRecord(year, sp, lastM);
     return { sp, team: getSalesTeam(sp) || '', lastScore: getFinalScore(rec, cfg, year, sp, lastM) };
   });
-  if (perfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  if (perfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
   else if (perfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.sp.localeCompare(b.sp, 'zh'));
   else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
 
@@ -13054,7 +13062,7 @@ function exportPerfMatrixXlsx() {
     const rec = getPerfRecord(year, sp, lastM);
     return { sp, team: getSalesTeam(sp) || '', lastScore: getFinalScore(rec, cfg, year, sp, lastM) };
   });
-  if (perfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  if (perfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
   else if (perfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.sp.localeCompare(b.sp, 'zh'));
   else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
   if (!rows.length) { showToast('当前无可导出的绩效矩阵数据', 'warning'); return; }
@@ -13101,7 +13109,7 @@ function refreshPerfSingle() {
     const rec = getPerfRecord(year, sp, month);
     return { sp, team: getSalesTeam(sp) || '', score: getFinalScore(rec, cfg, year, sp, month) };
   });
-  if (perfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  if (perfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
   else if (perfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.sp.localeCompare(b.sp, 'zh'));
   else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
 
@@ -13226,7 +13234,7 @@ function exportPerfSingleXlsx() {
     const rec = getPerfRecord(year, sp, month);
     return { sp, team: getSalesTeam(sp) || '', score: getFinalScore(rec, cfg, year, sp, month) };
   });
-  if (perfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.sp.localeCompare(b.sp, 'zh'));
+  if (perfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
   else if (perfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.sp.localeCompare(b.sp, 'zh'));
   else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
   const header = ['销售', '团队'];
@@ -13324,7 +13332,7 @@ function saveM0PerfSnapshot() {
   const cfg = getM0PerfConfig();
   if (!cloudData.m0PerformanceSnapshots) cloudData.m0PerformanceSnapshots = {};
   let n = 0;
-  m0SpActiveList().sort((a, b) => a.localeCompare(b, 'zh')).forEach(m0 => {
+  m0SpActiveList().sort((a, b) => teamOrderRank(a) - teamOrderRank(b)).forEach(m0 => {
     const rec = getM0PerfRecord(year, m0, month);
     const scores = computePerfScore(rec, cfg, year, m0, month);
     const gradeRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, month)]) || {};
@@ -13464,9 +13472,9 @@ function refreshM0PerfMatrix() {
     const gradeRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, lastM)]) || {};
     return { m0, team: getSalesTeam(m0) || '', lastScore: getFinalScore(rec, cfg, year, m0, lastM) };
   });
-  if (m0PerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.m0.localeCompare(b.m0, 'zh'));
-  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.m0.localeCompare(b.m0, 'zh'));
-  else rows.sort((a, b) => a.m0.localeCompare(b.m0, 'zh'));
+  if (m0PerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || teamOrderRank(a.m0) - teamOrderRank(b.m0));
+  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || teamOrderRank(a.m0) - teamOrderRank(b.m0));
+  else rows.sort((a, b) => teamOrderRank(a.m0) - teamOrderRank(b.m0));
 
   let h = '<thead><tr><th>M0人员</th><th>团队</th>';
   months.forEach(m => { h += `<th class="num">${m}月</th>`; });
@@ -13503,9 +13511,9 @@ function exportM0PerfMatrixXlsx() {
     const rec = getM0PerfRecord(year, m0, lastM);
     return { m0, team: getSalesTeam(m0) || '', lastScore: getFinalScore(rec, cfg, year, m0, lastM) };
   });
-  if (m0PerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.m0.localeCompare(b.m0, 'zh'));
-  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.m0.localeCompare(b.m0, 'zh'));
-  else rows.sort((a, b) => a.m0.localeCompare(b.m0, 'zh'));
+  if (m0PerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || teamOrderRank(a.m0) - teamOrderRank(b.m0));
+  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || teamOrderRank(a.m0) - teamOrderRank(b.m0));
+  else rows.sort((a, b) => teamOrderRank(a.m0) - teamOrderRank(b.m0));
   if (!rows.length) { showToast('当前无可导出的 M0 绩效矩阵数据', 'warning'); return; }
   const header = ['M0人员', '团队'].concat(months.map(m => m + '月(职级/评分)'));
   const aoa = [header];
@@ -13540,9 +13548,9 @@ function refreshM0PerfSingle() {
     const rec = getM0PerfRecord(year, m0, month);
     return { m0, team: getSalesTeam(m0) || '', score: getFinalScore(rec, cfg, year, m0, month) };
   });
-  if (m0PerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.m0.localeCompare(b.m0, 'zh'));
-  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.m0.localeCompare(b.m0, 'zh'));
-  else rows.sort((a, b) => a.m0.localeCompare(b.m0, 'zh'));
+  if (m0PerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || teamOrderRank(a.m0) - teamOrderRank(b.m0));
+  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.score - a.score || teamOrderRank(a.m0) - teamOrderRank(b.m0));
+  else rows.sort((a, b) => teamOrderRank(a.m0) - teamOrderRank(b.m0));
 
   let h = '<thead><tr>';
   h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:110px;white-space:nowrap">M0人员</th>';
@@ -13641,9 +13649,9 @@ function exportM0PerfSingleXlsx() {
     const rec = getM0PerfRecord(year, m0, month);
     return { m0, team: getSalesTeam(m0) || '', score: getFinalScore(rec, cfg, year, m0, month) };
   });
-  if (m0PerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.m0.localeCompare(b.m0, 'zh'));
-  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.m0.localeCompare(b.m0, 'zh'));
-  else rows.sort((a, b) => a.m0.localeCompare(b.m0, 'zh'));
+  if (m0PerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || teamOrderRank(a.m0) - teamOrderRank(b.m0));
+  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.score - a.score || teamOrderRank(a.m0) - teamOrderRank(b.m0));
+  else rows.sort((a, b) => teamOrderRank(a.m0) - teamOrderRank(b.m0));
   const header = ['M0人员', '团队'];
   items.forEach(it => { header.push(it.name + '(要求)', it.name + '(完成)', it.name + '(得分)'); });
   bonusList.forEach(b => header.push(b.name));
@@ -13716,7 +13724,7 @@ function m0PerfTeamOptions() {
   const teams = new Set();
   m0SpActiveList().forEach(m0 => { const t = getSalesTeam(m0); if (t) teams.add(t); });
   (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
-  return [...teams].sort((a, b) => a.localeCompare(b, 'zh')).map(t => `<option value="${esc(t)}" ${t === m0PerfTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  return [...teams].sort((a, b) => teamOrderRank(a) - teamOrderRank(b)).map(t => `<option value="${esc(t)}" ${t === m0PerfTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
 }
 function m0PerfTeamFilterChange(val) { m0PerfTeamFilter = val; m0PerfRefresh(); }
 function m0PerfSortChange(val) { m0PerfSortBy = val; m0PerfRefresh(); }
@@ -14054,7 +14062,7 @@ function mgrPerfAttachTeams() {
   const teams = new Set();
   mgrSpActiveList().forEach(mgr => { const t = getSalesTeam(mgr); if (t) teams.add(t); });
   (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
-  return [...teams].sort((a, b) => a.localeCompare(b, 'zh'));
+  return [...teams].sort((a, b) => teamOrderRank(a) - teamOrderRank(b));
 }
 async function mgrPerfAttachSaveRecord(year, month, team, recId, rec) {
   if (!cloudData.formConfig) cloudData.formConfig = {};
@@ -14379,7 +14387,7 @@ function refreshMgrPerfMatrix() {
     const rec = getMgrPerfRecord(year, mgr, lastM);
     return { mgr, team: getSalesTeam(mgr) || '', lastScore: getFinalScore(rec, cfg, year, mgr, lastM) };
   });
-  if (mgrPerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.mgr.localeCompare(b.mgr, 'zh'));
+  if (mgrPerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.mgr.localeCompare(b.mgr, 'zh'));
   else if (mgrPerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.mgr.localeCompare(b.mgr, 'zh'));
   else rows.sort((a, b) => a.mgr.localeCompare(b.mgr, 'zh'));
 
@@ -14416,7 +14424,7 @@ function exportMgrPerfMatrixXlsx() {
     const rec = getMgrPerfRecord(year, mgr, lastM);
     return { mgr, team: getSalesTeam(mgr) || '', lastScore: getFinalScore(rec, cfg, year, mgr, lastM) };
   });
-  if (mgrPerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.mgr.localeCompare(b.mgr, 'zh'));
+  if (mgrPerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.mgr.localeCompare(b.mgr, 'zh'));
   else if (mgrPerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.mgr.localeCompare(b.mgr, 'zh'));
   else rows.sort((a, b) => a.mgr.localeCompare(b.mgr, 'zh'));
   if (!rows.length) { showToast('当前无可导出的管理绩效矩阵数据', 'warning'); return; }
@@ -14451,7 +14459,7 @@ function refreshMgrPerfSingle() {
     const rec = getMgrPerfRecord(year, mgr, month);
     return { mgr, team: getSalesTeam(mgr) || '', score: getFinalScore(rec, cfg, year, mgr, month) };
   });
-  if (mgrPerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.mgr.localeCompare(b.mgr, 'zh'));
+  if (mgrPerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.mgr.localeCompare(b.mgr, 'zh'));
   else if (mgrPerfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.mgr.localeCompare(b.mgr, 'zh'));
   else rows.sort((a, b) => a.mgr.localeCompare(b.mgr, 'zh'));
 
@@ -14553,7 +14561,7 @@ function exportMgrPerfSingleXlsx() {
     const rec = getMgrPerfRecord(year, mgr, month);
     return { mgr, team: getSalesTeam(mgr) || '', score: getFinalScore(rec, cfg, year, mgr, month) };
   });
-  if (mgrPerfSortBy === 'team') rows.sort((a, b) => (a.team || '').localeCompare(b.team || '', 'zh') || a.mgr.localeCompare(b.mgr, 'zh'));
+  if (mgrPerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.mgr.localeCompare(b.mgr, 'zh'));
   else if (mgrPerfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.mgr.localeCompare(b.mgr, 'zh'));
   else rows.sort((a, b) => a.mgr.localeCompare(b.mgr, 'zh'));
   const header = ['管理者', '团队'];
@@ -14628,7 +14636,7 @@ function mgrPerfTeamOptions() {
   const teams = new Set();
   mgrSpActiveList().forEach(mgr => { const t = getSalesTeam(mgr); if (t) teams.add(t); });
   (cloudData.users || []).forEach(u => { if (u.department) teams.add(u.department); });
-  return [...teams].sort((a, b) => a.localeCompare(b, 'zh')).map(t => `<option value="${esc(t)}" ${t === mgrPerfTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  return [...teams].sort((a, b) => teamOrderRank(a) - teamOrderRank(b)).map(t => `<option value="${esc(t)}" ${t === mgrPerfTeamFilter ? 'selected' : ''}>${esc(t)}</option>`).join('');
 }
 function mgrPerfTeamFilterChange(val) { mgrPerfTeamFilter = val; mgrPerfRefresh(); }
 function mgrPerfSortChange(val) { mgrPerfSortBy = val; mgrPerfRefresh(); }
