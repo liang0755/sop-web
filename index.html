@@ -1093,6 +1093,7 @@ async function loadCloudData() {
 }
 
 async function apiCreate(collection, data) {
+  __markApiBusy();
   const res = await fetch(FB_BASE + '/' + collection + '/' + data.id + '.json', {
     method:'PUT', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(data)
@@ -1102,6 +1103,7 @@ async function apiCreate(collection, data) {
 }
 
 async function apiUpdate(collection, id, data) {
+  __markApiBusy();
   const res = await fetch(FB_BASE + '/' + collection + '/' + id + '.json', {
     method:'PATCH', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(data)
@@ -1110,10 +1112,39 @@ async function apiUpdate(collection, id, data) {
 }
 
 async function apiDelete(collection, id) {
+  __markApiBusy();
   const res = await fetch(FB_BASE + '/' + collection + '/' + id + '.json', {
     method:'DELETE'
   });
   if (!res.ok) throw new Error('API delete failed: ' + res.status);
+}
+
+// ===== 批量处理全局进度遮罩 =====
+let __batchBusy = false, __batchTimer = null;
+function showBatchProgress(label) {
+  let el = document.getElementById('batchProgressOverlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'batchProgressOverlay';
+    el.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.85);font-family:inherit';
+    el.innerHTML = '<div style="text-align:center;color:#333"><div class="bspin" style="width:34px;height:34px;margin:0 auto 12px;border:3px solid #ddd;border-top-color:#e23b3b;border-radius:50%;animation:bspspin .8s linear infinite"></div><div style="font-size:14px;font-weight:600">处理中…</div><div style="font-size:12px;color:#888;margin-top:6px">数据仍在写入，请勿刷新或切换页面</div></div>';
+    (document.body || document.documentElement).appendChild(el);
+    const st = document.createElement('style');
+    st.textContent = '@keyframes bspspin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(st);
+  }
+  el.querySelector('.bspin') && (el.querySelector('.bspin').parentElement.parentElement);
+  el.innerHTML = '<div style="text-align:center;color:#333"><div class="bspin" style="width:34px;height:34px;margin:0 auto 12px;border:3px solid #ddd;border-top-color:#e23b3b;border-radius:50%;animation:bspspin .8s linear infinite"></div><div style="font-size:14px;font-weight:600">' + (label || '处理中…') + '</div><div style="font-size:12px;color:#888;margin-top:6px">数据仍在写入，请勿刷新或切换页面</div></div>';
+  el.style.display = 'flex';
+}
+function hideBatchProgress() {
+  const el = document.getElementById('batchProgressOverlay');
+  if (el) el.style.display = 'none';
+}
+function __markApiBusy(label) {
+  if (!__batchBusy) { __batchBusy = true; showBatchProgress(label); }
+  clearTimeout(__batchTimer);
+  __batchTimer = setTimeout(() => { __batchBusy = false; hideBatchProgress(); }, 700);
 }
 
 // 把 Firebase 返回的 { key: record } 字典转换为数组，并确保每条记录带上与存储键一致的 id。
