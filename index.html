@@ -10394,7 +10394,7 @@ function renderCustomerSummary() {
       <td>${esc(g.docMonth)}</td>
       <td>${esc(g.salesperson)}${userStatusBadge(g.salesperson, userMap)}</td>
       <td>${esc(g.customer) || '-'}</td>
-      <td class="num">${fmtSalesMoney(g.amount)}</td>
+      <td class="num"><span style="color:${g.amount < 0 ? 'var(--danger)' : 'inherit'}">${fmtSalesMoney(g.amount)}</span></td>
       <td><span class="badge badge-team">${esc(g.team) || '-'}</span></td>
       <td>${tagSelect('customerSource', aggKey, g.customerSource)}</td>
       <td>${tagSelect('category', aggKey, g.category)}</td>
