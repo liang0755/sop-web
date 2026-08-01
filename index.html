@@ -10721,7 +10721,7 @@ h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
   months.forEach(m => {
     let cell = `<td class="num">${fmtSalesMoney(colTot[m] || 0)}`;
     if (key === 'team') {
-      const lyv = (sbLastYearTeamMap[key] && sbLastYearTeamMap[key][lyMonth(m)]) ? sbLastYearTeamMap[key][lyMonth(m)] : 0;
+      const lyv = colLy[m] || 0;
       if (sbShowYoy) {
         if (lyv > 0) {
           const g = (colTot[m] - lyv) / lyv * 100;
