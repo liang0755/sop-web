@@ -10730,7 +10730,7 @@ h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
           cell += `<div class="yoy-none" style="white-space:nowrap">— 同比 </div>`;
         }
       }
-      const tgt = (teamTargets[key] && teamTargets[key][m.slice(5)]) || 0;
+      const tgt = colTgt[m] || 0;
       if (tgt > 0) {
         const rate = colTot[m] / tgt * 100;
         cell += `<div style="font-size:11px;margin-top:2px;font-weight:600;white-space:nowrap;color:${rate >= 100 ? 'var(--danger)' : 'var(--gray-500)'}">目标 ${fmtSalesMoney(tgt)}</div>`
