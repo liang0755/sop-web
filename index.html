@@ -1355,6 +1355,21 @@ function ensureXLSX() {
   return _xlsxLoadingPromise;
 }
 
+// ExcelJS 按需加载(用于"客户汇总数据"导出后三列下拉):CDN 优先,幂等
+let _exceljsLoadingPromise = null;
+function ensureExcelJS() {
+  if (typeof ExcelJS !== 'undefined') return Promise.resolve();
+  if (_exceljsLoadingPromise) return _exceljsLoadingPromise;
+  _exceljsLoadingPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+    s.onload = () => (typeof ExcelJS !== 'undefined' ? resolve() : reject(new Error('ExcelJS load failed')));
+    s.onerror = () => reject(new Error('ExcelJS load failed'));
+    document.head.appendChild(s);
+  });
+  return _exceljsLoadingPromise;
+}
+
 async function showApp() {
   // Wait for config data (formConfig, brandConfig, etc.) to finish loading
   if (_coreDataPromise) { try { await _coreDataPromise; } catch(e){} }
@@ -10427,6 +10442,7 @@ function renderSalesBoardCustomer() {
     <div class="card">
       <div class="card-header"><h4>👥 客户汇总数据</h4><span style="font-size:12px;color:var(--gray-500)">按 年/月 × 销售员 × 客户 聚合折后金额</span>
         <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="csExportCustomerSummary()">📤 导出筛选结果</button>
+        <button class="btn btn-outline btn-sm" onclick="showCsImportModal()">📥 导入回填</button>
       </div>
       <div class="card-body"><div class="table-wrap" id="csTableWrap"></div><div id="csBatchBar" class="sticky-submit-bar" style="display:none"></div></div>
     </div>`;
@@ -10724,8 +10740,53 @@ async function applyCsBatchTags() {
   } catch (e) { showToast('批量设置失败:' + e.message, 'error', 4000); }
 }
 
-function csExportCustomerSummary() {
+async function csExportCustomerSummary() {
   if (!csAllRows.length) { showToast('当前无数据可导出', 'error'); return; }
+  try { await ensureExcelJS(); }
+  catch (e) { return csExportCustomerSummaryPlain(); }
+  const ExcelJS = window.ExcelJS;
+  const cfg = (cloudData.formConfig && cloudData.formConfig.customerTags) || { customerSource: [], category: [], customerProfile: [] };
+  const opts = {
+    customerSource: (cfg.customerSource || []).slice(),
+    category: (cfg.category || []).slice(),
+    customerProfile: (cfg.customerProfile || []).slice()
+  };
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('客户汇总');
+  const headers = ['年/月', '销售员', '客户', '折后总金额', '销售员所属门店', '客户来源', '品类', '客户画像'];
+  ws.addRow(headers);
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+  csAllRows.forEach(g => ws.addRow([g.docMonth, g.salesperson, g.customer, g.amount, g.team, g.customerSource, g.category, g.customerProfile]));
+  const widths = [12, 12, 20, 16, 18, 14, 14, 14];
+  ws.columns.forEach((c, i) => { c.width = widths[i] || 14; });
+  const lastRow = csAllRows.length + 1;
+  for (let r = 2; r <= lastRow; r++) ws.getCell('D' + r).numFmt = '#,##0.00';
+  // 隐藏"选项"表,供后三列下拉引用(避免选项含逗号导致下拉失效)
+  const optWs = wb.addWorksheet('选项');
+  optWs.state = 'hidden';
+  const putOpts = (col, arr) => arr.forEach((o, i) => { optWs.getCell(col + (i + 1)).value = o; });
+  const nSrc = opts.customerSource.length, nCat = opts.category.length, nPro = opts.customerProfile.length;
+  putOpts('A', opts.customerSource); putOpts('B', opts.category); putOpts('C', opts.customerProfile);
+  const mkDV = (ref) => ({ type: 'list', allowBlank: true, formulae: ['=选项!' + ref] });
+  const last = Math.max(lastRow, 2);
+  if (nSrc > 0) for (let r = 2; r <= last; r++) ws.getCell('F' + r).dataValidation = mkDV('A1:A' + nSrc);
+  if (nCat > 0) for (let r = 2; r <= last; r++) ws.getCell('G' + r).dataValidation = mkDV('B1:B' + nCat);
+  if (nPro > 0) for (let r = 2; r <= last; r++) ws.getCell('H' + r).dataValidation = mkDV('C1:C' + nPro);
+  const year = document.getElementById('csYear').value;
+  const monthLabel = csMonths.length ? ('_' + csMonths.map(m => (parseInt(m, 10)) + '月').join('')) : '';
+  const fname = '客户汇总_' + year + monthLabel + '.xlsx';
+  try {
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    showToast('已导出 ' + csAllRows.length + ' 条(筛选结果,后三列含下拉)', 'success');
+  } catch (e) { showToast('导出失败:' + e.message, 'error'); }
+}
+
+// ExcelJS 不可用时降级为普通 SheetJS 导出(无下拉)
+function csExportCustomerSummaryPlain() {
   if (typeof XLSX === 'undefined') { showToast('表格组件未加载,请刷新页面', 'error'); return; }
   const headers = ['年/月', '销售员', '客户', '折后总金额', '销售员所属门店', '客户来源', '品类', '客户画像'];
   const aoa = [headers];
@@ -10735,9 +10796,136 @@ function csExportCustomerSummary() {
   XLSX.utils.book_append_sheet(wb, ws, '客户汇总');
   const year = document.getElementById('csYear').value;
   const monthLabel = csMonths.length ? ('_' + csMonths.map(m => (parseInt(m, 10)) + '月').join('')) : '';
-  const fname = '客户汇总_' + year + monthLabel + '.xlsx';
-  XLSX.writeFile(wb, fname);
-  showToast('已导出 ' + csAllRows.length + ' 条(筛选结果)', 'success');
+  XLSX.writeFile(wb, '客户汇总_' + year + monthLabel + '.xlsx');
+  showToast('已导出 ' + csAllRows.length + ' 条(下拉库加载失败,已导出普通表格)', 'success');
+}
+
+function showCsImportModal() {
+  if (!hasPermission('salesDetail')) { showToast('无编辑权限', 'error'); return; }
+  showModal('导入回填客户标签', `
+    <div id="csImportAlert"></div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <label class="btn btn-outline btn-sm" style="cursor:pointer">📁 选择Excel/CSV文件<input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="csImportFile(event)"></label>
+    </div>
+    <div class="form-group"><label>或直接粘贴数据 <span style="color:var(--gray-400);font-weight:400">(从导出的Excel复制整片数据,含表头)</span></label>
+      <textarea class="form-control" id="csImportText" rows="8" placeholder="年/月	销售员	客户	折后总金额	销售员所属门店	客户来源	品类	客户画像"></textarea>
+    </div>
+    <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px;font-size:12px;color:var(--gray-600);margin-bottom:12px">
+      <strong>导入规则:</strong><br>
+      • 按「年/月 + 销售员 + 客户」匹配系统客户组(前5列仅作匹配依据,绝不被覆盖)<br>
+      • 仅覆盖「客户来源 / 品类 / 客户画像」三列;导入表该单元格留空 = 保留原值<br>
+      • 匹配不到的客户组(前5列不存在于业绩明细)整行跳过<br>
+      • 选项建议与"表单配置-客户标签配置"一致,不一致会提示但照常写入
+    </div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline" onclick="closeModal()">取消</button><button type="button" class="btn btn-primary" onclick="doCsImportTags()">开始导入</button></div>
+  `);
+}
+
+function csImportFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  const finish = (text) => {
+    const ta = document.getElementById('csImportText');
+    if (ta) ta.value = text.trim();
+    const al = document.getElementById('csImportAlert');
+    if (al) al.innerHTML = '<div class="alert alert-success">✅ 文件已读取,请检查后点击"开始导入"</div>';
+  };
+  const fail = (m) => { const al = document.getElementById('csImportAlert'); if (al) al.innerHTML = '<div class="alert alert-danger">❌ ' + m + '</div>'; };
+  if (ext === 'csv') {
+    const reader = new FileReader();
+    reader.onload = e => { let t = e.target.result; if (t.charCodeAt(0) === 0xFEFF) t = t.slice(1); finish(t); };
+    reader.readAsText(file, 'UTF-8');
+  } else if (ext === 'xlsx' || ext === 'xls') {
+    const loadAndParse = () => {
+      const reader = new FileReader();
+      reader.onload = e => { try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        finish(XLSX.utils.sheet_to_csv(ws, { FS: '\t' }));
+      } catch (err) { fail('Excel 解析失败:' + err.message); } };
+      reader.readAsArrayBuffer(file);
+    };
+    if (typeof XLSX === 'undefined') {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+      s.onload = loadAndParse;
+      s.onerror = () => fail('Excel 解析库加载失败,请改用 CSV');
+      document.head.appendChild(s);
+    } else loadAndParse();
+  } else {
+    fail('不支持的文件格式,请使用 CSV 或 Excel');
+  }
+}
+
+async function doCsImportTags() {
+  if (!hasPermission('salesDetail')) { showToast('无编辑权限', 'error'); return; }
+  const ta = document.getElementById('csImportText');
+  const raw = (ta ? ta.value : '').trim();
+  if (!raw) { showToast('请先粘贴数据或选择文件', 'error'); return; }
+  const lines = raw.split(/\r?\n/).filter(l => l.replace(/[\t,]/g, '').length);
+  if (!lines.length) { showToast('没有可导入的数据行', 'error'); return; }
+  const rows = lines.map(l => l.includes('\t') ? l.split('\t') : l.split(','));
+  // 表头识别:若首行含已知列名则按列名映射,否则按位置(8列)
+  const header = rows[0].map(h => (h || '').trim());
+  const hasHeader = header.some(h => ['年/月', '销售员', '客户', '客户来源', '品类', '客户画像'].includes(h));
+  const idx = (names, pos) => { if (hasHeader) { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; } return pos; };
+  const iDocMonth = idx(['年/月', '年月'], 0);
+  const iSales = idx(['销售员'], 1);
+  const iCust = idx(['客户'], 2);
+  const iSource = idx(['客户来源'], 5);
+  const iCat = idx(['品类'], 6);
+  const iPro = idx(['客户画像'], 7);
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  if (!dataRows.length) { showToast('没有可导入的数据行', 'error'); return; }
+  const cfg = (cloudData.formConfig && cloudData.formConfig.customerTags) || { customerSource: [], category: [], customerProfile: [] };
+  // 构建明细查找表: docMonth|salesperson|customer -> [rec]
+  const lookup = {};
+  cloudData.salesRecords.forEach(r => {
+    const key = (r.docMonth || '') + '|' + (r.salesperson || '') + '|' + (r.customer || '');
+    (lookup[key] || (lookup[key] = [])).push(r);
+  });
+  let matchedGroups = 0, updatedDetails = 0, skipped = 0, fail = 0, warnOpts = 0;
+  for (const cells of dataRows) {
+    const dm = (cells[iDocMonth] || '').trim();
+    const sp = (cells[iSales] || '').trim();
+    const cust = (cells[iCust] || '').trim();
+    if (!dm && !sp && !cust) continue;
+    const key = dm + '|' + sp + '|' + cust;
+    const matched = lookup[key];
+    if (!matched || !matched.length) { skipped++; continue; }
+    const newSrc = (cells[iSource] || '').trim();
+    const newCat = (cells[iCat] || '').trim();
+    const newPro = (cells[iPro] || '').trim();
+    if (newSrc && !cfg.customerSource.includes(newSrc)) warnOpts++;
+    if (newCat && !cfg.category.includes(newCat)) warnOpts++;
+    if (newPro && !cfg.customerProfile.includes(newPro)) warnOpts++;
+    // 仅后三列可覆盖;空单元格=保留原值(不修改)
+    let grpChanged = false;
+    for (const r of matched) {
+      const patch = {};
+      if (newSrc && r.customerSource !== newSrc) { r.customerSource = newSrc; patch.customerSource = newSrc; }
+      if (newCat && r.category !== newCat) { r.category = newCat; patch.category = newCat; }
+      if (newPro && r.customerProfile !== newPro) { r.customerProfile = newPro; patch.customerProfile = newPro; }
+      if (r.id && Object.keys(patch).length) {
+        try { await apiUpdate('salesRecords', r.id, patch); updatedDetails++; grpChanged = true; }
+        catch (e) { fail++; }
+      } else if (Object.keys(patch).length) { grpChanged = true; }
+    }
+    if (grpChanged) matchedGroups++;
+  }
+  saveReportsCache();
+  closeModal();
+  renderCustomerSummary();
+  if (salesBoardTab === 'source') renderSalesBoardSource();
+  if (salesBoardTab === 'profile') renderSalesBoardProfile();
+  if (salesBoardTab === 'signing') renderSalesBoardSigning();
+  let msg = '导入完成 · 匹配 ' + matchedGroups + ' 组 / 更新 ' + updatedDetails + ' 条明细';
+  if (skipped) msg += ' / 跳过 ' + skipped + ' 行(前5列未匹配)';
+  if (fail) msg += ' / ' + fail + ' 条写入失败';
+  if (warnOpts) msg += ' / ' + warnOpts + ' 个值不在系统选项内(已照常写入)';
+  showToast(msg, fail ? 'error' : 'success', 4500);
 }
 
 function sbSortBy(col, tid) {
