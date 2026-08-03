@@ -4378,14 +4378,16 @@ function exportCSV(type) {
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
+  a.href = url;
   let nameParts = [(type==='weekly'?'周报':'日报') + '数据'];
   if (s || e) nameParts.push((s||'') + '至' + (e||''));
   if (fDept) nameParts.push(fDept);
   if (fPerson) nameParts.push(fPerson);
   nameParts.push(new Date().toISOString().split('T')[0]);
   a.download = nameParts.join('_') + '.csv';
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => { try { document.body.removeChild(a); } catch(e){} URL.revokeObjectURL(url); }, 1500);
 }
 
 // ============ AI Chat Page ============
