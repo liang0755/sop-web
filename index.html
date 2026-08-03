@@ -907,7 +907,10 @@ async function loadCoreDataFresh() {
     cloudData.aiConfig = aiData || JSON.parse(JSON.stringify(DEFAULT_AI_CONFIG));
     // Load role config
     const rcData = rRes.ok ? await rRes.json() : null;
-    cloudData.roleConfig = rcData || JSON.parse(JSON.stringify(DEFAULT_ROLE_CONFIG));
+    // 若用户已在角色权限页编辑(脏标记),保留内存中的编辑,禁止用 Firebase 旧快照覆盖,避免保存时把旧值写回
+    if (!roleConfigDirty) {
+      cloudData.roleConfig = rcData || JSON.parse(JSON.stringify(DEFAULT_ROLE_CONFIG));
+    }
     if (!rcData) {
       try { await fetch(FB_BASE + '/roleConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.roleConfig)}); } catch(e) {}
     }
@@ -947,7 +950,7 @@ async function loadCoreDataFresh() {
           if (superAdmin.permissions[p] !== true) { superAdmin.permissions[p] = true; roleChanged = true; }
         });
       }
-      if (roleChanged) {
+      if (roleChanged && !roleConfigDirty) {
         try { await fetch(FB_BASE + '/roleConfig.json', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudData.roleConfig)}); } catch(e) {}
       }
     }
@@ -3758,6 +3761,7 @@ function renderUserManagement() {
 }
 
 // ============ Role & Permission Config ============
+let roleConfigDirty = false; // 用户已在角色权限页编辑过(未保存或刚保存),后台刷新不得用 Firebase 旧快照覆盖内存中的编辑
 function renderRoleConfig() {
   if (!hasPermission('roleConfig')) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
@@ -3821,6 +3825,7 @@ function updateRolePermission(roleIdx, perm, checked) {
   const cfg = getRoleConfig();
   if (cfg.roles[roleIdx] && cfg.roles[roleIdx].key !== 'admin') {
     cfg.roles[roleIdx].permissions[perm] = checked;
+    roleConfigDirty = true; // 标记有未保存/已编辑修改,防止后台 loadCoreDataFresh 用旧快照覆盖
   }
 }
 
@@ -3831,6 +3836,7 @@ async function saveRoleConfig() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(cloudData.roleConfig)
     });
+    roleConfigDirty = false; // 保存成功,清除脏标记,允许后续后台刷新正常拉取最新配置
     showToast('角色权限配置已保存!', 'success');
     saveCoreConfigCache(); // 同步刷新本地缓存,避免下次加载先命中旧缓存短暂显示未授权态
     // Update nav visibility for current user
@@ -3843,6 +3849,7 @@ async function saveRoleConfig() {
 function resetRoleConfig() {
   if (!confirm('确定恢复默认角色权限配置>所有自定义权限将丢失,')) return;
   cloudData.roleConfig = JSON.parse(JSON.stringify(DEFAULT_ROLE_CONFIG));
+  roleConfigDirty = true; // 恢复默认也是未保存修改,防止后台刷新覆盖
   renderRoleConfig();
   showToast('已恢复默认配置,记得点击保存', 'info');
 }
