@@ -14847,13 +14847,17 @@ function applyMgrPerfBatchStandard() {
   // Check for saved session (auto-login)
   const saved = localStorage.getItem(SESSION_KEY);
   if (saved) {
-    currentUser = JSON.parse(saved);
-    // Wait for users data to verify saved session
-    if (_usersDataPromise) { try { await _usersDataPromise; } catch(e){} }
-    const user = cloudData.users.find(u => u.id === currentUser.id && u.active);
-    if (user) {
-      currentUser = {id:user.id,username:user.username,name:user.name,department:user.department,role:user.role};
-      localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+    try { currentUser = JSON.parse(saved); } catch(e) { currentUser = null; }
+    if (currentUser && currentUser.id) {
+      // 尝试用云端用户数据刷新/校验;拉取失败则回退到已保存会话,不强制登出
+      try { if (_usersDataPromise) await _usersDataPromise; } catch(e){}
+      const found = cloudData.users.find(u => u.id === currentUser.id);
+      // 仅当云端用户被明确停用(active===false)时才清退会话
+      if (!(found && found.active === false)) {
+        if (found) {
+          currentUser = {id:found.id,username:found.username,name:found.name,department:found.department,role:found.role};
+          localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+        }
       // Wait for config data before showing dashboard
       if (_coreDataPromise) { try { await _coreDataPromise; } catch(e){} }
       // 按角色权限加载管理类记录(员工几乎零开销)
@@ -14879,6 +14883,7 @@ function applyMgrPerfBatchStandard() {
       updateNavVisibility();
       navTo(getInitialPage());
       return;
+    }
     }
   }
 })();
