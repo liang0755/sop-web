@@ -154,6 +154,13 @@ tr:hover > .perf-freeze{
 .filter-bar{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:flex-end}
 .filter-bar .form-group{margin-bottom:0;min-width:140px}
 .filter-bar .form-group label{font-size:12px}
+/* 日报/周报数据:报告卡片默认两列网格(容器变窄→表格列宽自然缩小) */
+.dw-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.dw-grid > .card{margin-bottom:0}
+.dw-grid .table-wrap{overflow-x:auto}
+.dw-grid table{font-size:12px}
+.dw-grid table th,.dw-grid table td{padding:6px 8px;white-space:nowrap}
+@media(max-width:980px){.dw-grid{grid-template-columns:1fr}}
 .modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}
 .modal{background:#fff;border-radius:12px;padding:28px;width:460px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg)}
 .modal.modal-wide{width:1000px;max-width:95vw}
@@ -2785,7 +2792,7 @@ function loadDataView(type) {
   if (fPerson) reports = reports.filter(r => r.name === fPerson);
   const c = document.getElementById('dataResults');
   if (!reports.length) { c.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无数据</div>'; return; }
-  c.innerHTML = reports.map(r => {
+  c.innerHTML = '<div class="dw-grid">' + reports.map(r => {
     const dl = type==='daily' ? r.reportDate : `${r.weekStart} ~ ${r.weekEnd}`;
     const canEdit = hasPermission('editOthers') || r.userId === currentUser.id;
     return `<div class="card" style="margin-bottom:16px">
@@ -2795,17 +2802,17 @@ function loadDataView(type) {
           ${canEdit ? `<button class="btn btn-outline btn-sm" onclick="editReport('${type}','${r.id}')">✏️ 编辑</button><button class="btn btn-danger btn-sm" onclick="deleteReport('${type}','${r.id}')">🗑 删除</button>` : ''}
         </div>
       </div>
-      <div class="table-wrap"><table><thead><tr><th>渠道</th><th>参考标准</th><th>新增线索</th><th>有效建联</th><th>AB意向</th><th>成交客户</th><th>成交金额</th><th>建联转AB率</th><th>目标金额</th><th>完成率</th><th>问题/提升动作</th></tr></thead><tbody>
+      <div class="table-wrap"><table><thead><tr><th>渠道</th><th>新增线索</th><th>有效建联</th><th>AB意向</th><th>成交客户</th><th>成交金额</th><th>建联转AB率</th><th>目标金额</th><th>完成率</th><th>问题/提升动作</th></tr></thead><tbody>
         ${(r.channels||[]).map(ch => {
           const ec=parseFloat(ch.effectiveContacts)||0,ab=parseFloat(ch.abIntent)||0,da=parseFloat(ch.dealAmount)||0,ta=parseFloat(ch.targetAmount)||0;
           const ctr=ch.effectiveContacts===''||ch.effectiveContacts==='/'?'/':(ec>0?(ab/ec*100).toFixed(1)+'%':'0%');
           const cpr=ch.targetAmount===''||ch.targetAmount==='/'?'/':(ta>0?(da/ta*100).toFixed(1)+'%':'0%');
-          return `<tr><td><strong>${ch.channel}</strong></td><td style="max-width:180px;color:var(--gray-500);font-size:12px">${ch.reference||'-'}</td><td>${ch.newLeads||'-'}</td><td>${ch.effectiveContacts||'-'}</td><td>${ch.abIntent||'-'}</td><td>${ch.closedCustomers||'-'}</td><td style="font-weight:600;color:var(--success)">${da>0?'¥'+da.toLocaleString():(ch.dealAmount||'-')}</td><td>${ctr}</td><td>${ta>0?'¥'+ta.toLocaleString():(ch.targetAmount||'-')}</td><td>${cpr}</td><td style="max-width:200px;font-size:12px">${ch.issues||'-'}</td></tr>`;
+          return `<tr><td><strong>${ch.channel}</strong></td><td>${ch.newLeads||'-'}</td><td>${ch.effectiveContacts||'-'}</td><td>${ch.abIntent||'-'}</td><td>${ch.closedCustomers||'-'}</td><td style="font-weight:600;color:var(--success)">${da>0?'¥'+da.toLocaleString():(ch.dealAmount||'-')}</td><td>${ctr}</td><td>${ta>0?'¥'+ta.toLocaleString():(ch.targetAmount||'-')}</td><td>${cpr}</td><td style="max-width:200px;font-size:12px">${ch.issues||'-'}</td></tr>`;
         }).join('')}
       </tbody></table></div>
       ${r.remark?`<div style="padding:10px 20px;background:var(--gray-50);font-size:12px;color:var(--gray-600)">备注: ${r.remark}</div>`:''}
     </div>`;
-  }).join('');
+  }).join('') + '</div>';
 }
 
 // ============ Edit / Delete Report ============
