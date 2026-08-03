@@ -9909,8 +9909,8 @@ function renderSourceSummaryTable(year) {
   let head = '<thead><tr><th rowspan="2" style="min-width:120px">客户来源</th>';
   months.forEach(m => { head += `<th colspan="2">${parseInt(m, 10)}月</th>`; });
   head += '<th colspan="2">合计</th></tr><tr>';
-  months.forEach(() => { head += '<th class="num">单数</th><th class="num">业绩</th>'; });
-  head += '<th class="num">单数</th><th class="num">业绩</th></tr></thead>';
+  months.forEach(() => { head += '<th class="num">客户数</th><th class="num">业绩</th>'; });
+  head += '<th class="num">客户数</th><th class="num">业绩</th></tr></thead>';
   let body = '<tbody>';
   const colCount = {}, colAmount = {}, colGrandCount = new Set();
   sources.forEach(src => {
@@ -9956,8 +9956,8 @@ function exportSourceSummary() {
   months.forEach(m => { header1.push(parseInt(m, 10) + '月'); header1.push(''); });
   header1.push('合计'); header1.push('');
   const header2 = [''];
-  months.forEach(() => { header2.push('单数'); header2.push('业绩'); });
-  header2.push('单数'); header2.push('业绩');
+  months.forEach(() => { header2.push('客户数'); header2.push('业绩'); });
+  header2.push('客户数'); header2.push('业绩');
   const aoa = [header1, header2];
   const colCount = {}, colAmount = {};
   sources.forEach(src => {
@@ -10088,8 +10088,8 @@ function renderProfileSummaryTable(year) {
   let head = '<thead><tr><th rowspan="2" style="min-width:120px">客户类型</th>';
   months.forEach(m => { head += `<th colspan="2">${parseInt(m, 10)}月</th>`; });
   head += '<th colspan="2">合计</th></tr><tr>';
-  months.forEach(() => { head += '<th class="num">单数</th><th class="num">业绩</th>'; });
-  head += '<th class="num">单数</th><th class="num">业绩</th></tr></thead>';
+  months.forEach(() => { head += '<th class="num">客户数</th><th class="num">业绩</th>'; });
+  head += '<th class="num">客户数</th><th class="num">业绩</th></tr></thead>';
   let body = '<tbody>';
   const colCount = {}, colAmount = {};
   profiles.forEach(prof => {
@@ -10294,8 +10294,8 @@ function exportProfileSummary() {
   months.forEach(m => { header1.push(parseInt(m, 10) + '月'); header1.push(''); });
   header1.push('合计'); header1.push('');
   const header2 = [''];
-  months.forEach(() => { header2.push('单数'); header2.push('业绩'); });
-  header2.push('单数'); header2.push('业绩');
+  months.forEach(() => { header2.push('客户数'); header2.push('业绩'); });
+  header2.push('客户数'); header2.push('业绩');
   const aoa = [header1, header2];
   const colCount = {}, colAmount = {};
   profiles.forEach(prof => {
