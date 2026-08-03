@@ -1455,13 +1455,18 @@ function getInitialPage() {
   return (p && valid.includes(p)) ? p : 'dashboard';
 }
 
-// 侧边栏导航:新标签页打开对应模块(当前标签保持不动);仅绑定 .sidebar .nav-item,不影响页面内按钮(按钮仍走 navTo 当前页)
+// 侧边栏导航:默认在当前页打开(走 navTo);仅 AI助手 模块保留新标签页打开
 function navToNewTab(page) {
   window.open('?page=' + encodeURIComponent(page), '_blank');
 }
 document.querySelectorAll('.sidebar .nav-item').forEach(el => {
   el.removeAttribute('onclick');
-  el.addEventListener('click', () => { const p = el.getAttribute('data-page'); if (p) navToNewTab(p); });
+  el.addEventListener('click', () => {
+    const p = el.getAttribute('data-page');
+    if (!p) return;
+    if (p === 'aiChat') { navToNewTab(p); }   // 仅 AI 助手在新标签打开
+    else { navTo(p); }                         // 其余模块在当前页打开
+  });
 });
 
 // Silently fetch latest report data in background; only re-render if data count changed
