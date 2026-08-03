@@ -14837,54 +14837,66 @@ function applyMgrPerfBatchStandard() {
   // NOTE: 报表数据不再于启动时无条件拉取(那时 currentUser 尚为 null 会触发全量下载),
   // 改为登录后(doLogin / 自动登录)再按角色加载,成员仅取自己数据,并用本地缓存秒开,
 
-  // Show login form IMMEDIATELY - don't wait for Firebase
-  const loadingEl = document.getElementById('loginLoading');
-  if (loadingEl) loadingEl.style.display = 'none';
-  const formBox = document.getElementById('loginFormBox');
-  if (formBox) formBox.style.display = '';
+  // 登录视图默认可见;有保存会话时先显示"自动登录"转圈,避免露出登录表单
   document.getElementById('loginView').classList.remove('hidden');
+  const loadingEl = document.getElementById('loginLoading');
+  const formBox = document.getElementById('loginFormBox');
 
-  // Check for saved session (auto-login)
+  // 检查已保存会话(自动登录)
   const saved = localStorage.getItem(SESSION_KEY);
   if (saved) {
+    // 先隐藏登录表单、显示转圈,用户不会看到"登录页"闪现
+    if (formBox) formBox.style.display = 'none';
+    if (loadingEl) {
+      loadingEl.innerHTML = '<div style="font-size:36px;margin-bottom:14px;animation:spin 1.5s linear infinite;display:inline-block">⏳</div><div style="font-size:15px;font-weight:600;color:#fff">正在自动登录...</div>';
+      loadingEl.style.display = '';
+    }
     try { currentUser = JSON.parse(saved); } catch(e) { currentUser = null; }
     if (currentUser && currentUser.id) {
-      // 尝试用云端用户数据刷新/校验;拉取失败则回退到已保存会话,不强制登出
+      // 用云端用户数据刷新/校验;拉取失败则回退到已保存会话,不强制登出
       try { if (_usersDataPromise) await _usersDataPromise; } catch(e){}
       const found = cloudData.users.find(u => u.id === currentUser.id);
       // 仅当云端用户被明确停用(active===false)时才清退会话
-      if (!(found && found.active === false)) {
+      if (found && found.active === false) {
+        currentUser = null;
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (formBox) formBox.style.display = '';
+      } else {
         if (found) {
           currentUser = {id:found.id,username:found.username,name:found.name,department:found.department,role:found.role};
           localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
         }
-      // Wait for config data before showing dashboard
-      if (_coreDataPromise) { try { await _coreDataPromise; } catch(e){} }
-      // 按角色权限加载管理类记录(员工几乎零开销)
-      await loadRoleScopedData();
-      // Wait for report data (cache hit → instant; otherwise spinner) before showing dashboard
-      if (!reportsLoaded) {
-        if (loadingEl) {
-          loadingEl.innerHTML = '<div style="font-size:36px;margin-bottom:14px;animation:spin 1.5s linear infinite;display:inline-block">⏳</div><div id="loadingStepText" style="font-size:15px;font-weight:600;margin-bottom:16px;color:#fff">正在加载报表数据...</div><div style="width:260px;height:6px;background:rgba(255,255,255,.15);border-radius:3px;margin:0 auto 10px;overflow:hidden"><div id="loadingProgress" style="width:0%;height:100%;background:linear-gradient(90deg,#3b82f6,#06b6d4);border-radius:3px;transition:width .3s ease"></div></div><div id="loadingCountdown" style="font-size:12px;color:rgba(255,255,255,.55)">正在准备...</div>';
-          loadingEl.style.display = '';
-        }
-        if (formBox) formBox.style.display = 'none';
-        await loadReportData();
-        try { await ensureXLSX(); } catch(e) { console.warn('表格组件加载失败:', e && e.message); }
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (formBox) formBox.style.display = '';
+        // 等待配置数据
+        try { if (_coreDataPromise) await _coreDataPromise; } catch(e){}
+        // 按角色权限加载管理类记录(异常不阻断登录)
+        try { await loadRoleScopedData(); } catch(e){ console.warn('auto-login loadRoleScopedData 失败:', e && e.message); }
+        // 等待报表数据(异常不阻断登录)
+        try {
+          if (!reportsLoaded) {
+            await loadReportData();
+            try { await ensureXLSX(); } catch(e){ console.warn('表格组件加载失败:', e && e.message); }
+          }
+        } catch(e){ console.warn('auto-login loadReportData 失败:', e && e.message); }
+        // 进入应用
+        document.getElementById('loginView').classList.add('hidden');
+        document.getElementById('appLayout').classList.remove('hidden');
+        document.getElementById('sidebarName').textContent = currentUser.name;
+        document.getElementById('sidebarDept').textContent = currentUser.department;
+        document.getElementById('sidebarAvatar').textContent = currentUser.name.charAt(0);
+        document.getElementById('userWelcome').textContent = `👋 欢迎,${currentUser.name}`;
+        updateNavVisibility();
+        navTo(getInitialPage());
+        return;
       }
-      document.getElementById('loginView').classList.add('hidden');
-      document.getElementById('appLayout').classList.remove('hidden');
-      document.getElementById('sidebarName').textContent = currentUser.name;
-      document.getElementById('sidebarDept').textContent = currentUser.department;
-      document.getElementById('sidebarAvatar').textContent = currentUser.name.charAt(0);
-      document.getElementById('userWelcome').textContent = `👋 欢迎,${currentUser.name}`;
-      updateNavVisibility();
-      navTo(getInitialPage());
-      return;
+    } else {
+      // 无效会话 → 显示登录表单
+      if (loadingEl) loadingEl.style.display = 'none';
+      if (formBox) formBox.style.display = '';
     }
-    }
+  } else {
+    // 无保存会话 → 直接显示登录表单
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (formBox) formBox.style.display = '';
   }
 })();
 </script>
