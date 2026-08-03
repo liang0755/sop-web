@@ -716,8 +716,8 @@ if (SESSION_BUS) {
   SESSION_BUS.onmessage = (ev) => {
     const msg = ev.data || {};
     if (msg.type === 'SOP_REQ_DATA') {
-      // 仅当本标签已登录且核心+报表数据均就绪时才响应(避免回传空/半成品数据)
-      if (currentUser && currentUser.id && dataLoaded && reportsLoaded) {
+      // 仅当本标签已登录且核心数据就绪时才响应(报表数据由新标签自行后台补齐,放宽门槛提高借数据成功率)
+      if (currentUser && currentUser.id && dataLoaded) {
         try {
           SESSION_BUS.postMessage({
             type: 'SOP_DATA',
@@ -15153,69 +15153,76 @@ function applyMgrPerfBatchStandard() {
   const loadingEl = document.getElementById('loginLoading');
   const formBox = document.getElementById('loginFormBox');
 
-  // 检查已保存会话(自动登录)
+  // ===== 跨标签页/本地会话 三级保障:新标签打开任何模块都不弹登录页 =====
+  // ① 有本地会话(sop_session) → 立即进应用(零延迟),后台借兄弟标签内存做秒更补全;
+  // ② 无本地会话但存在已登录兄弟标签 → 经 BroadcastChannel 借登录态+内存,借到即进应用;
+  // ③ 两者皆无(真·从未登录) → 才显示登录表单。
+  function hideLoginAndShowApp() {
+    document.getElementById('loginView').classList.add('hidden');
+    document.getElementById('appLayout').classList.remove('hidden');
+    document.getElementById('sidebarName').textContent = currentUser.name;
+    document.getElementById('sidebarDept').textContent = currentUser.department;
+    document.getElementById('sidebarAvatar').textContent = currentUser.name.charAt(0);
+    document.getElementById('userWelcome').textContent = '👋 欢迎,' + currentUser.name;
+    updateNavVisibility();
+  }
+  function showLoginForm() {
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (formBox) formBox.style.display = '';
+  }
+  // 向已登录兄弟标签请求内存快照(含登录态);借到返回 true 并写入 currentUser/cloudData/本地会话
+  function requestSiblingSnapshot(timeoutMs) {
+    return new Promise((resolve) => {
+      if (!SESSION_BUS) { resolve(false); return; }
+      const reqId = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+      let done = false;
+      const onMsg = (ev) => {
+        const m = ev.data || {};
+        if (m.type === 'SOP_DATA' && m.reqId === reqId) {
+          if (done) return;
+          done = true;
+          try { SESSION_BUS.removeEventListener('message', onMsg); } catch(e){}
+          const p = m.payload || {};
+          if (p.cloudData && p.currentUser && p.currentUser.id) {
+            cloudData = p.cloudData;
+            dataLoaded = !!p.dataLoaded;
+            reportsLoaded = !!p.reportsLoaded;
+            try { if (typeof visitDataLoaded !== 'undefined') visitDataLoaded = !!p.visitDataLoaded; } catch(e){}
+            currentUser = p.currentUser;
+            try { localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser)); } catch(e){}
+            resolve(true);
+          } else { resolve(false); }
+        }
+      };
+      SESSION_BUS.addEventListener('message', onMsg);
+      try { SESSION_BUS.postMessage({ type: 'SOP_REQ_DATA', reqId: reqId }); } catch(e){}
+      setTimeout(() => { if (!done) { done = true; try { SESSION_BUS.removeEventListener('message', onMsg); } catch(e){} resolve(false); } }, timeoutMs || 400);
+    });
+  }
+
+  // ① 有本地会话 → 立即进应用(不弹登录页),随后后台补全数据
   const saved = localStorage.getItem(SESSION_KEY);
   if (saved) {
     try { currentUser = JSON.parse(saved); } catch(e) { currentUser = null; }
-    if (currentUser && currentUser.id) {
-      // 立即进入应用(隐藏登录视图、显示主框架),界面不闪登录页/转圈
-      document.getElementById('loginView').classList.add('hidden');
-      document.getElementById('appLayout').classList.remove('hidden');
-      document.getElementById('sidebarName').textContent = currentUser.name;
-      document.getElementById('sidebarDept').textContent = currentUser.department;
-      document.getElementById('sidebarAvatar').textContent = currentUser.name.charAt(0);
-      document.getElementById('userWelcome').textContent = `👋 欢迎,${currentUser.name}`;
-      updateNavVisibility();
-      // 尝试从已打开的同会话标签页复用其内存数据(跨标签页 BroadcastChannel),实现新标签秒开;无可用兄弟标签则回退云端拉取
-      let usedSibling = false;
-      if (SESSION_BUS) {
-        const reqId = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2);
-        usedSibling = await new Promise((resolve) => {
-          let done = false;
-          const onMsg = (ev) => {
-            const m = ev.data || {};
-            if (m.type === 'SOP_DATA' && m.reqId === reqId) {
-              if (done) return;
-              done = true;
-              try { SESSION_BUS.removeEventListener('message', onMsg); } catch(e){}
-              const p = m.payload || {};
-              if (p.cloudData) {
-                cloudData = p.cloudData;
-                dataLoaded = !!p.dataLoaded;
-                reportsLoaded = !!p.reportsLoaded;
-                try { if (typeof visitDataLoaded !== 'undefined') visitDataLoaded = !!p.visitDataLoaded; } catch(e){}
-                if (p.currentUser && p.currentUser.id) {
-                  currentUser = p.currentUser;
-                  try { localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser)); } catch(e){}
-                }
-                resolve(true);
-              } else { resolve(false); }
-            }
-          };
-          SESSION_BUS.addEventListener('message', onMsg);
-          try { SESSION_BUS.postMessage({ type: 'SOP_REQ_DATA', reqId: reqId, userId: currentUser.id }); } catch(e){}
-          // 无兄弟标签或兄弟尚未就绪 → 超时回退云端拉取
-          setTimeout(() => { if (!done) { done = true; try { SESSION_BUS.removeEventListener('message', onMsg); } catch(e){} resolve(false); } }, 350);
-        });
-      }
-      if (usedSibling) {
-        // 数据直接来自兄弟标签内存:跳过所有云端拉取,后台仅静默补齐可能缺失的部分(角色类/报表缓存),不阻塞界面
-        ensureXLSX().catch(()=>{});
-        loadRoleScopedData().catch(e=>console.warn('角色数据补齐失败:', e && e.message));
-        if (!reportsLoaded) { loadReportData().catch(e=>console.warn('报表数据补齐失败:', e && e.message)); }
-        navTo(getInitialPage());
-        return;
-      }
-      // 回退:无兄弟标签可复用 → 走原云端自动登录流程(失败仅告警,不强制登出)
+  }
+  if (currentUser && currentUser.id) {
+    hideLoginAndShowApp();
+    navTo(getInitialPage());
+    const got = await requestSiblingSnapshot(400);
+    if (got) {
+      ensureXLSX().catch(()=>{});
+      loadRoleScopedData().catch(e=>console.warn('角色数据补齐失败:', e && e.message));
+      if (!reportsLoaded) { loadReportData().catch(e=>console.warn('报表数据补齐失败:', e && e.message)); }
+    } else {
+      // 借不到兄弟 → 走云端拉取补全(含账号停用检测),失败仅告警、信任本地会话
       (async () => {
         try { if (_usersDataPromise) await _usersDataPromise; } catch(e){}
-        // 仅当云端明确标记停用(active===false)才退回登录;其余情况(含拉取失败)信任已保存会话
         const found = cloudData.users.find(u => u.id === currentUser.id);
         if (found && found.active === false) {
           currentUser = null;
           document.getElementById('appLayout').classList.add('hidden');
           document.getElementById('loginView').classList.remove('hidden');
-          if (formBox) formBox.style.display = '';
+          showLoginForm();
           return;
         }
         if (found) {
@@ -15225,14 +15232,24 @@ function applyMgrPerfBatchStandard() {
         try { if (_coreDataPromise) await _coreDataPromise; } catch(e){}
         try { await loadRoleScopedData(); } catch(e){ console.warn('auto loadRoleScopedData 失败:', e && e.message); }
         try { if (!reportsLoaded) { await loadReportData(); try { await ensureXLSX(); } catch(e){ console.warn('表格组件加载失败:', e && e.message); } } } catch(e){ console.warn('auto loadReportData 失败:', e && e.message); }
-        navTo(getInitialPage());
       })();
-      return;
     }
+    return;
   }
-  // 无有效会话 → 显示登录表单
-  if (loadingEl) loadingEl.style.display = 'none';
-  if (formBox) formBox.style.display = '';
+
+  // ② 无本地会话 → 先向兄弟标签借登录态(已登录兄弟存在则不弹登录页)
+  const gotSibling = await requestSiblingSnapshot(400);
+  if (gotSibling) {
+    hideLoginAndShowApp();
+    navTo(getInitialPage());
+    ensureXLSX().catch(()=>{});
+    loadRoleScopedData().catch(e=>console.warn('角色数据补齐失败:', e && e.message));
+    if (!reportsLoaded) { loadReportData().catch(e=>console.warn('报表数据补齐失败:', e && e.message)); }
+    return;
+  }
+
+  // ③ 真·未登录 → 显示登录表单
+  showLoginForm();
 })();
 </script>
 </body>
