@@ -1283,7 +1283,7 @@ async function showApp() {
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
   updateNavVisibility();
-  navTo('dashboard');
+  navTo(getInitialPage());
 }
 
 function updateNavVisibility() {
@@ -1327,6 +1327,24 @@ function navTo(page) {
   // Background refresh: silently fetch latest data (non-blocking, only for read-only pages)
   silentRefresh(page);
 }
+
+// 通过 URL 参数确定新标签/直达应打开的模块(登录后默认首页)
+function getInitialPage() {
+  const valid = ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','settings','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
+  const p = new URLSearchParams(location.search).get('page');
+  return (p && valid.includes(p)) ? p : 'dashboard';
+}
+
+// 侧边栏导航:新标签页打开对应模块(当前标签保持不动)
+function navToNewTab(page) {
+  window.open('?page=' + encodeURIComponent(page), '_blank');
+}
+
+// 绑定侧边栏导航项:点击 → 新标签打开(移除内联 onclick,避免当前页也跳转)
+document.querySelectorAll('.sidebar .nav-item').forEach(el => {
+  el.removeAttribute('onclick');
+  el.addEventListener('click', () => navToNewTab(el.dataset.page));
+});
 
 // Silently fetch latest report data in background; only re-render if data count changed
 async function silentRefresh(page) {
@@ -14859,7 +14877,7 @@ function applyMgrPerfBatchStandard() {
       document.getElementById('sidebarAvatar').textContent = currentUser.name.charAt(0);
       document.getElementById('userWelcome').textContent = `👋 欢迎,${currentUser.name}`;
       updateNavVisibility();
-      navTo('dashboard');
+      navTo(getInitialPage());
       return;
     }
   }
