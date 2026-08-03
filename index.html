@@ -4351,7 +4351,8 @@ function exportCSV(type) {
   if (e) reports = reports.filter(r => (type==='daily'?r.reportDate:r.weekStart) <= e);
   if (fDept) reports = reports.filter(r => r.department === fDept);
   if (fPerson) reports = reports.filter(r => r.name === fPerson);
-  const headers = ['姓名','部门',type==='weekly'?'周开始':'日期',type==='weekly'?'周结束':'','渠道','参考标准','新增精准线索数','有效建联数','AB意向数','成交客户数','成交金额','建联转AB率','目标金额','完成率','问题/提升动作'];
+  // 表头与"日报/周报数据"页面展示保持一致(页面已移除"参考标准"列,故导出不再包含)
+  const headers = ['姓名','部门', type==='weekly'?'周开始':'日期', ...(type==='weekly'?['周结束']:[]), '渠道','新增线索','有效建联','AB意向','成交客户','成交金额','建联转AB率','目标金额','完成率','问题/提升动作'];
   // CSV 转义:值含逗号/引号/换行时用双引号包裹
   const esc = v => {
     if (v === null || v === undefined) return '';
@@ -4369,14 +4370,15 @@ function exportCSV(type) {
       const cpr=ch.targetAmount===''||ch.targetAmount==='/'?'/':(ta>0?(da/ta*100).toFixed(1)+'%':'/');
       const df=type==='weekly'?r.weekStart:r.reportDate;
       const ef=type==='weekly'?r.weekEnd:'';
-      rows.push([r.name,r.department,df,ef,ch.channel,ch.reference||'',ch.newLeads||'',ch.effectiveContacts||'',ch.abIntent||'',ch.closedCustomers||'',ch.dealAmount||'',ctr,ch.targetAmount||'',cpr,(ch.issues||'').replace(/,/g,',').replace(/\n/g,' ')].map(esc).join(','));
+      const base=[r.name,r.department,df,...(type==='weekly'?[ef]:[]),ch.channel,ch.newLeads||'',ch.effectiveContacts||'',ch.abIntent||'',ch.closedCustomers||'',ch.dealAmount||'',ctr,ch.targetAmount||'',cpr,(ch.issues||'').replace(/\n/g,' ')];
+      rows.push(base.map(esc).join(','));
     });
   });
   const csv = '\uFEFF' + rows.join('\n');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  let nameParts = [type==='weekly'?'周报':'日报' + '数据'];
+  let nameParts = [(type==='weekly'?'周报':'日报') + '数据'];
   if (s || e) nameParts.push((s||'') + '至' + (e||''));
   if (fDept) nameParts.push(fDept);
   if (fPerson) nameParts.push(fPerson);
