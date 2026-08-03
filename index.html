@@ -703,6 +703,7 @@ const SESSION_KEY = 'sop_session';
 let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}, honorRecords:{}};
 let currentUser = null;
 let isCloudAvailable = false;
+let cloudConfirmedViaSibling = false; // 已通过兄弟标签页确认云端可达:loadUsersOnly 拉取失败时不再把 isCloudAvailable 下探为 false
 let dataLoaded = false;
 let reportsLoaded = false;
 let _coreDataPromise = null;
@@ -753,7 +754,7 @@ async function loadUsersOnly() {
     isCloudAvailable = true;
   } catch(e) {
     console.warn('Users fetch failed:', e.message);
-    isCloudAvailable = false;
+    if (!cloudConfirmedViaSibling) isCloudAvailable = false;
     cloudData.users = [];
   }
   // Ensure admin exists
@@ -15190,6 +15191,8 @@ function applyMgrPerfBatchStandard() {
             try { if (typeof visitDataLoaded !== 'undefined') visitDataLoaded = !!p.visitDataLoaded; } catch(e){}
             currentUser = p.currentUser;
             try { localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser)); } catch(e){}
+            cloudConfirmedViaSibling = true;
+            isCloudAvailable = true;
             resolve(true);
           } else { resolve(false); }
         }
@@ -15200,14 +15203,13 @@ function applyMgrPerfBatchStandard() {
     });
   }
 
-  // ① 有本地会话 → 立即进应用(不弹登录页),随后后台补全数据
+  // ① 有本地会话 → 立即隐藏登录页进应用(不闪登录页),数据/云端状态就绪后再渲染首屏
   const saved = localStorage.getItem(SESSION_KEY);
   if (saved) {
     try { currentUser = JSON.parse(saved); } catch(e) { currentUser = null; }
   }
   if (currentUser && currentUser.id) {
     hideLoginAndShowApp();
-    navTo(getInitialPage());
     const got = await requestSiblingSnapshot(400);
     if (got) {
       ensureXLSX().catch(()=>{});
@@ -15215,25 +15217,24 @@ function applyMgrPerfBatchStandard() {
       if (!reportsLoaded) { loadReportData().catch(e=>console.warn('报表数据补齐失败:', e && e.message)); }
     } else {
       // 借不到兄弟 → 走云端拉取补全(含账号停用检测),失败仅告警、信任本地会话
-      (async () => {
-        try { if (_usersDataPromise) await _usersDataPromise; } catch(e){}
-        const found = cloudData.users.find(u => u.id === currentUser.id);
-        if (found && found.active === false) {
-          currentUser = null;
-          document.getElementById('appLayout').classList.add('hidden');
-          document.getElementById('loginView').classList.remove('hidden');
-          showLoginForm();
-          return;
-        }
-        if (found) {
-          currentUser = {id:found.id,username:found.username,name:found.name,department:found.department,role:found.role};
-          localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
-        }
-        try { if (_coreDataPromise) await _coreDataPromise; } catch(e){}
-        try { await loadRoleScopedData(); } catch(e){ console.warn('auto loadRoleScopedData 失败:', e && e.message); }
-        try { if (!reportsLoaded) { await loadReportData(); try { await ensureXLSX(); } catch(e){ console.warn('表格组件加载失败:', e && e.message); } } } catch(e){ console.warn('auto loadReportData 失败:', e && e.message); }
-      })();
+      try { if (_usersDataPromise) await _usersDataPromise; } catch(e){}
+      const found = cloudData.users.find(u => u.id === currentUser.id);
+      if (found && found.active === false) {
+        currentUser = null;
+        document.getElementById('appLayout').classList.add('hidden');
+        document.getElementById('loginView').classList.remove('hidden');
+        showLoginForm();
+        return;
+      }
+      if (found) {
+        currentUser = {id:found.id,username:found.username,name:found.name,department:found.department,role:found.role};
+        localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+      }
+      try { if (_coreDataPromise) await _coreDataPromise; } catch(e){}
+      try { await loadRoleScopedData(); } catch(e){ console.warn('auto loadRoleScopedData 失败:', e && e.message); }
+      try { if (!reportsLoaded) { await loadReportData(); try { await ensureXLSX(); } catch(e){ console.warn('表格组件加载失败:', e && e.message); } } } catch(e){ console.warn('auto loadReportData 失败:', e && e.message); }
     }
+    navTo(getInitialPage()); // 数据/云端状态就绪后再渲染首屏,避免首页误报"云端连接失败"
     return;
   }
 
