@@ -532,6 +532,15 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 .seg-toggle .seg-btn{background:var(--gray-50);border:none;padding:0 14px;font-size:12px;cursor:pointer;color:var(--gray-600);white-space:nowrap}
 .seg-toggle .seg-btn:hover{background:var(--gray-100)}
 .seg-toggle .seg-btn.active{background:var(--primary);color:#fff;font-weight:600}
+/* 客户汇总"未填报"筛选开关 */
+.cs-switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;font-size:13px;color:var(--gray-700);margin-top:22px}
+.cs-switch input{position:absolute;opacity:0;width:0;height:0}
+.cs-switch-track{position:relative;width:40px;height:22px;background:var(--gray-300);border-radius:999px;transition:background .2s ease;flex-shrink:0}
+.cs-switch-thumb{position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:50%;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .2s ease}
+.cs-switch input:checked + .cs-switch-track{background:var(--primary)}
+.cs-switch input:checked + .cs-switch-track .cs-switch-thumb{transform:translateX(18px)}
+.cs-switch-label{font-size:13px;color:var(--gray-700)}
+.cs-switch input:checked ~ .cs-switch-label{color:var(--primary);font-weight:600}
 #sbBoard2 td,#sbBoard2 th{padding-left:8px;padding-right:8px}
 .sort-th{cursor:pointer;user-select:none;white-space:nowrap}
 .sort-th:hover{background:var(--gray-100)}
@@ -9602,6 +9611,7 @@ let csPage = 1;
 let csPageSize = 20;
 let csMonths = []; // 客户汇总月份多选('01'~'12');空数组=全部月份
 let csSortState = null; // 客户汇总排序状态:{ col: 'docMonth'|'salesperson'|'amount'|'team'|'customerSource'|'category'|'customerProfile', dir: 'asc'|'desc' };null=默认按年/月+销售员+客户 升序
+let csOnlyBlank = false; // 客户汇总"未填报"筛选开关:true=只显示 客户来源/品类/客户画像 任一未设置的聚合行
 
 // ===== 客户来源汇总 / 客户画像汇总 / 销售签约分析 的团队&人员筛选 =====
 // 团队筛选(空=全部);人员多选(空数组=全部)
@@ -10386,6 +10396,13 @@ function renderSalesBoardCustomer() {
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">部门</label><select class="form-control" id="csTeam" onchange="csRefilter()">${teamOptsCs}</select></div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">人员</label><select class="form-control" id="csSales" onchange="csRefilter()">${spOptsCs}</select></div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetCustomerSummary()">重置</button></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label>
+          <label class="cs-switch" title="只显示 客户来源 / 品类 / 客户画像 中任一未设置的行">
+            <input type="checkbox" id="csOnlyBlank" ${csOnlyBlank ? 'checked' : ''} onchange="csToggleBlank(this.checked)">
+            <span class="cs-switch-track"><span class="cs-switch-thumb"></span></span>
+            <span class="cs-switch-label">未填报</span>
+          </label>
+        </div>
       </div>
       <div class="form-group" style="margin-top:12px">
         <label style="font-size:12px;color:var(--gray-500)">月份(可多选,默认上个月)</label>
@@ -10420,6 +10437,9 @@ function resetCustomerSummary() {
   csRenderMonthChips();
   document.getElementById('csTeam').value = '';
   document.getElementById('csSales').value = '';
+  csOnlyBlank = false;
+  const blankEl = document.getElementById('csOnlyBlank');
+  if (blankEl) blankEl.checked = false;
   csPage = 1;
   csSelectedKeys.clear();
   renderCustomerSummary();
@@ -10504,6 +10524,10 @@ function renderCustomerSummary() {
     });
   } else {
     rows = Object.keys(groups).map(k => groups[k]).sort(defaultSort);
+  }
+  // "未填报"筛选:只保留 客户来源/品类/客户画像 任一未设置的聚合行(叠加在年份/部门/人员/月份筛选之上)
+  if (csOnlyBlank) {
+    rows = rows.filter(g => !g.customerSource || !g.category || !g.customerProfile);
   }
   csAllRows = rows;
   // 分页
@@ -10596,6 +10620,7 @@ function lyMonth(mm) { const p = String(mm).split('-'); return (parseInt(p[0], 1
 
 // ===== 客户汇总:分页 / 勾选 / 批量设置 / 导出 / 排序 =====
 function csRefilter() { csPage = 1; csSelectedKeys.clear(); renderCustomerSummary(); }
+function csToggleBlank(on) { csOnlyBlank = !!on; csPage = 1; csSelectedKeys.clear(); renderCustomerSummary(); }
 function csGotoPage(p) { csPage = p; renderCustomerSummary(); }
 function csSetPageSize(v) { csPageSize = parseInt(v, 10) || 20; csPage = 1; renderCustomerSummary(); }
 function csKeyOf(g) { return g.docMonth + '|' + g.salesperson + '|' + (g.customer || ''); }
