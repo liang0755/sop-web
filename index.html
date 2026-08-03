@@ -637,6 +637,34 @@ let reportsLoaded = false;
 let _coreDataPromise = null;
 let _usersDataPromise = null;
 
+// ============ 跨标签页内存数据共享(BroadcastChannel):新标签秒开 ============
+// 已登录且数据就绪的标签页作为"数据源",把内存中的 cloudData 直接发给新开的同会话标签页,
+// 新标签据此跳过全部云端拉取、直接渲染目标模块,实现秒开。无可用兄弟标签时自动回退云端拉取(优雅降级)。
+const SESSION_BUS = ('BroadcastChannel' in window) ? new BroadcastChannel('sop_session_bus') : null;
+if (SESSION_BUS) {
+  SESSION_BUS.onmessage = (ev) => {
+    const msg = ev.data || {};
+    if (msg.type === 'SOP_REQ_DATA') {
+      // 仅当本标签已登录且核心+报表数据均就绪时才响应(避免回传空/半成品数据)
+      if (currentUser && currentUser.id && dataLoaded && reportsLoaded) {
+        try {
+          SESSION_BUS.postMessage({
+            type: 'SOP_DATA',
+            reqId: msg.reqId,
+            payload: {
+              cloudData: cloudData,
+              dataLoaded: dataLoaded,
+              reportsLoaded: reportsLoaded,
+              visitDataLoaded: (typeof visitDataLoaded !== 'undefined') ? visitDataLoaded : false,
+              currentUser: currentUser
+            }
+          });
+        } catch(e) { console.warn('BroadcastChannel 响应失败:', e && e.message); }
+      }
+    }
+  };
+}
+
 async function hashPassword(pwd) {
   const enc = new TextEncoder();
   const buf = await crypto.subtle.digest('SHA-256', enc.encode(pwd));
@@ -1334,6 +1362,15 @@ function getInitialPage() {
   const p = new URLSearchParams(location.search).get('page');
   return (p && valid.includes(p)) ? p : 'dashboard';
 }
+
+// 侧边栏导航:新标签页打开对应模块(当前标签保持不动);仅绑定 .sidebar .nav-item,不影响页面内按钮(按钮仍走 navTo 当前页)
+function navToNewTab(page) {
+  window.open('?page=' + encodeURIComponent(page), '_blank');
+}
+document.querySelectorAll('.sidebar .nav-item').forEach(el => {
+  el.removeAttribute('onclick');
+  el.addEventListener('click', () => { const p = el.getAttribute('data-page'); if (p) navToNewTab(p); });
+});
 
 // Silently fetch latest report data in background; only re-render if data count changed
 async function silentRefresh(page) {
@@ -14836,7 +14873,7 @@ function applyMgrPerfBatchStandard() {
   if (saved) {
     try { currentUser = JSON.parse(saved); } catch(e) { currentUser = null; }
     if (currentUser && currentUser.id) {
-      // 立即进入应用(隐藏登录视图、显示主框架),界面不闪登录页/转圈;数据后台静默补齐
+      // 立即进入应用(隐藏登录视图、显示主框架),界面不闪登录页/转圈
       document.getElementById('loginView').classList.add('hidden');
       document.getElementById('appLayout').classList.remove('hidden');
       document.getElementById('sidebarName').textContent = currentUser.name;
@@ -14844,7 +14881,47 @@ function applyMgrPerfBatchStandard() {
       document.getElementById('sidebarAvatar').textContent = currentUser.name.charAt(0);
       document.getElementById('userWelcome').textContent = `👋 欢迎,${currentUser.name}`;
       updateNavVisibility();
-      // 后台静默加载用户/配置/报表数据并跳到目标模块(不阻塞界面,失败仅告警)
+      // 尝试从已打开的同会话标签页复用其内存数据(跨标签页 BroadcastChannel),实现新标签秒开;无可用兄弟标签则回退云端拉取
+      let usedSibling = false;
+      if (SESSION_BUS) {
+        const reqId = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+        usedSibling = await new Promise((resolve) => {
+          let done = false;
+          const onMsg = (ev) => {
+            const m = ev.data || {};
+            if (m.type === 'SOP_DATA' && m.reqId === reqId) {
+              if (done) return;
+              done = true;
+              try { SESSION_BUS.removeEventListener('message', onMsg); } catch(e){}
+              const p = m.payload || {};
+              if (p.cloudData) {
+                cloudData = p.cloudData;
+                dataLoaded = !!p.dataLoaded;
+                reportsLoaded = !!p.reportsLoaded;
+                try { if (typeof visitDataLoaded !== 'undefined') visitDataLoaded = !!p.visitDataLoaded; } catch(e){}
+                if (p.currentUser && p.currentUser.id) {
+                  currentUser = p.currentUser;
+                  try { localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser)); } catch(e){}
+                }
+                resolve(true);
+              } else { resolve(false); }
+            }
+          };
+          SESSION_BUS.addEventListener('message', onMsg);
+          try { SESSION_BUS.postMessage({ type: 'SOP_REQ_DATA', reqId: reqId, userId: currentUser.id }); } catch(e){}
+          // 无兄弟标签或兄弟尚未就绪 → 超时回退云端拉取
+          setTimeout(() => { if (!done) { done = true; try { SESSION_BUS.removeEventListener('message', onMsg); } catch(e){} resolve(false); } }, 350);
+        });
+      }
+      if (usedSibling) {
+        // 数据直接来自兄弟标签内存:跳过所有云端拉取,后台仅静默补齐可能缺失的部分(角色类/报表缓存),不阻塞界面
+        ensureXLSX().catch(()=>{});
+        loadRoleScopedData().catch(e=>console.warn('角色数据补齐失败:', e && e.message));
+        if (!reportsLoaded) { loadReportData().catch(e=>console.warn('报表数据补齐失败:', e && e.message)); }
+        navTo(getInitialPage());
+        return;
+      }
+      // 回退:无兄弟标签可复用 → 走原云端自动登录流程(失败仅告警,不强制登出)
       (async () => {
         try { if (_usersDataPromise) await _usersDataPromise; } catch(e){}
         // 仅当云端明确标记停用(active===false)才退回登录;其余情况(含拉取失败)信任已保存会话
