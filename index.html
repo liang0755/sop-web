@@ -1188,6 +1188,7 @@ async function refreshReportsInBackground() {
     if (activePage === 'dashboard') renderDashboard();
     else if (activePage === 'dailyData') loadDataView('daily');
     else if (activePage === 'weeklyData') loadDataView('weekly');
+    else if (activePage === 'mgrReport') { try { renderMgrReportList(); } catch(e) {} }
   } catch(e) {}
 }
 
@@ -1485,7 +1486,7 @@ async function silentRefresh(page) {
   if (bgRefreshInFlight) return;
   if (Date.now() - lastRefreshTime < REFRESH_INTERVAL) return;
   // Only background-refresh read-only pages (not forms with user input)
-  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'].includes(page)) return;
+  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf','mgrReport'].includes(page)) return;
   bgRefreshInFlight = true;
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
@@ -1494,11 +1495,12 @@ async function silentRefresh(page) {
     const needSales = hasPermission('salesDetail') || hasPermission('salesBoard');
     const needPerf = hasPermission('salesPerf');
     const needMgrPerf = hasPermission('mgrPerf');
+    const needMgr = hasPermission('mgrReport');
     const fetches = [
       fetch(FB_BASE + '/dailyReports.json'),
       fetch(FB_BASE + '/weeklyReports.json')
     ];
-    let iVisit = -1, iSales = -1, iPerfSnap = -1, iM0Snap = -1, iMgrSnap = -1;
+    let iVisit = -1, iSales = -1, iPerfSnap = -1, iM0Snap = -1, iMgrSnap = -1, iMgrR = -1;
     if (needVisit) { iVisit = fetches.length; fetches.push(fetch(FB_BASE + '/visitRecords.json')); }
     if (needSales) { iSales = fetches.length; fetches.push(fetch(FB_BASE + '/salesRecords.json')); }
     // 仅具权限者才在后台刷新管理绩效快照,避免普通员工无谓拉取
@@ -1507,6 +1509,7 @@ async function silentRefresh(page) {
       iM0Snap = fetches.length; fetches.push(fetch(FB_BASE + '/m0PerformanceSnapshots.json'));
     }
     if (needMgrPerf) { iMgrSnap = fetches.length; fetches.push(fetch(FB_BASE + '/mgrPerformanceSnapshots.json')); }
+    if (needMgr) { iMgrR = fetches.length; fetches.push(fetch(FB_BASE + '/mgrReports.json')); }
     const iHonor = fetches.length; fetches.push(fetch(FB_BASE + '/honorRecords.json'));
     const results = await Promise.all(fetches);
     const newDaily = results[0].ok ? Object.values(await results[0].json() || {}) : [];
@@ -1520,6 +1523,8 @@ async function silentRefresh(page) {
     if (newM0Snap && typeof newM0Snap === 'object') cloudData.m0PerformanceSnapshots = newM0Snap;
     const newMgrSnap = (iMgrSnap >= 0 && results[iMgrSnap] && results[iMgrSnap].ok) ? await results[iMgrSnap].json() : null;
     if (newMgrSnap && typeof newMgrSnap === 'object') cloudData.mgrPerformanceSnapshots = newMgrSnap;
+    // 管理周报后台刷新
+    const newMgrR = (iMgrR >= 0 && results[iMgrR] && results[iMgrR].ok) ? Object.values(await results[iMgrR].json() || {}) : null;
     // 荣誉激励后台刷新
     const newHonor = (iHonor >= 0 && results[iHonor] && results[iHonor].ok) ? await results[iHonor].json() : null;
     if (newHonor && typeof newHonor === 'object') {
@@ -1527,14 +1532,16 @@ async function silentRefresh(page) {
       normalizeHonorRecords();
     }
     // Only update + re-render if data count changed (new records added by others)
-    if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length || newSales.length !== cloudData.salesRecords.length) {
+    const mgrRChanged = newMgrR && newMgrR.length !== cloudData.mgrReports.length;
+    if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length || newSales.length !== cloudData.salesRecords.length || mgrRChanged) {
       cloudData.dailyReports = newDaily;
       cloudData.weeklyReports = newWeekly;
       cloudData.visitRecords = newVisit;
       cloudData.salesRecords = newSales;
+      if (newMgrR) cloudData.mgrReports = newMgrR;
       const activePage = document.querySelector('.nav-item.active')?.dataset.page;
       if (activePage === page) {
-        ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
+        ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf,mgrReport:renderMgrReportList}[page]||(()=>{}))();
       }
     }
   } catch(e) { /* silent fail */ }
