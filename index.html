@@ -1434,7 +1434,7 @@ function updateNavVisibility() {
 
 // ============ Navigation ============
 let lastRefreshTime = Date.now();
-const REFRESH_INTERVAL = 60000; // 60s minimum between background refreshes
+const REFRESH_INTERVAL = 30000; // 30s minimum between background refreshes
 let bgRefreshInFlight = false;
 
 function navTo(page) {
@@ -1457,7 +1457,7 @@ function navTo(page) {
   ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
   closeSidebar();
   // Background refresh: silently fetch latest data (non-blocking, only for read-only pages)
-  silentRefresh(page);
+  silentRefresh(page, true);
 }
 
 // 通过 URL 参数确定新标签/直达应打开的模块(登录后默认首页)
@@ -1481,10 +1481,23 @@ document.querySelectorAll('.sidebar .nav-item').forEach(el => {
   });
 });
 
-// Silently fetch latest report data in background; only re-render if data count changed
-async function silentRefresh(page) {
+// 持续后台刷新: 每 30s 触发一次(内部由 REFRESH_INTERVAL 节流), 使停留在某页面时也能
+// 自动拉取最新数据, 不再只在切换导航时才刷新一次
+setInterval(() => {
+  const ap = document.querySelector('.nav-item.active')?.dataset.page;
+  if (ap) silentRefresh(ap);
+}, 30000);
+
+// 轻量数据指纹(覆盖新增/删除/编辑关键字段), 用于判断后台刷新是否真正产生变更
+function dataSig(arr) {
+  return (arr || []).map(r => `${r && r.id || ''}|${r && r.amount || ''}|${r && r.team || ''}|${r && r.status || ''}|${r && r.docMonth || ''}`).join('##');
+}
+
+// Silently fetch latest report data in background; re-render if data changed (count OR content).
+// force=true 时跳过节流(用于切换导航后立即拉取最新); 常规后台 tick 走节流
+async function silentRefresh(page, force = false) {
   if (bgRefreshInFlight) return;
-  if (Date.now() - lastRefreshTime < REFRESH_INTERVAL) return;
+  if (!force && Date.now() - lastRefreshTime < REFRESH_INTERVAL) return;
   // Only background-refresh read-only pages (not forms with user input)
   if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf','mgrReport'].includes(page)) return;
   bgRefreshInFlight = true;
@@ -1531,9 +1544,9 @@ async function silentRefresh(page) {
       cloudData.honorRecords = newHonor;
       normalizeHonorRecords();
     }
-    // Only update + re-render if data count changed (new records added by others)
-    const mgrRChanged = newMgrR && newMgrR.length !== cloudData.mgrReports.length;
-    if (newDaily.length !== cloudData.dailyReports.length || newWeekly.length !== cloudData.weeklyReports.length || newVisit.length !== cloudData.visitRecords.length || newSales.length !== cloudData.salesRecords.length || mgrRChanged) {
+    // 任一数据有变更(新增/删除/编辑关键字段)即更新+重渲染, 而非仅比记录数量
+    const mgrRChanged = newMgrR && (newMgrR.length !== cloudData.mgrReports.length || dataSig(newMgrR) !== dataSig(cloudData.mgrReports));
+    if (dataSig(newDaily) !== dataSig(cloudData.dailyReports) || dataSig(newWeekly) !== dataSig(cloudData.weeklyReports) || dataSig(newVisit) !== dataSig(cloudData.visitRecords) || dataSig(newSales) !== dataSig(cloudData.salesRecords) || mgrRChanged) {
       cloudData.dailyReports = newDaily;
       cloudData.weeklyReports = newWeekly;
       cloudData.visitRecords = newVisit;
