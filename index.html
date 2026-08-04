@@ -4754,6 +4754,10 @@ function getAIWeekNumber(d) {
   return Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
 }
 
+// 原始明细记录条数上限:汇总统计(salesSummary/visitSummary/teamPerformanceSummary 等)已覆盖全量数据,
+// 仅原始明细用于"逐条查看",超出上限会撑爆模型上下文(DeepSeek 约 128K),故裁剪为最近 N 条。
+const AI_RAW_CAP = { visit: 110, sales: 220, daily: 55, weekly: 42, mgr: 20 };
+
 function buildAIContext() {
   const userMap = {};
   cloudData.users.forEach(u => { userMap[u.id] = u; });
@@ -5023,16 +5027,16 @@ function buildAIContext() {
     users: activeUsers.map(u => ({name: u.name, department: u.department, role: u.role})),
     dailyChannels: (fc.daily || []).map(c => ({name: c.name, reference: c.reference})),
     weeklyChannels: (fc.weekly || []).map(c => ({name: c.name, reference: c.reference})),
-    dailyReports: dailyData,
-    weeklyReports: weeklyData,
-    visitRecords: visitData,
+    dailyReports: dailyData.slice(-AI_RAW_CAP.daily),
+    weeklyReports: weeklyData.slice(-AI_RAW_CAP.weekly),
+    visitRecords: visitData.slice(-AI_RAW_CAP.visit),
     visitSummary: visitSummary,
     visitResultOptions: (cloudData.visitConfig && cloudData.visitConfig.visitResults) || [],
     signinEventOptions: (cloudData.formConfig && cloudData.formConfig.signinEvents) || [],
-    salesRecords: salesData,
+    salesRecords: salesData.slice(-AI_RAW_CAP.sales),
     salesSummary: salesSummary,
     salesTeamOptions: SALES_KA_TEAMS,
-    mgrReports: mgrData,
+    mgrReports: mgrData.slice(-AI_RAW_CAP.mgr),
     customerSummary: customerSummary,
     teamTargets: teamTargets,
     teamHeadcount: teamHeadcount,
@@ -5140,7 +5144,7 @@ function buildAISystemMessage() {
     + '- M0评级(m0Records)字段: key=年_M0_月,含 grade/prevGrade/promote/note\n'
     + '- 管理绩效(mgrPerformanceRecords)字段: key=年_管理者_月,结构同绩效(含 items/bonus/workingDays/comment/base),管理者无职级列\n'
     + '- 荣誉激励(honorRecords)字段: 顶层 key=YYYY-MM 月份(如 "2026-06"),value 为该月奖项数组,每项含 awardName(奖项名称,如 外部攻坚奖/新媒体突破奖/营销端销冠),salesperson(获奖人姓名),team(所属团队/部门,自动匹配),bonus(奖金, 元),achievement(成就描述),note(备注),回答时按月份归类,按奖项分组展示获奖人与奖金,可用于回答"上个月谁拿了什么奖 / 某月某奖项的获奖人是谁 / 奖金合计是多少"等问题,\n'
-    + '以下是当前系统的完整数据(JSON格式):\n' + dataContext;
+    + '以下是当前系统的数据(JSON格式):为适配模型上下文上限,原始明细记录仅保留最近若干条(拜访≤' + AI_RAW_CAP.visit + '/业绩≤' + AI_RAW_CAP.sales + '/日报≤' + AI_RAW_CAP.daily + '/周报≤' + AI_RAW_CAP.weekly + '/管理周报≤' + AI_RAW_CAP.mgr + ',均取最近日期),而聚合汇总(salesSummary/visitSummary/teamPerformanceSummary/customerSummary)与评级/绩效/荣誉等仍为全量;若需查询更早的逐条明细,请引导用户缩小时间范围。\n' + dataContext;
 }
 
 async function callAI(messages) {
