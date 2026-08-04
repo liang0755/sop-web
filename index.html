@@ -5129,7 +5129,7 @@ function buildAISystemMessage() {
     + '- 当用户的问题涉及"M0 绩效 / M0 考核 / M0 得分"时,必须使用 m0PerformanceRecords 与 m0PerformanceConfig 回答;涉及"M0 评级 / M0 升降级"时使用 m0Records 与 m0Config 回答,\n'
     + '- 当用户的问题涉及"管理绩效 / 管理者绩效 / 主管绩效得分"时,必须使用 mgrPerformanceRecords 与 mgrPerformanceConfig 回答(管理者角色用户,无职级之分,绩效基数默认 5000,最终基数=基数×在职天数/30),\n'
     + '- 当用户的问题涉及"荣誉激励 / 奖项 / 获奖人 / 奖金 / 销冠 / 攻坚奖 / 营销端冠军 / 团队冠军"时,必须使用 honorRecords 回答(按月份聚合的奖项与获奖人员/奖金/成就/备注),\n'
-    + '- 当用户的问题涉及"销售签约分析 / 各销售按来源分组的业绩矩阵 / 某销售某月某来源业绩 / 自拓/线索/其他 来源分组业绩对比"时,先看 customerTags.customerSourceGroups({组名:[客户来源项]})确定分组归属,再用 salesRecords 按 salesperson/docMonth/customerSource 汇总各 (月×组) 业绩,"销售"口径:在岗 + 非 admin/manager/viewer + 非 M0,\n'
+    + '- 当用户的问题涉及"销售签约分析 / 各销售按来源分组的业绩矩阵 / 某销售某月某来源业绩 / 自拓/线索/其他 来源分组业绩对比"时,先看 customerTags.customerSourceGroups({组名:[客户来源项]})确定分组归属,再用 salesRecords 按 salesperson/docMonth/customerSource 汇总各 (月×组) 业绩,"销售"口径:在岗 + 非 admin/manager/viewer(含 M0 人员),\n'
     + '- customerTags 字段: customerSource/category/customerProfile 三个选项数组 + customerSourceGroups 分组映射({组名:[客户来源项]}),未配置分组时所有客户来源归入"其他",\n'
     + '- 团队业绩统计(teamPerformanceSummary)字段(按 团队→年→月 三层嵌套,请先按 currentYear/lastYear 定位年份再读月份):\n'
     + '  - 结构: teamPerformanceSummary[团队].byYear[年份].byMonth[月份] = { target(月目标金额, 来自 teamTargets), amount(实际完成业绩金额, 来自 salesRecords 同团队同月汇总), grossProfit(毛利), completionRate(完成率% = amount÷target, 目标为0时为null), headcount(团队人数, 来自 teamHeadcount), efficiency(人效=amount÷headcount, 人数为0时为null) }\n'
@@ -10195,12 +10195,10 @@ function renderProfileSummaryTable(year) {
 }
 
 // ===== 销售签约分析:销售 × 月份 × 来源分组 业绩矩阵 =====
-// 在岗销售成员:在岗 + 非 admin/manager/viewer + 不在 M0 名单中
+// 在岗销售成员:在岗 + 非 admin/manager/viewer(含 M0 人员)
 function getActiveSalesUsers() {
-  const m0Set = new Set();
-  (cloudData.formConfig?.m0Config?.groups || []).forEach(g => { if (g.m0) m0Set.add((g.m0 || '').trim()); });
   return (cloudData.users || [])
-    .filter(u => u && u.name && u.active && !u.leaveDate && u.role !== 'admin' && u.role !== 'manager' && u.role !== 'viewer' && !m0Set.has((u.name || '').trim()))
+    .filter(u => u && u.name && u.active && !u.leaveDate && u.role !== 'admin' && u.role !== 'manager' && u.role !== 'viewer')
     .map(u => ({ name: u.name }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh'));
 }
@@ -10247,7 +10245,7 @@ function renderSalesBoardSigning() {
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesSigningYear()">重置为今年</button></div>
           <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportSalesSigning()">📤 导出 Excel</button></div>
         </div>
-        <div style="font-size:12px;color:var(--gray-600);margin-top:8px">💡 销售成员口径:在岗 + 非 admin/manager/viewer + 非 M0,分组顺序:自拓 → 线索 → 其他(在"表单配置 → 客户标签配置"可调整分组与归属项),</div>
+        <div style="font-size:12px;color:var(--gray-600);margin-top:8px">💡 销售成员口径:在岗 + 非 admin/manager/viewer(含 M0 人员),分组顺序:自拓 → 线索 → 其他(在"表单配置 → 客户标签配置"可调整分组与归属项),</div>
       </div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="sigTableWrap"></div></div></div>`;
