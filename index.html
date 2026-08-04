@@ -127,6 +127,10 @@ tr:hover > .perf-freeze{
 .channel-card.collapsed .ch-toggle-arrow{transform:rotate(-90deg)}
 .channel-card.collapsed .channel-form-grid{display:none}
 .channel-card.collapsed .ch-ref-box{display:none}
+/* 日报/周报填写:渠道卡片两列网格(移动端自动单列) */
+.channel-forms-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.channel-forms-grid .channel-card{margin-bottom:0}
+@media (max-width:768px){ .channel-forms-grid{grid-template-columns:1fr} }
 .ch-filled-badge{font-size:11px;background:var(--success-light);color:var(--success);padding:2px 8px;border-radius:10px;font-weight:600;white-space:nowrap}
 .ch-filled-badge.empty{background:var(--gray-100);color:var(--gray-400)}
 /* Channel quick-jump chips */
@@ -2343,7 +2347,7 @@ function renderReportForm(type) {
         <button class="btn btn-outline btn-sm" onclick="collapseAllChannels()">收起全部</button>
       </div>
     </div>
-    <div id="channelForms"></div>
+    <div id="channelForms" class="channel-forms-grid"></div>
     <div style="height:70px"></div>
     <div class="sticky-submit-bar">
       <button class="btn btn-outline" onclick="navTo('dashboard')">取消</button>
