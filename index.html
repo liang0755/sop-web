@@ -3723,9 +3723,9 @@ function getDepartments() {
     : [...new Set(cloudData.users.map(u => u.department).filter(d => d))].sort();
 }
 
-// ===== 部门名归一化(修复 "KA二部" 与 "KA 二部" 空格不一致导致匹配失败)=====
-// 比较时去掉所有空白;存储时尽量映射回主数据里的规范(带空格)部门名
-function normDeptKey(d) { return (d || '').replace(/\s/g, ''); }
+// ===== 部门名归一化(修复 "KA二部" 与 "KA 二部" 空格不一致 / 全角半角括号不一致 导致匹配失败)=====
+// 比较时去掉所有空白 + 全角标点转半角;存储时尽量映射回主数据里的规范(带空格)部门名
+function normDeptKey(d) { return (d || '').replace(/\s/g, '').replace(/[（）【】\[\]]/g, s => ({'（':'(','）':')','【':'[','】':']'})[s] || s); }
 function getDeptCanonicalMap() {
   const map = {};
   getDepartments().forEach(d => { if (d) map[normDeptKey(d)] = d; });
@@ -9014,6 +9014,13 @@ const SALES_STORE_CORRECTION = {
   'KA-KA全国大区': 'KA 三部(全国区域)',
   'KA-KA华南大区': 'KA 二部(广东区域)'
 };
+// 团队名归一化:将全角括号/空格等变体统一映射到 SALES_KA_TEAMS 标准名
+function canonTeamName(raw) {
+  if (!raw) return raw;
+  const key = normDeptKey(raw);
+  for (const t of SALES_KA_TEAMS) { if (normDeptKey(t) === key) return t; }
+  return raw; // 无匹配则原样返回
+}
 function fmtSalesMoney(n) { return '¥' + Math.round(n || 0).toLocaleString('zh-CN'); }
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function toNum(x) { if (x == null || x === '') return 0; if (typeof x === 'number') return x; const n = parseFloat(String(x).replace(/[, ¥ ]/g, '')); return isNaN(n) ? 0 : n; }
@@ -9133,7 +9140,7 @@ async function importSalesFile(file, mode = 'cover') {
     for (const r of rows) {
       const storeRaw = String(get(r, '销售员所属门店') || '').trim();
       if (!storeRaw.startsWith('KA-')) { filtered++; continue; }
-      const team = SALES_STORE_CORRECTION[storeRaw] || storeRaw;
+      const team = canonTeamName(SALES_STORE_CORRECTION[storeRaw] || storeRaw);
       corrected[team] = (corrected[team] || 0) + 1;
       const docNo = String(get(r, '单据编号') || '').trim();
       const productName = String(get(r, '商品名称') || '').trim();
@@ -9393,9 +9400,12 @@ async function renderSalesDetail() {
   const startIdx = (salesDetailPage - 1) * salesDetailPageSize;
   const recs = all.slice(startIdx, startIdx + salesDetailPageSize);
   const colCount = 8 + (canEdit ? 2 : 0);
-  // 筛选下拉选项
-  const teams = [...new Set(cloudData.salesRecords.map(r => r.team).filter(Boolean))].sort((a, b) => teamOrderRank(a) - teamOrderRank(b));
-  const teamOpts = teams.map(t => `<option value="${esc(t)}" ${t === f.team ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  // 筛选下拉选项(团队名归一化去重:全角/半角括号变体合并为同一选项)
+  const teamRawSet = [...new Set(cloudData.salesRecords.map(r => r.team).filter(Boolean))];
+  const teamMap = {}; // normKey → canonName (取第一个出现的原始值经 canonTeamName 映射)
+  teamRawSet.forEach(t => { const key = normDeptKey(t); if (!(key in teamMap)) teamMap[key] = canonTeamName(t); });
+  const teams = Object.values(teamMap).sort((a, b) => teamOrderRank(a) - teamOrderRank(b));
+  const teamOpts = teams.map(t => `<option value="${esc(t)}" ${normDeptKey(t) === normDeptKey(f.team) ? 'selected' : ''}>${esc(t)}</option>`).join('');
   const sps = [...new Set(cloudData.salesRecords.map(r => r.salesperson).filter(Boolean))].sort();
   const spOpts = sps.map(s => `<option value="${esc(s)}" ${s === f.salesperson ? 'selected' : ''}>${esc(s)}</option>`).join('');
   const docTypes = [...new Set(cloudData.salesRecords.map(r => r.docType).filter(Boolean))].sort();
