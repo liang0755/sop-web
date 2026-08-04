@@ -9010,9 +9010,9 @@ function finishLoadingCountdown() {
 // ============ 业绩明细 / 业绩看板 ============
 const SALES_KA_TEAMS = ['KA 一部(江浙沪区域)', 'KA 二部(广东区域)', 'KA 三部(全国区域)'];
 const SALES_STORE_CORRECTION = {
-  'KA-KA华东大区': 'KA 一部(江浙沪区域)',
-  'KA-KA全国大区': 'KA 三部(全国区域)',
-  'KA-KA华南大区': 'KA 二部(广东区域)'
+  'KA-KA华东大区': 'KA 一部（江浙沪区域）',
+  'KA-KA全国大区': 'KA 三部（全国区域）',
+  'KA-KA华南大区': 'KA 二部（广东区域）'
 };
 // 团队名归一化:将全角括号/空格等变体统一映射到 SALES_KA_TEAMS 标准名
 function canonTeamName(raw) {
@@ -9090,7 +9090,7 @@ async function importSalesFile(file, mode = 'cover') {
     const existingById = new Map();
     cloudData.salesRecords.forEach(r => { const k = _dupKey(r); if (k) existingById.set(k, r); });
     let total = rows.length, filtered = 0, added = 0, updated = 0, batchMerged = 0, dup = 0;
-    const corrected = { 'KA 一部(江浙沪区域)': 0, 'KA 二部(广东区域)': 0, 'KA 三部(全国区域)': 0 };
+    const corrected = { 'KA 一部（江浙沪区域）': 0, 'KA 二部（广东区域）': 0, 'KA 三部（全国区域）': 0 };
     const toAdd = [];
     const toUpdate = []; // {id, rec}
     const processing = new Map(); // 本批按 key 跟踪(同文件内重复行合并到同一条)
@@ -9140,7 +9140,7 @@ async function importSalesFile(file, mode = 'cover') {
     for (const r of rows) {
       const storeRaw = String(get(r, '销售员所属门店') || '').trim();
       if (!storeRaw.startsWith('KA-')) { filtered++; continue; }
-      const team = canonTeamName(SALES_STORE_CORRECTION[storeRaw] || storeRaw);
+      const team = SALES_STORE_CORRECTION[storeRaw] || storeRaw;
       corrected[team] = (corrected[team] || 0) + 1;
       const docNo = String(get(r, '单据编号') || '').trim();
       const productName = String(get(r, '商品名称') || '').trim();
