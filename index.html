@@ -792,8 +792,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805222546';
-const APP_VERSION = '1.42.32'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805225707';
+const APP_VERSION = '1.42.33'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -3457,6 +3457,28 @@ document.addEventListener('click', function(e) {
     if (panel.contains(e.target) || (btn && btn.contains(e.target))) return;
     panel.style.display = 'none';
   });
+});
+
+// 通用:点击空白处自动收起浮动下拉面板(根治"展开后点空白无法收回")
+// 约定:凡是 position:absolute 的浮动筛选/选择面板,都加 class="float-panel" 且 data-toggle-btn="<触发按钮id>"。
+// 适用于开关仅切换 style.display 的面板(如各页"人员/销售"多选面板、管理周报选周次弹层)。
+// 新增任意浮动下拉时,务必加上这两个属性,否则点空白不会收起(长效规则)。
+document.addEventListener('click', function(e) {
+  document.querySelectorAll('.float-panel').forEach(function(panel) {
+    if (panel.style.display === 'none') return;
+    const btnId = panel.getAttribute('data-toggle-btn');
+    const btn = btnId ? document.getElementById(btnId) : null;
+    if (panel.contains(e.target) || (btn && btn.contains(e.target))) return;
+    panel.style.display = 'none';
+  });
+});
+// M0 配置内"累加人员"浮动面板(m0MemPanel_*):其开关会整段重渲染容器(旧元素被替换),
+// 不能依赖触发按钮元素身份判断,改用选择器;关闭时重置状态并重渲染配置区
+document.addEventListener('click', function(e) {
+  if (typeof m0MemberPanelFor === 'undefined' || m0MemberPanelFor < 0) return;
+  if (e.target.closest && (e.target.closest('[onclick*="toggleM0MemberPanel"]') || e.target.closest('[id^="m0MemPanel_"]'))) return;
+  m0MemberPanelFor = -1;
+  if (document.getElementById('m0ConfigPanel')) { try { renderM0ConfigPanelInto(); } catch (_) {} }
 });
 
 function recomputeSummary() {
@@ -8150,8 +8172,8 @@ async function renderMgrReport() {
             ${mgrMonths.map(m => `<option value="${m}">${m}</option>`).join('')}
           </select>
           <div style="position:relative">
-            <button class="btn btn-sm btn-outline" onclick="toggleMgrWeekCheck()">📆 选择周次 ▾</button>
-            <div id="mgrWeekCheckPop" style="display:none;position:absolute;right:0;top:36px;z-index:60;background:#fff;border:1px solid var(--gray-200);border-radius:8px;padding:10px;box-shadow:0 6px 20px rgba(0,0,0,.15);max-height:280px;overflow:auto;min-width:250px">
+            <button class="btn btn-sm btn-outline" id="mgrWeekCheckBtn" onclick="toggleMgrWeekCheck()">📆 选择周次 ▾</button>
+            <div id="mgrWeekCheckPop" class="float-panel" data-toggle-btn="mgrWeekCheckBtn" style="display:none;position:absolute;right:0;top:36px;z-index:60;background:#fff;border:1px solid var(--gray-200);border-radius:8px;padding:10px;box-shadow:0 6px 20px rgba(0,0,0,.15);max-height:280px;overflow:auto;min-width:250px">
               <div style="display:flex;gap:8px;margin-bottom:8px">
                 <button class="btn btn-xs btn-outline" onclick="mgrWeekCheckAll(true)">全选</button>
                 <button class="btn btn-xs btn-outline" onclick="mgrWeekCheckAll(false)">清空</button>
@@ -12549,7 +12571,7 @@ function renderSalesGrade() {
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">销售(在职)</label>
             <button type="button" class="form-control" id="sgSpBtn" onclick="toggleSgSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${sgSpLabel()}</button>
-            <div id="sgSpPanel" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
+            <div id="sgSpPanel" class="float-panel" data-toggle-btn="sgSpBtn" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
               <div style="display:flex;gap:6px;margin-bottom:8px">
                 <input type="text" class="form-control form-control-sm" id="sgSpSearch" placeholder="搜索销售姓名" oninput="renderSgSpPanel()" style="flex:1;min-width:0">
                 <button type="button" class="btn btn-sm btn-outline" onclick="sgSpSelectAll()">全选</button>
@@ -14035,7 +14057,7 @@ function renderSalesPerf() {
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">销售(在职)</label>
             <button type="button" class="form-control" id="perfSpBtn" onclick="togglePerfSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${perfSpLabel()}</button>
-            <div id="perfSpPanel" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
+            <div id="perfSpPanel" class="float-panel" data-toggle-btn="perfSpBtn" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
               <div style="display:flex;gap:6px;margin-bottom:8px">
                 <input type="text" class="form-control form-control-sm" id="perfSpSearch" placeholder="搜索销售姓名" oninput="renderPerfSpPanel()" style="flex:1;min-width:0">
                 <button type="button" class="btn btn-sm btn-outline" onclick="perfSpSelectAll()">全选</button>
@@ -14516,7 +14538,7 @@ function renderM0Perf(mount) {
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">M0人员</label>
             <button type="button" class="form-control" id="m0PerfSpBtn" onclick="toggleM0PerfSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${m0PerfSpLabel()}</button>
-            <div id="m0PerfSpPanel" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
+            <div id="m0PerfSpPanel" class="float-panel" data-toggle-btn="m0PerfSpBtn" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
               <div style="display:flex;gap:6px;margin-bottom:8px">
                 <input type="text" class="form-control form-control-sm" id="m0PerfSpSearch" placeholder="搜索 M0 姓名" oninput="renderM0PerfSpPanel()" style="flex:1;min-width:0">
                 <button type="button" class="btn btn-sm btn-outline" onclick="m0PerfSpSelectAll()">全选</button>
@@ -15092,7 +15114,7 @@ function renderMgrPerf() {
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">管理者</label>
             <button type="button" class="form-control" id="mgrPerfSpBtn" onclick="toggleMgrPerfSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${mgrPerfSpLabel()}</button>
-            <div id="mgrPerfSpPanel" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
+            <div id="mgrPerfSpPanel" class="float-panel" data-toggle-btn="mgrPerfSpBtn" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
               <div style="display:flex;gap:6px;margin-bottom:8px">
                 <input type="text" class="form-control form-control-sm" id="mgrPerfSpSearch" placeholder="搜索管理者姓名" oninput="renderMgrPerfSpPanel()" style="flex:1;min-width:0">
                 <button type="button" class="btn btn-sm btn-outline" onclick="mgrPerfSpSelectAll()">全选</button>
