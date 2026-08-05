@@ -9977,20 +9977,70 @@ function aggregateSourceSummary(year) {
   return srcMap;
 }
 
+// ===== 客户来源/画像汇总 表头排序 =====
+const CS_MONTHS = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+let csSort = { source: { col: 'name', dir: 'asc' }, profile: { col: 'name', dir: 'asc' } };
+function csSortVal(map, label, col) {
+  if (col === 'name') return label;
+  if (col === 'totc') { let s = 0; for (const m of CS_MONTHS) { const c = (map[label] && map[label][m]) || { countSet: new Set(), amount: 0 }; s += c.countSet.size; } return s; }
+  if (col === 'tota') { let s = 0; for (const m of CS_MONTHS) { const c = (map[label] && map[label][m]) || { countSet: new Set(), amount: 0 }; s += c.amount; } return s; }
+  const m = col.slice(1, 3);
+  const c = (map[label] && map[label][m]) || { countSet: new Set(), amount: 0 };
+  return col.endsWith('c') ? c.countSet.size : c.amount;
+}
+function csSortLabels(labels, map, state) {
+  const dir = state.dir === 'desc' ? -1 : 1;
+  const col = state.col;
+  return labels.slice().sort((a, b) => {
+    if (col === 'name') {
+      if (a === '(未设置)' && b === '(未设置)') return 0;
+      if (a === '(未设置)') return 1;
+      if (b === '(未设置)') return -1;
+      return a.localeCompare(b, 'zh') * dir;
+    }
+    return (csSortVal(map, a, col) - csSortVal(map, b, col)) * dir;
+  });
+}
+function csTh(label, col, board, cls) {
+  const st = csSort[board];
+  const active = st.col === col;
+  const arrow = active ? (st.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  return `<th class="${cls || ''}" title="点击排序" onclick="csToggleSort('${board}','${col}')" style="cursor:pointer;user-select:none;white-space:nowrap">${label}${arrow}</th>`;
+}
+function csToggleSort(board, col) {
+  const st = csSort[board];
+  if (st.col === col) {
+    st.dir = st.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    st.col = col;
+    st.dir = (col === 'name') ? 'asc' : 'desc';
+  }
+  const yv = board === 'source'
+    ? (document.getElementById('srcYear') ? document.getElementById('srcYear').value : new Date().getFullYear().toString())
+    : (document.getElementById('profileYear') ? document.getElementById('profileYear').value : new Date().getFullYear().toString());
+  if (board === 'source') renderSourceSummaryTable(yv);
+  else renderProfileSummaryTable(yv);
+}
+
 function renderSourceSummaryTable(year) {
   const wrap = document.getElementById('srcTableWrap');
   const srcMap = aggregateSourceSummary(year);
   const sources = Object.keys(srcMap).sort((a, b) => a === '(未设置)' ? 1 : (b === '(未设置)' ? -1 : a.localeCompare(b)));
   const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
   if (!sources.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无匹配数据</div>'; return; }
-  let head = '<thead><tr><th rowspan="2" style="min-width:120px">客户来源</th>';
+  const st = csSort.source;
+  const nameArrow = st.col === 'name' ? (st.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  let head = '<thead><tr>';
+  head += `<th rowspan="2" style="min-width:120px;cursor:pointer;user-select:none" title="点击排序" onclick="csToggleSort('source','name')">客户来源${nameArrow}</th>`;
   months.forEach(m => { head += `<th colspan="2">${parseInt(m, 10)}月</th>`; });
   head += '<th colspan="2">合计</th></tr><tr>';
-  months.forEach(() => { head += '<th class="num">客户数</th><th class="num">业绩</th>'; });
-  head += '<th class="num">客户数</th><th class="num">业绩</th></tr></thead>';
+  months.forEach(m => { head += csTh('客户数', 'm' + m + 'c', 'source', 'num') + csTh('业绩', 'm' + m + 'a', 'source', 'num'); });
+  head += csTh('客户数', 'totc', 'source', 'num') + csTh('业绩', 'tota', 'source', 'num');
+  head += '</tr></thead>';
   let body = '<tbody>';
   const colCount = {}, colAmount = {}, colGrandCount = new Set();
-  sources.forEach(src => {
+  const sortedSources = csSortLabels(sources, srcMap, st);
+  sortedSources.forEach(src => {
     let rowCount = 0, rowAmount = 0;
     body += `<tr><td><span class="badge badge-info">${esc(src)}</span></td>`;
     months.forEach(m => {
@@ -10037,7 +10087,8 @@ function exportSourceSummary() {
   header2.push('客户数'); header2.push('业绩');
   const aoa = [header1, header2];
   const colCount = {}, colAmount = {};
-  sources.forEach(src => {
+  const sortedSources = csSortLabels(sources, srcMap, csSort.source);
+  sortedSources.forEach(src => {
     const row = [src];
     let rowCount = 0, rowAmount = 0;
     months.forEach(m => {
@@ -10162,14 +10213,19 @@ function renderProfileSummaryTable(year) {
   const profiles = Object.keys(profileMap).sort((a, b) => a === '(未设置)' ? 1 : (b === '(未设置)' ? -1 : a.localeCompare(b)));
   const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
   if (!profiles.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无匹配数据</div>'; return; }
-  let head = '<thead><tr><th rowspan="2" style="min-width:120px">客户类型</th>';
+  const st = csSort.profile;
+  const nameArrow = st.col === 'name' ? (st.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  let head = '<thead><tr>';
+  head += `<th rowspan="2" style="min-width:120px;cursor:pointer;user-select:none" title="点击排序" onclick="csToggleSort('profile','name')">客户类型${nameArrow}</th>`;
   months.forEach(m => { head += `<th colspan="2">${parseInt(m, 10)}月</th>`; });
   head += '<th colspan="2">合计</th></tr><tr>';
-  months.forEach(() => { head += '<th class="num">客户数</th><th class="num">业绩</th>'; });
-  head += '<th class="num">客户数</th><th class="num">业绩</th></tr></thead>';
+  months.forEach(m => { head += csTh('客户数', 'm' + m + 'c', 'profile', 'num') + csTh('业绩', 'm' + m + 'a', 'profile', 'num'); });
+  head += csTh('客户数', 'totc', 'profile', 'num') + csTh('业绩', 'tota', 'profile', 'num');
+  head += '</tr></thead>';
   let body = '<tbody>';
   const colCount = {}, colAmount = {};
-  profiles.forEach(prof => {
+  const sortedProfiles = csSortLabels(profiles, profileMap, st);
+  sortedProfiles.forEach(prof => {
     let rowCount = 0, rowAmount = 0;
     body += `<tr><td><span class="badge badge-info">${esc(prof)}</span></td>`;
     months.forEach(m => {
@@ -10373,7 +10429,8 @@ function exportProfileSummary() {
   header2.push('客户数'); header2.push('业绩');
   const aoa = [header1, header2];
   const colCount = {}, colAmount = {};
-  profiles.forEach(prof => {
+  const sortedProfiles = csSortLabels(profiles, profileMap, csSort.profile);
+  sortedProfiles.forEach(prof => {
     const row = [prof];
     let rowCount = 0, rowAmount = 0;
     months.forEach(m => {
