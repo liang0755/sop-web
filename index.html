@@ -792,8 +792,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805181115';
-const APP_VERSION = '1.42.22'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805184904';
+const APP_VERSION = '1.42.23'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -3336,6 +3336,37 @@ function saveFilterDefault(key, arr) {
     showToast('保存失败: ' + e.message, 'error');
   });
 }
+// ===== 原生 select 默认值(字符串类型,与 multiSelectPanelHtml 的数组型共用 filterDefaults 节点) =====
+// takeSelectDefault: 本会话首次调用时从云端读取默认字符串值;之后返回当前值保留个人临时改
+// saveSelectDefault: 将当前 select 值写入云端(filterDefaults),仅 admin 可操作
+function takeSelectDefault(key, cur) {
+  if (Object.prototype.hasOwnProperty.call(__filterDefaultApplied, key)) return cur;
+  __filterDefaultApplied[key] = true;
+  const d = cloudData.filterDefaults && cloudData.filterDefaults[key];
+  // 数组型 defaultKey 存的是数组(给 multiSelectPanel 用);字符串型存的是字符串/数字(给 select 用)
+  if (Array.isArray(d)) return cur; // 跳过数组型的 key
+  return (d !== undefined && d !== null && d !== '') ? String(d) : cur;
+}
+function saveSelectDefault(key, val) {
+  if (!hasPermission('admin')) { showToast('仅管理员可保存全局默认筛选', 'error'); return; }
+  if (!cloudData.filterDefaults) cloudData.filterDefaults = {};
+  cloudData.filterDefaults[key] = (val !== undefined && val !== null) ? String(val) : '';
+  fetch(FB_BASE + '/filterDefaults/' + encodeURIComponent(key) + '.json', {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(cloudData.filterDefaults[key])
+  }).then(function(res) {
+    if (!res.ok) throw new Error('API update failed: ' + res.status);
+    showToast('已保存默认: ' + key + ' = ' + val, 'success');
+  }).catch(function(e) {
+    showToast('保存失败: ' + e.message, 'error');
+  });
+}
+// 生成紧贴 select 右侧的 💾 存默认按钮 HTML(仅 admin 可见)
+function selectSaveBtnHtml(id, defaultKey) {
+  if (!defaultKey || !hasPermission('admin')) return '';
+  return `<button type="button" title="保存当前选择为全局默认" style="flex-shrink:0;margin-left:4px;border:1px solid var(--gray-300);background:var(--gray-50);border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px;color:var(--gray-600);line-height:22px" onclick="saveSelectDefault('${defaultKey}',document.getElementById('${id}')?.value)">💾</button>`;
+}
+
 // 点击空白区域自动收起所有通用多选面板
 document.addEventListener('click', function(e) {
   document.querySelectorAll('.ms-panel').forEach(function(panel) {
@@ -7274,7 +7305,7 @@ async function renderVisitData() {
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}" onchange="setVisitQuickDateActive('')"></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="resetVisitPage()">🔍 查询</button></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-outline" onclick="exportVisitData()">📤 导出</button></div>
-        <div class="form-group"><label>每页</label><select class="form-control" id="visitPageSize" onchange="onVisitPageSizeChange()"><option value="30"${visitPageSize===30?' selected':''}>30</option><option value="50"${visitPageSize===50?' selected':''}>50</option><option value="100"${visitPageSize===100?' selected':''}>100</option><option value="200"${visitPageSize===200?' selected':''}>200</option></select></div>
+        <div class="form-group"><label>每页</label><div style="display:flex;align-items:center"><select class="form-control" id="visitPageSize" onchange="onVisitPageSizeChange()"><option value="30"${visitPageSize===30?' selected':''}>30</option><option value="50"${visitPageSize===50?' selected':''}>50</option><option value="100"${visitPageSize===100?' selected':''}>100</option><option value="200"${visitPageSize===200?' selected':''}>200</option></select>${selectSaveBtnHtml('visitPageSize','visit.pageSize')}</div></div>
       </div>
     </div></div>
     <div id="visitResults"></div>
@@ -10102,7 +10133,7 @@ function sbTeamRefresh(prefix) {
 function sbMonthRangeHtml(prefix) {
   const mf = sbMonthFilters[prefix] || { start: '01', end: '12' };
   const opts = which => CS_MONTHS.map(x => `<option value="${x}" ${x === mf[which] ? 'selected' : ''}>${parseInt(x, 10)}月</option>`).join('');
-  return `<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份区间</label><div style="display:flex;align-items:center;gap:6px"><select class="form-control" id="${prefix}MonthStart" onchange="sbMonthRangeChange('${prefix}','start',this.value)">${opts('start')}</select><span style="color:var(--gray-500)">至</span><select class="form-control" id="${prefix}MonthEnd" onchange="sbMonthRangeChange('${prefix}','end',this.value)">${opts('end')}</select></div></div>`;
+  return `<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份区间</label><div style="display:flex;align-items:center;gap:4px"><select class="form-control" id="${prefix}MonthStart" onchange="sbMonthRangeChange('${prefix}','start',this.value)">${opts('start')}</select>${selectSaveBtnHtml(prefix+'MonthStart','salesBoard.'+prefix+'.monthStart')}<span style="color:var(--gray-500)">至</span><select class="form-control" id="${prefix}MonthEnd" onchange="sbMonthRangeChange('${prefix}','end',this.value)">${opts('end')}</select>${selectSaveBtnHtml(prefix+'MonthEnd','salesBoard.'+prefix+'.monthEnd')}</div></div>`;
 }
 function sbMonthRangeChange(prefix, which, val) {
   if (!sbMonthFilters[prefix]) sbMonthFilters[prefix] = { start: '01', end: '12' };
@@ -10154,9 +10185,9 @@ function renderSalesBoardStats() {
     <div class="card filter-card">
       <div class="card-header"><h4>🗓️ 时间筛选(年度为报表范围)</h4></div>
       <div class="card-body"><div class="filter-bar">
-        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="sbYear" onchange="refreshSalesBoardStats()">${yearOpts}</select></div>
-        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="sbMFrom" onchange="sbSyncTo();refreshSalesBoardStats()">${monthOpts()}</select></div>
-        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="sbMTo" onchange="refreshSalesBoardStats()">${monthOpts()}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><div style="display:flex;align-items:center"><select class="form-control" id="sbYear" onchange="refreshSalesBoardStats()">${yearOpts}</select>${selectSaveBtnHtml('sbYear','salesBoard.stats.year')}</div></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><div style="display:flex;align-items:center"><select class="form-control" id="sbMFrom" onchange="sbSyncTo();refreshSalesBoardStats()">${monthOpts()}</select>${selectSaveBtnHtml('sbMFrom','salesBoard.stats.monthFrom')}</div></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><div style="display:flex;align-items:center"><select class="form-control" id="sbMTo" onchange="refreshSalesBoardStats()">${monthOpts()}</select>${selectSaveBtnHtml('sbMTo','salesBoard.stats.monthTo')}</div></div>
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">动态同比口径</label>
           <div class="seg-toggle">
             <button type="button" id="segDynYear" class="seg-btn ${sbDynMode==='year'?'active':''}" onclick="sbSetDynMode('year')">年初累计</button>
@@ -10239,7 +10270,7 @@ function renderSalesBoardSource() {
     <div class="card filter-card">
       <div class="card-header"><h4>🏷️ 客户来源汇总</h4><span style="font-size:12px;color:var(--gray-500)">按年显示,横向1-12月,每月统计客户数与业绩</span></div>
       <div class="card-body"><div class="filter-bar">
-        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="srcYear" onchange="refreshSalesBoardSource()">${yearOpts}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><div style="display:flex;align-items:center"><select class="form-control" id="srcYear" onchange="refreshSalesBoardSource()">${yearOpts}</select>${selectSaveBtnHtml('srcYear','salesBoard.source.year')}</div></div>
         ${sbTeamFilterHtml('src')}
         ${sbPersonPanelHtml('src', sbPersonLabel('src'))}
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesBoardSource()">重置为今年</button></div>
@@ -10480,7 +10511,7 @@ function renderSalesBoardProfile() {
     <div class="card filter-card">
       <div class="card-header"><h4>👤 客户画像汇总</h4><span style="font-size:12px;color:var(--gray-500)">按年显示,横向1-12月,每月统计客户数与业绩</span></div>
       <div class="card-body"><div class="filter-bar">
-        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="profileYear" onchange="refreshSalesBoardProfile()">${yearOpts}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><div style="display:flex;align-items:center"><select class="form-control" id="profileYear" onchange="refreshSalesBoardProfile()">${yearOpts}</select>${selectSaveBtnHtml('profileYear','salesBoard.profile.year')}</div></div>
         ${sbTeamFilterHtml('profile')}
         ${sbPersonPanelHtml('profile', sbPersonLabel('profile'))}
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesBoardProfile()">重置为今年</button></div>
@@ -10644,7 +10675,7 @@ function renderSalesBoardSigning() {
       <div class="card-header"><h4>📝 销售签约分析</h4><span style="font-size:12px;color:var(--gray-500)">按年显示:纵向在岗销售成员 × 横向月份 × 来源分组,单元格汇总业绩</span></div>
       <div class="card-body">
         <div class="filter-bar">
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="sigYear" onchange="renderSalesSigningTable(this.value)">${yearOpts}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><div style="display:flex;align-items:center"><select class="form-control" id="sigYear" onchange="renderSalesSigningTable(this.value)">${yearOpts}</select>${selectSaveBtnHtml('sigYear','salesBoard.signing.year')}</div></div>
           ${sbTeamFilterHtml('sig')}
           ${sbMonthRangeHtml('sig')}
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesSigningYear()">重置为今年</button></div>
@@ -10872,7 +10903,7 @@ function renderSalesBoardCustomer() {
       <div class="card-body" style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
         <div style="flex:1;min-width:320px">
           <div class="filter-bar">
-        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="csYear" onchange="csRefilter()">${yearOpts}</select></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><div style="display:flex;align-items:center"><select class="form-control" id="csYear" onchange="csRefilter()">${yearOpts}</select>${selectSaveBtnHtml('csYear','customerSummary.year')}</div></div>
         ${multiSelectPanelHtml('csTeam', {label:'部门', options:teams, selected:csTeamFilter, placeholder:'全部部门', searchPlaceholder:'搜索部门', defaultKey:'customerSummary.dept', onChange:function(arr){csTeamFilter=arr;csRefilter();}})}
         ${multiSelectPanelHtml('csSales', {label:'人员', options:sps, selected:csSalesFilter, placeholder:'全部人员', searchPlaceholder:'搜索人员', defaultKey:'customerSummary.person', onChange:function(arr){csSalesFilter=arr;csRefilter();}})}
         ${multiSelectPanelHtml('csSource', {label:'客户来源', options:(csTagCfg.customerSource||[]), selected:csSourceFilter, placeholder:'全部来源', searchPlaceholder:'搜索来源', defaultKey:'customerSummary.source', onChange:function(arr){csSourceFilter=arr;csRefilter();}})}
@@ -12380,8 +12411,11 @@ function renderSalesGrade() {
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = prevMonth().year.toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
-  salesGradeYear = year;
-  const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
+  // 应用云端默认值(仅本会话首次)
+  salesGradeYear = takeSelectDefault('salesGrade.year', year);
+  salesGradeMonth = takeSelectDefault('salesGrade.month', String(salesGradeMonth));
+  salesGradeSortBy = takeSelectDefault('salesGrade.sortBy', salesGradeSortBy);
+  const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === salesGradeYear ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${salesGradeYear}">${salesGradeYear}</option>`;
   const isM0 = salesGradeTab === 'm0matrix' || salesGradeTab === 'm0single';
   document.getElementById('contentBody').innerHTML = `
     <div class="card filter-card">
@@ -12405,8 +12439,8 @@ function renderSalesGrade() {
       </div>
       <div class="card-body">
         <div class="filter-bar">
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="sgYear" onchange="sgYearDispatch()">${yearOpts}</select></div>
-          ${(salesGradeTab==='single'||salesGradeTab==='m0single')?`<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="sgMonth" onchange="salesGradeMonth=parseInt(this.value,10);sgRefreshDispatch()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===salesGradeMonth?'selected':''}>${m}月</option>`).join('')}</select></div>`:''}
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><div style="display:flex;align-items:center"><select class="form-control" id="sgYear" onchange="sgYearDispatch()">${yearOpts}</select>${selectSaveBtnHtml('sgYear','salesGrade.year')}</div></div>
+          ${(salesGradeTab==='single'||salesGradeTab==='m0single')?`<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><div style="display:flex;align-items:center"><select class="form-control" id="sgMonth" onchange="salesGradeMonth=parseInt(this.value,10);sgRefreshDispatch()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===salesGradeMonth?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('sgMonth','salesGrade.month')}</div></div>`:''}
           ${isM0 ? `
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">M0 计算范围</label>
@@ -12433,10 +12467,10 @@ function renderSalesGrade() {
           </div>
           <div class="form-group">
             <label style="font-size:12px;color:var(--gray-500)">排序</label>
-            <select class="form-control" id="sgSortBy" onchange="sgSortChange(this.value)">
+            <div style="display:flex;align-items:center"><select class="form-control" id="sgSortBy" onchange="sgSortChange(this.value)">
               <option value="amount" ${salesGradeSortBy==='amount'?'selected':''}>按评级业绩降序</option>
               <option value="team" ${salesGradeSortBy==='team'?'selected':''}>按团队+姓名</option>
-            </select>
+            </select>${selectSaveBtnHtml('sgSortBy','salesGrade.sortBy')}</div>
           </div>`}
           ${(salesGradeTab==='single'||salesGradeTab==='m0single')?(function(){
             const k = sgBoardNoteKey();
@@ -13860,6 +13894,12 @@ function renderSalesPerf() {
   const curYear = prevMonth().year.toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
   if (!perfYear) perfYear = year;
+  // 应用云端默认值(仅本会话首次)
+  perfYear = takeSelectDefault('salesPerf.year', perfYear);
+  perfSortBy = takeSelectDefault('salesPerf.sortBy', perfSortBy);
+  perfMonthFrom = parseInt(takeSelectDefault('salesPerf.monthFrom', String(perfMonthFrom)), 10);
+  perfMonthTo = parseInt(takeSelectDefault('salesPerf.monthTo', String(perfMonthTo)), 10);
+  perfSingleMonth = parseInt(takeSelectDefault('salesPerf.month', String(perfSingleMonth)), 10);
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === perfYear ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${perfYear}">${perfYear}</option>`;
   // 最终保存快照信息
   const isMatrix = perfTab === 'matrix';
@@ -13891,7 +13931,7 @@ function renderSalesPerf() {
       <div class="card-body">
         ${isM0 ? '<div id="m0PerfMount"></div>' : `
         <div class="filter-bar">
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="perfYear" onchange="perfYear=this.value;renderSalesPerf()">${yearOpts}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><div style="display:flex;align-items:center"><select class="form-control" id="perfYear" onchange="perfYear=this.value;renderSalesPerf()">${yearOpts}</select>${selectSaveBtnHtml('perfYear','salesPerf.year')}</div></div>
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">销售(在职)</label>
             <button type="button" class="form-control" id="perfSpBtn" onclick="togglePerfSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${perfSpLabel()}</button>
@@ -13913,18 +13953,18 @@ function renderSalesPerf() {
           </div>
           <div class="form-group">
             <label style="font-size:12px;color:var(--gray-500)">排序</label>
-            <select class="form-control" id="perfSortBy" onchange="perfSortChange(this.value)">
+            <div style="display:flex;align-items:center"><select class="form-control" id="perfSortBy" onchange="perfSortChange(this.value)">
               <option value="name" ${perfSortBy==='name'?'selected':''}>按姓名</option>
               <option value="team" ${perfSortBy==='team'?'selected':''}>按团队+姓名</option>
               <option value="score" ${perfSortBy==='score'?'selected':''}>按绩效评分降序</option>
-            </select>
+            </select>${selectSaveBtnHtml('perfSortBy','salesPerf.sortBy')}</div>
           </div>
           ${isMatrix ? `
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="perfMFrom" onchange="perfMonthFrom=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select></div>
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="perfMTo" onchange="perfMonthTo=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfMonthTo?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><div style="display:flex;align-items:center"><select class="form-control" id="perfMFrom" onchange="perfMonthFrom=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('perfMFrom','salesPerf.monthFrom')}</div></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><div style="display:flex;align-items:center"><select class="form-control" id="perfMTo" onchange="perfMonthTo=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfMonthTo?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('perfMTo','salesPerf.monthTo')}</div></div>
           <button class="btn btn-success btn-sm" onclick="exportPerfMatrixXlsx()">📥 导出矩阵Excel</button>
           ` : `
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="perfMonth" onchange="perfSingleMonth=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><div style="display:flex;align-items:center"><select class="form-control" id="perfMonth" onchange="perfSingleMonth=parseInt(this.value,10);perfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===perfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('perfMonth','salesPerf.month')}</div></div>
           <button class="btn btn-outline btn-sm" onclick="refreshPerfSingle()">刷新计算</button>
           <button class="btn btn-outline btn-sm" onclick="openPerfBatchStandard()">📝 批量设置要求</button>
           <button class="btn btn-primary btn-sm" onclick="savePerfSnapshot()">💾 最终保存</button>
@@ -14353,6 +14393,12 @@ function renderM0Perf(mount) {
   m0PerfSpFilter = takeFilterDefault('m0Perf.salesperson', m0PerfSpFilter);
   const curYear = new Date().getFullYear().toString();
   if (!m0PerfYear || m0PerfYearOptions().indexOf('value="' + m0PerfYear + '"') < 0) m0PerfYear = curYear;
+  // 应用云端默认值(仅本会话首次)
+  m0PerfYear = takeSelectDefault('m0Perf.year', m0PerfYear);
+  m0PerfSortBy = takeSelectDefault('m0Perf.sortBy', m0PerfSortBy);
+  m0PerfMonthFrom = parseInt(takeSelectDefault('m0Perf.monthFrom', String(m0PerfMonthFrom)), 10);
+  m0PerfMonthTo = parseInt(takeSelectDefault('m0Perf.monthTo', String(m0PerfMonthTo)), 10);
+  m0PerfSingleMonth = parseInt(takeSelectDefault('m0Perf.month', String(m0PerfSingleMonth)), 10);
   const isMatrix = m0PerfTab === 'matrix';
   let m0SnapInfo = '', m0SnapExists = false;
   if (!isMatrix && m0PerfViewSnapshot) {
@@ -14366,7 +14412,7 @@ function renderM0Perf(mount) {
   }
   target.innerHTML = `
         <div class="filter-bar">
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="m0PerfYear" onchange="m0PerfYear=this.value;renderM0Perf()">${m0PerfYearOptions()}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><div style="display:flex;align-items:center"><select class="form-control" id="m0PerfYear" onchange="m0PerfYear=this.value;renderM0Perf()">${m0PerfYearOptions()}</select>${selectSaveBtnHtml('m0PerfYear','m0Perf.year')}</div></div>
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">M0人员</label>
             <button type="button" class="form-control" id="m0PerfSpBtn" onclick="toggleM0PerfSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${m0PerfSpLabel()}</button>
@@ -14388,18 +14434,18 @@ function renderM0Perf(mount) {
           </div>
           <div class="form-group">
             <label style="font-size:12px;color:var(--gray-500)">排序</label>
-            <select class="form-control" id="m0PerfSortBy" onchange="m0PerfSortChange(this.value)">
+            <div style="display:flex;align-items:center"><select class="form-control" id="m0PerfSortBy" onchange="m0PerfSortChange(this.value)">
               <option value="name" ${m0PerfSortBy==='name'?'selected':''}>按姓名</option>
               <option value="team" ${m0PerfSortBy==='team'?'selected':''}>按团队+姓名</option>
               <option value="score" ${m0PerfSortBy==='score'?'selected':''}>按绩效评分降序</option>
-            </select>
+            </select>${selectSaveBtnHtml('m0PerfSortBy','m0Perf.sortBy')}</div>
           </div>
           ${isMatrix ? `
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="m0PerfMFrom" onchange="m0PerfMonthFrom=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select></div>
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="m0PerfMTo" onchange="m0PerfMonthTo=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfMonthTo?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><div style="display:flex;align-items:center"><select class="form-control" id="m0PerfMFrom" onchange="m0PerfMonthFrom=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('m0PerfMFrom','m0Perf.monthFrom')}</div></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><div style="display:flex;align-items:center"><select class="form-control" id="m0PerfMTo" onchange="m0PerfMonthTo=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfMonthTo?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('m0PerfMTo','m0Perf.monthTo')}</div></div>
           <button class="btn btn-success btn-sm" onclick="exportM0PerfMatrixXlsx()">📥 导出矩阵Excel</button>
           ` : `
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="m0PerfMonth" onchange="m0PerfSingleMonth=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><div style="display:flex;align-items:center"><select class="form-control" id="m0PerfMonth" onchange="m0PerfSingleMonth=parseInt(this.value,10);m0PerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===m0PerfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('m0PerfMonth','m0Perf.month')}</div></div>
           <button class="btn btn-outline btn-sm" onclick="refreshM0PerfSingle()">刷新计算</button>
           <button class="btn btn-outline btn-sm" onclick="openM0PerfBatchStandard()">📝 批量设置要求</button>
           <button class="btn btn-primary btn-sm" onclick="saveM0PerfSnapshot()">💾 最终保存</button>
@@ -14911,6 +14957,12 @@ function renderMgrPerf() {
   mgrPerfSpFilter = takeFilterDefault('mgrPerf.salesperson', mgrPerfSpFilter);
   const curYear = prevMonth().year.toString();
   if (!mgrPerfYear || mgrPerfYearOptions().indexOf('value="' + mgrPerfYear + '"') < 0) mgrPerfYear = curYear;
+  // 应用云端默认值(仅本会话首次)
+  mgrPerfYear = takeSelectDefault('mgrPerf.year', mgrPerfYear);
+  mgrPerfSortBy = takeSelectDefault('mgrPerf.sortBy', mgrPerfSortBy);
+  mgrPerfMonthFrom = parseInt(takeSelectDefault('mgrPerf.monthFrom', String(mgrPerfMonthFrom)), 10);
+  mgrPerfMonthTo = parseInt(takeSelectDefault('mgrPerf.monthTo', String(mgrPerfMonthTo)), 10);
+  mgrPerfSingleMonth = parseInt(takeSelectDefault('mgrPerf.month', String(mgrPerfSingleMonth)), 10);
   const isMatrix = mgrPerfTab === 'matrix';
   let snapInfo = '', snapExists = false;
   if (!isMatrix && mgrPerfViewSnapshot) {
@@ -14936,7 +14988,7 @@ function renderMgrPerf() {
       </div>
       <div class="card-body">
         <div class="filter-bar">
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" id="mgrPerfYear" onchange="mgrPerfYear=this.value;renderMgrPerf()">${mgrPerfYearOptions()}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><div style="display:flex;align-items:center"><select class="form-control" id="mgrPerfYear" onchange="mgrPerfYear=this.value;renderMgrPerf()">${mgrPerfYearOptions()}</select>${selectSaveBtnHtml('mgrPerfYear','mgrPerf.year')}</div></div>
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">管理者</label>
             <button type="button" class="form-control" id="mgrPerfSpBtn" onclick="toggleMgrPerfSpPanel()" style="text-align:left;cursor:pointer;color:var(--gray-700)">${mgrPerfSpLabel()}</button>
@@ -14958,18 +15010,18 @@ function renderMgrPerf() {
           </div>
           <div class="form-group">
             <label style="font-size:12px;color:var(--gray-500)">排序</label>
-            <select class="form-control" id="mgrPerfSortBy" onchange="mgrPerfSortChange(this.value)">
+            <div style="display:flex;align-items:center"><select class="form-control" id="mgrPerfSortBy" onchange="mgrPerfSortChange(this.value)">
               <option value="name" ${mgrPerfSortBy==='name'?'selected':''}>按姓名</option>
               <option value="team" ${mgrPerfSortBy==='team'?'selected':''}>按团队+姓名</option>
               <option value="score" ${mgrPerfSortBy==='score'?'selected':''}>按绩效评分降序</option>
-            </select>
+            </select>${selectSaveBtnHtml('mgrPerfSortBy','mgrPerf.sortBy')}</div>
           </div>
           ${isMatrix ? `
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><select class="form-control" id="mgrPerfMFrom" onchange="mgrPerfMonthFrom=parseInt(this.value,10);mgrPerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mgrPerfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select></div>
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><select class="form-control" id="mgrPerfMTo" onchange="mgrPerfMonthTo=parseInt(this.value,10);mgrPerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mgrPerfMonthTo?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">起始月</label><div style="display:flex;align-items:center"><select class="form-control" id="mgrPerfMFrom" onchange="mgrPerfMonthFrom=parseInt(this.value,10);mgrPerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mgrPerfMonthFrom?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('mgrPerfMFrom','mgrPerf.monthFrom')}</div></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">结束月</label><div style="display:flex;align-items:center"><select class="form-control" id="mgrPerfMTo" onchange="mgrPerfMonthTo=parseInt(this.value,10);mgrPerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mgrPerfMonthTo?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('mgrPerfMTo','mgrPerf.monthTo')}</div></div>
           <button class="btn btn-success btn-sm" onclick="exportMgrPerfMatrixXlsx()">📥 导出矩阵Excel</button>
           ` : `
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" id="mgrPerfMonth" onchange="mgrPerfSingleMonth=parseInt(this.value,10);mgrPerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mgrPerfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><div style="display:flex;align-items:center"><select class="form-control" id="mgrPerfMonth" onchange="mgrPerfSingleMonth=parseInt(this.value,10);mgrPerfRefresh()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===mgrPerfSingleMonth?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('mgrPerfMonth','mgrPerf.month')}</div></div>
           <button class="btn btn-outline btn-sm" onclick="refreshMgrPerfSingle()">刷新计算</button>
           <button class="btn btn-outline btn-sm" onclick="openMgrPerfBatchStandard()">📝 批量设置要求</button>
           <button class="btn btn-primary btn-sm" onclick="saveMgrPerfSnapshot()">💾 最终保存</button>
@@ -15084,6 +15136,8 @@ function showMgrAttachPreview(src) {
 function renderMgrPerfAttachmentsTab() {
   const curYear = prevMonth().year.toString();
   if (!mgrPerfYear || mgrPerfYearOptions().indexOf('value="' + mgrPerfYear + '"') < 0) mgrPerfYear = curYear;
+  // 应用云端默认值(仅本会话首次)
+  mgrPerfAttachMonth = parseInt(takeSelectDefault('mgrPerf.attachMonth', String(mgrPerfAttachMonth)), 10);
   const isAdmin = hasPermission('admin');
   const monthOpts = [1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${m===mgrPerfAttachMonth?'selected':''}>${m}月</option>`).join('');
   const teams = mgrPerfAttachTeams();
@@ -15149,8 +15203,8 @@ function renderMgrPerfAttachmentsTab() {
       </div>
       <div class="card-body">
         <div class="filter-bar">
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><select class="form-control" onchange="mgrPerfYear=this.value;renderMgrPerf()">${mgrPerfYearOptions()}</select></div>
-          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><select class="form-control" onchange="mgrPerfAttachMonth=parseInt(this.value,10);renderMgrPerf()">${monthOpts}</select></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><div style="display:flex;align-items:center"><select class="form-control" onchange="mgrPerfYear=this.value;renderMgrPerf()">${mgrPerfYearOptions()}</select>${selectSaveBtnHtml('mgrPerfAttachYear','mgrPerf.year')}</div></div>
+          <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><div style="display:flex;align-items:center"><select class="form-control" id="mgrPerfAttachMonthSel" onchange="mgrPerfAttachMonth=parseInt(this.value,10);renderMgrPerf()">${monthOpts}</select>${selectSaveBtnHtml('mgrPerfAttachMonthSel','mgrPerf.attachMonth')}</div></div>
           <div style="font-size:12px;color:var(--gray-500);margin-left:auto;align-self:center">
             共 <b>${teams.length}</b> 个团队 · <b>${totalRecords}</b> 条记录 · 当前仅显示 <b>${year}年${month}月</b>
           </div>
