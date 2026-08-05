@@ -791,8 +791,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805130506';
-const APP_VERSION = '1.42.5'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805131104';
+const APP_VERSION = '1.42.6'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 function saveCoreConfigCache() {
   try {
@@ -12018,9 +12018,16 @@ function sgRefreshDirtyUI() {
   if (disc) disc.style.display = n ? '' : 'none';
 }
 
+// 上个月(year+month),用于「评级和绩效管理」分组下各模块默认展示上个月数据
+function prevMonth() {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1); // 自动处理跨年(1月→去年12月)
+  return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
 let salesGradeYear = '';
 let salesGradeTab = 'matrix';
-let salesGradeMonth = (new Date().getMonth() + 1);
+let salesGradeMonth = prevMonth().month;
 let salesGradeSpFilter = [];          // 选中的销售名单(空数组=全部在职销售)
 let salesGradeSpFilterLoaded = false; // 是否已从 localStorage 载入默认
 let salesGradeTeamFilter = '';        // 按团队筛选(空=全部)
@@ -12036,7 +12043,7 @@ function renderSalesGrade() {
   }
   const records = cloudData.salesRecords || [];
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
-  const curYear = new Date().getFullYear().toString();
+  const curYear = prevMonth().year.toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
   salesGradeYear = year;
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${year}">${year}</option>`;
@@ -12838,7 +12845,7 @@ let perfTab = 'matrix';
 let perfYear = '';
 let perfMonthFrom = 1;
 let perfMonthTo = 12;
-let perfSingleMonth = (new Date().getMonth() + 1);
+let perfSingleMonth = prevMonth().month;
 let perfViewSnapshot = false;   // 是否查看"最终保存"冻结快照
 let m0PerfViewSnapshot = false;   // 是否查看 M0"最终保存"冻结快照
 let perfSpFilter = [];          // 绩效看板:选中的销售名单(空数组=全部在职销售)
@@ -12862,7 +12869,7 @@ let mgrPerfTab = 'matrix';
 let mgrPerfYear = '';
 let mgrPerfMonthFrom = 1;
 let mgrPerfMonthTo = 12;
-let mgrPerfSingleMonth = (new Date().getMonth() + 1);
+let mgrPerfSingleMonth = prevMonth().month;
 let mgrPerfSpFilter = [];          // 管理绩效看板:选中的管理者(空=全部)
 let mgrPerfSpFilterLoaded = false;
 let mgrPerfTeamFilter = '';
@@ -13499,7 +13506,7 @@ function renderSalesPerf() {
   }
   const records = cloudData.salesRecords || [];
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
-  const curYear = new Date().getFullYear().toString();
+  const curYear = prevMonth().year.toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
   if (!perfYear) perfYear = year;
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === perfYear ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${perfYear}">${perfYear}</option>`;
@@ -14564,7 +14571,7 @@ function renderMgrPerf() {
     try { const s = localStorage.getItem('sop_mgrperf_sp_filter'); mgrPerfSpFilter = s ? JSON.parse(s) : []; } catch (e) { mgrPerfSpFilter = []; }
     mgrPerfSpFilterLoaded = true;
   }
-  const curYear = new Date().getFullYear().toString();
+  const curYear = prevMonth().year.toString();
   if (!mgrPerfYear || mgrPerfYearOptions().indexOf('value="' + mgrPerfYear + '"') < 0) mgrPerfYear = curYear;
   const isMatrix = mgrPerfTab === 'matrix';
   let snapInfo = '', snapExists = false;
@@ -14741,7 +14748,7 @@ function showMgrAttachPreview(src) {
 
 // 列表页:每条记录一行;同团队用 rowspan 合并首列;团队末尾追加"+ 新增记录"
 function renderMgrPerfAttachmentsTab() {
-  const curYear = new Date().getFullYear().toString();
+  const curYear = prevMonth().year.toString();
   if (!mgrPerfYear || mgrPerfYearOptions().indexOf('value="' + mgrPerfYear + '"') < 0) mgrPerfYear = curYear;
   const isAdmin = hasPermission('admin');
   const monthOpts = [1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${m===mgrPerfAttachMonth?'selected':''}>${m}月</option>`).join('');
