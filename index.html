@@ -791,8 +791,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805152807';
-const APP_VERSION = '1.42.11'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805155825';
+const APP_VERSION = '1.42.12'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 function saveCoreConfigCache() {
   try {
@@ -12177,37 +12177,60 @@ function sgDoFill(months) {
   renderSalesGrade();
   showToast('已按自动评级值填充 ' + months.length + ' 个月(' + months.map(m => m + '月').join(',') + '),记得点"💾 最终保存"', 'success');
 }
-function sgSaveAll() {
+async function sgSaveAll() {
   const keys = Object.keys(sgPending);
   const m0keys = Object.keys(m0Pending);
   if (!keys.length && !m0keys.length) { showToast('没有需要保存的改动', 'info'); return; }
   if (!cloudData.gradeRecords) cloudData.gradeRecords = {};
   if (!cloudData.m0Records) cloudData.m0Records = {};
-  let n = 0;
-  keys.forEach(k => {
-    const p = sgPending[k];
-    const rec = Object.assign({}, cloudData.gradeRecords[k] || {});
-    if (p.grade !== undefined) {
-      if (p.grade === GRADE_AUTO) { delete rec.grade; }
-      else rec.grade = p.grade;
-    }
-    if (p.note !== undefined) rec.note = p.note;
-    cloudData.gradeRecords[k] = rec;
-    apiUpdate('gradeRecords', k, rec).catch(e => showToast('保存失败: ' + e.message, 'error'));
-    n++;
-  });
-  m0keys.forEach(k => {
-    const p = m0Pending[k];
-    const rec = Object.assign({}, cloudData.m0Records[k] || {});
-    if (p.grade !== undefined) rec.grade = p.grade;
-    if (p.note !== undefined) rec.note = p.note;
-    cloudData.m0Records[k] = rec;
-    apiUpdate('m0Records', k, rec).catch(e => showToast('保存失败: ' + e.message, 'error'));
-    n++;
-  });
+  const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+  // 预算所有销售员的 roll(避免在循环内重复算)
+  const { roll: _fullRoll } = sgBuildRoll(salesGradeYear);
+  let n = 0, fail = 0;
+  await Promise.all(keys.map(async k => {
+    try {
+      const p = sgPending[k];
+      const rec = Object.assign({}, cloudData.gradeRecords[k] || {});
+      if (p.grade !== undefined) {
+        if (p.grade === GRADE_AUTO) {
+          // 解析 key → 找到对应销售员 → 算出当月实际自动评级值并冻结写入(而非 delete 导致空对象)
+          const parts = k.split('_');
+          const yr = parts[0], mm = parseInt(parts[parts.length - 1], 10);
+          const spKey = parts.slice(1, -1).join('_');
+          // 从在职销售名单中反查原始姓名(key 做了字符替换,用 normDeptKey 模糊匹配)
+          const statusMap = buildUserStatusMap();
+          const allSps = [...new Set((cloudData.salesRecords || []).map(r => (r.salesperson || '').trim()).filter(Boolean))].filter(s => statusMap[s] === '在职');
+          const matchedSp = allSps.find(s => gradeKey(yr, s, mm) === k) || allSps.find(s => s.replace(/[.#$\[\]]/g, '_') === spKey) || spKey.replace(/_/g, '');
+          if (matchedSp && levels.length) {
+            const spRoll = _fullRoll[matchedSp] || {};
+            const rg = sgComputeGrades(spRoll, levels, yr, matchedSp);
+            rec.grade = (rg[mm] && rg[mm].autoName) || '';
+          }
+        } else {
+          rec.grade = p.grade;
+        }
+      }
+      if (p.note !== undefined) rec.note = p.note;
+      cloudData.gradeRecords[k] = rec;
+      await apiUpdate('gradeRecords', k, rec);
+      n++;
+    } catch(e) { fail++; showToast('保存失败(' + k + '): ' + e.message, 'error'); }
+  }));
+  await Promise.all(m0keys.map(async k => {
+    try {
+      const p = m0Pending[k];
+      const rec = Object.assign({}, cloudData.m0Records[k] || {});
+      if (p.grade !== undefined) rec.grade = p.grade;
+      if (p.note !== undefined) rec.note = p.note;
+      cloudData.m0Records[k] = rec;
+      await apiUpdate('m0Records', k, rec);
+      n++;
+    } catch(e) { fail++; showToast('M0保存失败(' + k + '): ' + e.message, 'error'); }
+  }));
   sgPending = {};
   m0Pending = {};
-  showToast('已保存 ' + n + ' 条评级改动', 'success');
+  if (fail) showToast('完成: 成功 ' + n + ' 条, 失败 ' + fail + ' 条', fail >= n ? 'error' : 'warning');
+  else showToast('已保存 ' + n + ' 条评级改动', 'success');
   renderSalesGrade();
 }
 function sgDiscard() {
