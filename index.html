@@ -792,8 +792,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805205317';
-const APP_VERSION = '1.42.31'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805222546';
+const APP_VERSION = '1.42.32'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1661,13 +1661,13 @@ function getBrandConfig() {
 
 // ============ AI Config ============
 const AI_PROVIDERS = {
-  deepseek: {label:'DeepSeek', apiUrl:'https://api.deepseek.com', model:'deepseek-chat', desc:'性价比高,中文理解强'},
+  deepseek: {label:'DeepSeek', apiUrl:'https://api.deepseek.com', model:'deepseek-v4-flash', desc:'V4 系列,1M 上下文,读大库首选'},
   moonshot: {label:'Moonshot (Kimi)', apiUrl:'https://api.moonshot.cn/v1', model:'moonshot-v1-8k', desc:'长文本理解能力突出'},
   qwen: {label:'通义千问 (Qwen)', apiUrl:'https://dashscope.aliyuncs.com/compatible-mode/v1', model:'qwen-turbo', desc:'阿里云出品,国内速度快'},
   openai: {label:'OpenAI', apiUrl:'https://api.openai.com/v1', model:'gpt-4o-mini', desc:'能力全面,需科学上网'},
   custom: {label:'自定义 (OpenAI兼容)', apiUrl:'', model:'', desc:'填写任意OpenAI兼容API'}
 };
-const DEFAULT_AI_CONFIG = {provider:'deepseek', apiKey:'', apiUrl:'https://api.deepseek.com', model:'deepseek-chat'};
+const DEFAULT_AI_CONFIG = {provider:'deepseek', apiKey:'', apiUrl:'https://api.deepseek.com', model:'deepseek-v4-flash'};
 function getAIConfig() { return cloudData.aiConfig || DEFAULT_AI_CONFIG; }
 let aiChatHistory = [];
 let aiChatLoading = false;
@@ -5143,8 +5143,9 @@ function getAIWeekNumber(d) {
 }
 
 // 原始明细记录条数上限:汇总统计(salesSummary/visitSummary/teamPerformanceSummary 等)已覆盖全量数据,
-// 仅原始明细用于"逐条查看",超出上限会撑爆模型上下文(DeepSeek 约 128K),故裁剪为最近 N 条。
-const AI_RAW_CAP = { visit: 110, sales: 220, daily: 55, weekly: 42, mgr: 20 };
+// 仅原始明细用于"逐条查看"。DeepSeek V4 上下文为 1M token(远超旧 128K),故上限大幅抬高至接近全量,
+// 配合 buildAIContext 末尾的兜底截断(数据过大时自动丢弃最老明细),既保证"读全"又防止超出上下文导致 400。
+const AI_RAW_CAP = { visit: 3000, sales: 6000, daily: 2000, weekly: 1500, mgr: 500 };
 
 function buildAIContext() {
   const userMap = {};
@@ -5448,7 +5449,25 @@ function buildAIContext() {
       customerSourceGroups: (fc.customerTags && fc.customerTags.customerSourceGroups) || {}
     }
   };
-  return JSON.stringify(context, null, 2);
+  // 兜底截断:若数据总量逼近模型上下文上限(DeepSeek V4 为 1M token,取 ~800K token 安全线 ≈ 2.4MB 字符),
+  // 渐进丢弃最老的原始明细记录,避免超出上下文导致 API 400 / "读不全"。汇总/评级/绩效等仍保留全量。
+  const AI_CTX_MAX_CHARS = 2400000;
+  let json = JSON.stringify(context, null, 2);
+  if (json.length > AI_CTX_MAX_CHARS) {
+    const rawKeys = ['visitRecords', 'salesRecords', 'dailyReports', 'weeklyReports', 'mgrReports'];
+    while (json.length > AI_CTX_MAX_CHARS) {
+      let trimmed = false;
+      for (const k of rawKeys) {
+        if (Array.isArray(context[k]) && context[k].length > 50) {
+          context[k] = context[k].slice(Math.ceil(context[k].length * 0.1)); // 每次丢弃最老 10%
+          trimmed = true; break;
+        }
+      }
+      if (!trimmed) break;
+      json = JSON.stringify(context, null, 2);
+    }
+  }
+  return json;
 }
 
 function buildAISystemMessage() {
@@ -5532,7 +5551,7 @@ function buildAISystemMessage() {
     + '- M0评级(m0Records)字段: key=年_M0_月,含 grade/prevGrade/promote/note\n'
     + '- 管理绩效(mgrPerformanceRecords)字段: key=年_管理者_月,结构同绩效(含 items/bonus/workingDays/comment/base),管理者无职级列\n'
     + '- 荣誉激励(honorRecords)字段: 顶层 key=YYYY-MM 月份(如 "2026-06"),value 为该月奖项数组,每项含 awardName(奖项名称,如 外部攻坚奖/新媒体突破奖/营销端销冠),salesperson(获奖人姓名),team(所属团队/部门,自动匹配),bonus(奖金, 元),achievement(成就描述),note(备注),回答时按月份归类,按奖项分组展示获奖人与奖金,可用于回答"上个月谁拿了什么奖 / 某月某奖项的获奖人是谁 / 奖金合计是多少"等问题,\n'
-    + '以下是当前系统的数据(JSON格式):为适配模型上下文上限,原始明细记录仅保留最近若干条(拜访≤' + AI_RAW_CAP.visit + '/业绩≤' + AI_RAW_CAP.sales + '/日报≤' + AI_RAW_CAP.daily + '/周报≤' + AI_RAW_CAP.weekly + '/管理周报≤' + AI_RAW_CAP.mgr + ',均取最近日期),而聚合汇总(salesSummary/visitSummary/teamPerformanceSummary/customerSummary)与评级/绩效/荣誉等仍为全量;若需查询更早的逐条明细,请引导用户缩小时间范围。\n' + dataContext;
+    + '以下是当前系统的数据(JSON格式):默认尽量全量提供原始明细记录(上限 拜访≤' + AI_RAW_CAP.visit + '/业绩≤' + AI_RAW_CAP.sales + '/日报≤' + AI_RAW_CAP.daily + '/周报≤' + AI_RAW_CAP.weekly + '/管理周报≤' + AI_RAW_CAP.mgr + ',均取最近日期);当数据总量过大时系统会自动丢弃最老的原始明细记录以防超出模型上下文上限;聚合汇总(salesSummary/visitSummary/teamPerformanceSummary/customerSummary)与评级/绩效/荣誉等仍为全量。\n' + dataContext;
 }
 
 async function callAI(messages) {
