@@ -780,7 +780,9 @@ async function loadUsersOnly() {
 
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
-const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_v1';
+// APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
+const APP_CACHE_VER = '20260805105109';
+const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 function saveCoreConfigCache() {
   try {
     const payload = { t: Date.now(), v: 1,
@@ -1075,7 +1077,7 @@ function needsAllReports() {
 }
 
 // ---------- 报表数据本地缓存:加速普通成员打开系统 / 填写日报周报 ----------
-const REPORTS_CACHE_KEY = 'sop_reports_cache_v3';
+const REPORTS_CACHE_KEY = 'sop_reports_cache_' + APP_CACHE_VER;
 const REPORTS_CACHE_TTL = 30 * 60 * 1000; // 30 分钟
 function saveReportsCache() {
   try {
@@ -1185,10 +1187,10 @@ async function refreshReportsInBackground() {
     if (data.sales !== undefined) cloudData.salesRecords = data.sales;
     saveReportsCache();
     const activePage = document.querySelector('.nav-item.active')?.dataset.page;
-    if (activePage === 'dashboard') renderDashboard();
-    else if (activePage === 'dailyData') loadDataView('daily');
-    else if (activePage === 'weeklyData') loadDataView('weekly');
-    else if (activePage === 'mgrReport') { try { renderMgrReportList(); } catch(e) {} }
+    // 重绘当前所在页面(覆盖全部模块,不再只限 4 个),确保后台拉到的最新数据真正渲染到屏幕
+    if (activePage) {
+      ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf,mgrReport:renderMgrReportList}[activePage]||(()=>{}))();
+    }
   } catch(e) {}
 }
 
