@@ -791,8 +791,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805170702';
-const APP_VERSION = '1.42.18'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805171356';
+const APP_VERSION = '1.42.19'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -8385,7 +8385,8 @@ function m0vWeekKey(dateStr) {
   return { key: 'W' + mon.getFullYear() + '-' + fmt(mon), label: fmt(mon) + '~' + fmt(sun) };
 }
 function computeM0VisitRows() {
-  if (!m0vChannelFilter.length) m0vChannelFilter = [getM0VisitChannel()];
+  // 注意: m0vChannelFilter 为空时表示"全部渠道"(不过滤),不要自动填入配置默认值
+  // 因为配置值可能与日报数据中的实际渠道名不一致(如"陪访"vs"拜访")导致永远匹配不到
   const s = document.getElementById('visitStatsStart')?.value || '';
   const e = document.getElementById('visitStatsEnd')?.value || '';
   const reports = cloudData.dailyReports || [];
@@ -8405,7 +8406,7 @@ function computeM0VisitRows() {
   return rows;
 }
 function renderM0VisitStats() {
-  if (!m0vChannelFilter.length) m0vChannelFilter = [getM0VisitChannel()];
+  // m0vChannelFilter 为空时表示"全部渠道"(不过滤),不自动填入配置默认值(可能与实际数据不一致)
   const s = document.getElementById('visitStatsStart')?.value || '';
   const e = document.getElementById('visitStatsEnd')?.value || '';
   const c = document.getElementById('visitStatsResults');
@@ -8482,7 +8483,7 @@ function renderM0VisitStats() {
     body += `<tr>${trow}</tr>`;
     matrixHtml = `<div class="table-wrap"><table class="table sticky-cols"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   } else {
-    matrixHtml = '<div class="empty-state"><div class="icon">📭</div>所选范围内暂无"' + esc(m0vChannelFilter.join('/')) + '"陪访数据</div>';
+    matrixHtml = '<div class="empty-state"><div class="icon">📭</div>所选范围内暂无"' + esc(m0vChannelFilter.length ? m0vChannelFilter.join('/') : '全部渠道') + '"陪访数据</div>';
   }
   // detail
   const persons = allM0s;
