@@ -791,8 +791,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805125931';
-const APP_VERSION = '1.42.4'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805130506';
+const APP_VERSION = '1.42.5'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 function saveCoreConfigCache() {
   try {
@@ -9840,7 +9840,7 @@ function sbMonthRangeChange(prefix, which, val) {
 
 async function renderSalesBoard() {
   const html = `
-    <div class="summary-tabs" style="margin-bottom:20px">
+    <div class="summary-tabs" id="salesBoardTabs" style="margin-bottom:20px">
       <div class="summary-tab ${salesBoardTab==='stats'?'active':''}" onclick="switchSalesBoardTab('stats')">📊 业绩统计</div>
       <div class="summary-tab ${salesBoardTab==='customer'?'active':''}" onclick="switchSalesBoardTab('customer')">👥 客户汇总数据</div>
       <div class="summary-tab ${salesBoardTab==='source'?'active':''}" onclick="switchSalesBoardTab('source')">🏷️ 客户来源汇总</div>
@@ -9854,6 +9854,10 @@ async function renderSalesBoard() {
 
 function switchSalesBoardTab(t) {
   salesBoardTab = t;
+  // 同步切换 tab 的 active 样式(蓝条跟随)
+  document.querySelectorAll('#salesBoardTabs .summary-tab').forEach(function(el) {
+    el.classList.toggle('active', el.getAttribute('onclick').indexOf("'" + t + "'") >= 0);
+  });
   renderSalesBoards();
 }
 
