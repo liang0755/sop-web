@@ -787,7 +787,7 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805110335';
+const APP_CACHE_VER = '20260805113844';
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 function saveCoreConfigCache() {
   try {
@@ -9260,7 +9260,7 @@ function openAddSalesModal() {
   const teamOpts = SALES_KA_TEAMS.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
   showModal('新增业绩记录', `<form onsubmit="return saveSalesRecord(event,null)">
     <div class="form-group"><label>销售员 <span class="req">*</span></label><input type="text" class="form-control" id="sSalesperson" required></div>
-    <div class="form-group"><label>销售员所属门店(团队) <span class="req">*</span></label><select class="form-control" id="sTeam" required>${teamOpts}</select></div>
+    <div class="form-group"><label>销售员所属门店(团队) <span class="req">*</span> <span style="font-size:11px;color:var(--gray-400)">可自由输入,也可从下拉选择</span></label><input type="text" class="form-control" id="sTeam" list="sTeamListAdd" autocomplete="off" required placeholder="输入或选择团队名"><datalist id="sTeamListAdd">${teamOpts}</datalist></div>
     <div class="form-group"><label>单据日期 <span class="req">*</span></label><input type="date" class="form-control" id="sDocDate" required></div>
     <div class="form-group"><label>折后金额(元)</label><input type="number" step="0.01" class="form-control" id="sAmount" value="0"></div>
     <div class="form-group"><label>毛利润(元)</label><input type="number" step="0.01" class="form-control" id="sGross" value="0"></div>
@@ -9275,10 +9275,10 @@ function openAddSalesModal() {
 
 function editSalesRecord(id) {
   const r = cloudData.salesRecords.find(x => x.id === id); if (!r) return;
-  const teamOpts = SALES_KA_TEAMS.map(t => `<option value="${esc(t)}" ${t === r.team ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  const teamOpts = SALES_KA_TEAMS.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
   showModal('编辑业绩记录', `<form onsubmit="return saveSalesRecord(event,'${id}')">
     <div class="form-group"><label>销售员 <span class="req">*</span></label><input type="text" class="form-control" id="sSalesperson" value="${esc(r.salesperson)}" required></div>
-    <div class="form-group"><label>销售员所属门店(团队) <span class="req">*</span></label><select class="form-control" id="sTeam" required>${teamOpts}</select></div>
+    <div class="form-group"><label>销售员所属门店(团队) <span class="req">*</span> <span style="font-size:11px;color:var(--gray-400)">可自由输入,也可从下拉选择</span></label><input type="text" class="form-control" id="sTeam" list="sTeamListEdit" value="${esc(r.team)}" autocomplete="off" required placeholder="输入或选择团队名"><datalist id="sTeamListEdit">${teamOpts}</datalist></div>
     <div class="form-group"><label>单据日期 <span class="req">*</span></label><input type="date" class="form-control" id="sDocDate" value="${esc((r.docDate || '').slice(0, 10))}" required></div>
     <div class="form-group"><label>折后金额(元)</label><input type="number" step="0.01" class="form-control" id="sAmount" value="${toNum(r.amount)}"></div>
     <div class="form-group"><label>毛利润(元)</label><input type="number" step="0.01" class="form-control" id="sGross" value="${toNum(r.grossProfit)}"></div>
