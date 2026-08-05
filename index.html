@@ -8,7 +8,7 @@
 <link rel="preload" as="image" href="login-bg.jpg">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--primary:#2563eb;--primary-dark:#1d4ed8;--primary-light:#dbeafe;--success:#16a34a;--success-light:#dcfce7;--warning:#f59e0b;--warning-light:#fef3c7;--danger:#dc2626;--danger-light:#fee2e2;--gray-50:#f9fafb;--gray-100:#f3f4f6;--gray-200:#e5e7eb;--gray-300:#d1d5db;--gray-400:#9ca3af;--gray-500:#6b7280;--gray-600:#4b5563;--gray-700:#374151;--gray-800:#1f2937;--gray-900:#111827;--radius:8px;--shadow:0 1px 3px rgba(0,0,0,.1);--shadow-lg:0 10px 25px rgba(0,0,0,.1)}
+:root{--primary:#2563eb;--primary-dark:#1d4ed8;--primary-light:#dbeafe;--primary-50:#eff6ff;--primary-100:#dbeafe;--success:#16a34a;--success-light:#dcfce7;--warning:#f59e0b;--warning-light:#fef3c7;--danger:#dc2626;--danger-light:#fee2e2;--gray-50:#f9fafb;--gray-100:#f3f4f6;--gray-200:#e5e7eb;--gray-300:#d1d5db;--gray-400:#9ca3af;--gray-500:#6b7280;--gray-600:#4b5563;--gray-700:#374151;--gray-800:#1f2937;--gray-900:#111827;--radius:8px;--shadow:0 1px 3px rgba(0,0,0,.1);--shadow-lg:0 10px 25px rgba(0,0,0,.1)}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;background:var(--gray-100);color:var(--gray-800);font-size:14px;line-height:1.6}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%);position:relative}
@@ -581,6 +581,12 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 .source-summary-table thead th:first-child{background:var(--gray-50)}
 .source-summary-table tbody tr:hover td{background:var(--gray-50)}
 .source-summary-table tbody td:first-child{background:var(--gray-50);font-weight:600}
+.source-summary-table .sortable-th{position:relative;transition:background .15s}
+.source-summary-table .sortable-th:hover{background:var(--primary-50)}
+.source-summary-table .sortable-th.sort-active{background:var(--primary-100);color:var(--primary-dark)}
+.source-summary-table .sort-ind{display:inline-block;margin-left:3px;font-size:11px;vertical-align:middle}
+.source-summary-table .sort-hint{opacity:.35}
+.source-summary-table .sortable-th.sort-active .sort-ind{opacity:1;color:var(--primary)}
 .month-chip-all { border-style: dashed; }
 .month-chip-all.active { background: var(--gray-500); border-color: var(--gray-500); }
 /* Dashboard new cards (当月漏交日报 / 当月漏交周报 / 上月销冠 / 上周拜访冠军) */
@@ -781,7 +787,7 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805105109';
+const APP_CACHE_VER = '20260805110335';
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 function saveCoreConfigCache() {
   try {
@@ -10006,8 +10012,8 @@ function csSortLabels(labels, map, state) {
 function csTh(label, col, board, cls) {
   const st = csSort[board];
   const active = st.col === col;
-  const arrow = active ? (st.dir === 'asc' ? ' ▲' : ' ▼') : '';
-  return `<th class="${cls || ''}" title="点击排序" onclick="csToggleSort('${board}','${col}')" style="cursor:pointer;user-select:none;white-space:nowrap">${label}${arrow}</th>`;
+  const arrow = active ? (st.dir === 'asc' ? '▲' : '▼') : '<span class="sort-hint">⇅</span>';
+  return `<th class="sortable-th ${active ? 'sort-active' : ''} ${cls || ''}" title="点击按「${label}」排序" onclick="csToggleSort('${board}','${col}')" style="cursor:pointer;user-select:none;white-space:nowrap">${label}<span class="sort-ind">${arrow}</span></th>`;
 }
 function csToggleSort(board, col) {
   const st = csSort[board];
@@ -10031,9 +10037,9 @@ function renderSourceSummaryTable(year) {
   const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
   if (!sources.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无匹配数据</div>'; return; }
   const st = csSort.source;
-  const nameArrow = st.col === 'name' ? (st.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const nameIcon = st.col === 'name' ? (st.dir === 'asc' ? '▲' : '▼') : '<span class="sort-hint">⇅</span>';
   let head = '<thead><tr>';
-  head += `<th rowspan="2" style="min-width:120px;cursor:pointer;user-select:none" title="点击排序" onclick="csToggleSort('source','name')">客户来源${nameArrow}</th>`;
+  head += `<th rowspan="2" class="sortable-th ${st.col === 'name' ? 'sort-active' : ''}" style="min-width:120px;cursor:pointer;user-select:none" title="点击按「客户来源」排序" onclick="csToggleSort('source','name')">客户来源<span class="sort-ind">${nameIcon}</span></th>`;
   months.forEach(m => { head += `<th colspan="2">${parseInt(m, 10)}月</th>`; });
   head += '<th colspan="2">合计</th></tr><tr>';
   months.forEach(m => { head += csTh('客户数', 'm' + m + 'c', 'source', 'num') + csTh('业绩', 'm' + m + 'a', 'source', 'num'); });
@@ -10216,9 +10222,9 @@ function renderProfileSummaryTable(year) {
   const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
   if (!profiles.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无匹配数据</div>'; return; }
   const st = csSort.profile;
-  const nameArrow = st.col === 'name' ? (st.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const nameIcon = st.col === 'name' ? (st.dir === 'asc' ? '▲' : '▼') : '<span class="sort-hint">⇅</span>';
   let head = '<thead><tr>';
-  head += `<th rowspan="2" style="min-width:120px;cursor:pointer;user-select:none" title="点击排序" onclick="csToggleSort('profile','name')">客户类型${nameArrow}</th>`;
+  head += `<th rowspan="2" class="sortable-th ${st.col === 'name' ? 'sort-active' : ''}" style="min-width:120px;cursor:pointer;user-select:none" title="点击按「客户类型」排序" onclick="csToggleSort('profile','name')">客户类型<span class="sort-ind">${nameIcon}</span></th>`;
   months.forEach(m => { head += `<th colspan="2">${parseInt(m, 10)}月</th>`; });
   head += '<th colspan="2">合计</th></tr><tr>';
   months.forEach(m => { head += csTh('客户数', 'm' + m + 'c', 'profile', 'num') + csTh('业绩', 'm' + m + 'a', 'profile', 'num'); });
