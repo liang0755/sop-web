@@ -787,7 +787,7 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805113844';
+const APP_CACHE_VER = '20260805114349';
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 function saveCoreConfigCache() {
   try {
@@ -9033,7 +9033,7 @@ function finishLoadingCountdown() {
 
 // ============ Init ============
 // ============ 业绩明细 / 业绩看板 ============
-const SALES_KA_TEAMS = ['KA 一部(江浙沪区域)', 'KA 二部(广东区域)', 'KA 三部(全国区域)'];
+const SALES_KA_TEAMS = ['KA 一部（江浙沪区域）', 'KA 二部（广东区域）', 'KA 三部（全国区域）'];
 const SALES_STORE_CORRECTION = {
   'KA-KA华东大区': 'KA 一部（江浙沪区域）',
   'KA-KA全国大区': 'KA 三部（全国区域）',
@@ -9360,7 +9360,7 @@ async function renderSalesDetail() {
     const d = (r.docDate || '');
     if (f.start && d && d < f.start) return false;
     if (f.end && d && d > f.end) return false;
-    if (f.team && (r.team || '') !== f.team) return false;
+    if (f.team && normDeptKey(r.team || '') !== normDeptKey(f.team)) return false;
     if (f.salesperson && (r.salesperson || '') !== f.salesperson) return false;
     if (f.customer) { const c = (r.customer || '').toLowerCase(); if (!c.includes(f.customer.toLowerCase())) return false; }
     if (f.docType && (r.docType || '') !== f.docType) return false;
@@ -9548,7 +9548,7 @@ function exportSalesDetailCsv() {
     const d = (r.docDate || '');
     if (f.start && d && d < f.start) return false;
     if (f.end && d && d > f.end) return false;
-    if (f.team && (r.team || '') !== f.team) return false;
+    if (f.team && normDeptKey(r.team || '') !== normDeptKey(f.team)) return false;
     if (f.salesperson && (r.salesperson || '') !== f.salesperson) return false;
     if (f.customer) { const c = (r.customer || '').toLowerCase(); if (!c.includes(f.customer.toLowerCase())) return false; }
     if (f.docType && (r.docType || '') !== f.docType) return false;
@@ -9956,7 +9956,7 @@ function aggregateSourceSummary(year) {
     filtered = filtered.filter(r => {
       const sp = (r.salesperson || '').trim();
       if (pf && pf.length && pf.indexOf(sp) < 0) return false;
-      if (tf && (r.team || getSalesTeam(sp)) !== tf) return false;
+      if (tf && normDeptKey(r.team || getSalesTeam(sp) || '') !== normDeptKey(tf)) return false;
       return true;
     });
   }
@@ -10186,7 +10186,7 @@ function aggregateProfileSummary(year) {
     filtered = filtered.filter(r => {
       const sp = (r.salesperson || '').trim();
       if (pf && pf.length && pf.indexOf(sp) < 0) return false;
-      if (tf && (r.team || getSalesTeam(sp)) !== tf) return false;
+      if (tf && normDeptKey(r.team || getSalesTeam(sp) || '') !== normDeptKey(tf)) return false;
       return true;
     });
   }
@@ -10629,7 +10629,7 @@ function renderCustomerSummary() {
     if (!dm.startsWith(year)) return false;
     const mm = dm.slice(5);
     if (months.length && !months.includes(mm)) return false;
-    if (dept && (r.team || '') !== dept) return false;
+    if (dept && normDeptKey(r.team || '') !== normDeptKey(dept)) return false;
     if (person && (r.salesperson || '') !== person) return false;
     return true;
   });
@@ -13145,7 +13145,7 @@ function teamPerfSum(year, sp, month) {
   const ym = String(year) + '-' + String(month).padStart(2, '0');
   let s = 0;
   (cloudData.salesRecords || []).forEach(r => {
-    if ((r.team || '').trim() !== team) return;
+    if (normDeptKey((r.team || '').trim()) !== normDeptKey(team)) return;
     if ((r.docMonth || '') !== ym) return;
     s += toNum(r.amount);
   });
