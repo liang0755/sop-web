@@ -792,8 +792,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805191019';
-const APP_VERSION = '1.42.26'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805192738';
+const APP_VERSION = '1.42.27'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -802,7 +802,8 @@ function saveCoreConfigCache() {
       formConfig: cloudData.formConfig, brandConfig: cloudData.brandConfig,
       departments: cloudData.departments, aiConfig: cloudData.aiConfig,
       roleConfig: cloudData.roleConfig, visitConfig: cloudData.visitConfig,
-      honorRecords: cloudData.honorRecords };
+      honorRecords: cloudData.honorRecords,
+      filterDefaults: cloudData.filterDefaults };
     const s = JSON.stringify(payload);
     if (s.length > 2 * 1024 * 1024) return; // 过大不缓存,避免撑爆 localStorage
     localStorage.setItem(CORE_CONFIG_CACHE_KEY, s);
@@ -822,6 +823,11 @@ function loadCoreConfigCache() {
     cloudData.roleConfig = p.roleConfig || cloudData.roleConfig;
     cloudData.visitConfig = p.visitConfig || cloudData.visitConfig;
     cloudData.honorRecords = p.honorRecords || cloudData.honorRecords;
+    // 恢复云端筛选默认值(含则标记已就绪,首屏渲染即可应用;不含则保持空{},等后台加载后重绘应用)
+    if (p.filterDefaults && typeof p.filterDefaults === 'object') {
+      cloudData.filterDefaults = p.filterDefaults;
+      filterDefaultsLoaded = true; // 缓存中有 filterDefaults → 首屏即可应用默认值
+    }
     return true;
   } catch(e) { return false; }
 }
@@ -1054,6 +1060,9 @@ async function loadCoreDataFresh() {
     migrateMgrPerfConfig();
     migrateM0PerfConfig();
     if (cloudData.formConfig.mgrPerformanceBase === undefined || cloudData.formConfig.mgrPerformanceBase === null) cloudData.formConfig.mgrPerformanceBase = DEFAULT_FORM_CONFIG.mgrPerformanceBase;
+    // catch 分支:网络异常时也标记 filterDefaults 已就绪(空对象),避免守卫永远不置真导致默认值永远无法应用
+    if (!cloudData.filterDefaults || typeof cloudData.filterDefaults !== 'object') cloudData.filterDefaults = {};
+    filterDefaultsLoaded = true;
   }
 }
 
