@@ -721,7 +721,7 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}, honorRecords:{}};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}, honorRecords:{}, filterDefaults:{}};
 let currentUser = null;
 let isCloudAvailable = false;
 let cloudConfirmedViaSibling = false; // 已通过兄弟标签页确认云端可达:loadUsersOnly 拉取失败时不再把 isCloudAvailable 下探为 false
@@ -791,8 +791,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805171356';
-const APP_VERSION = '1.42.19'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805174740';
+const APP_VERSION = '1.42.20'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -860,14 +860,15 @@ async function loadCoreData() {
 }
 async function loadCoreDataFresh() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes, hRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes, hRes, fdRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
       fetch(FB_BASE + '/aiConfig.json'),
       fetch(FB_BASE + '/roleConfig.json'),
       fetch(FB_BASE + '/visitConfig.json'),
-      fetch(FB_BASE + '/honorRecords.json')
+      fetch(FB_BASE + '/honorRecords.json'),
+      fetch(FB_BASE + '/filterDefaults.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -1005,6 +1006,10 @@ async function loadCoreDataFresh() {
     const hrData = hRes.ok ? await hRes.json() : null;
     cloudData.honorRecords = hrData || {};
     normalizeHonorRecords();
+    // Load filter defaults (全局筛选默认,仅 admin 可写,所有账号共享)
+    const fdData = fdRes.ok ? await fdRes.json() : null;
+    cloudData.filterDefaults = (fdData && typeof fdData === 'object') ? fdData : {};
+    if (!cloudData.filterDefaults || typeof cloudData.filterDefaults !== 'object') cloudData.filterDefaults = {};
     saveCoreConfigCache(); // 缓存本次拉取到的(已迁移)核心配置,加速复访
     isCloudAvailable = true;
     if (dataLoaded) rerenderCurrentPage(); // 应用已加载完成后,配置有更新则自动重绘当前页(让其他账号看到最新配置)
@@ -2835,6 +2840,8 @@ let dataViewDeptFilter = [];
 let dataViewPersonFilter = [];
 
 function renderDataView(type) {
+  dataViewDeptFilter = takeFilterDefault('dataView.dept', dataViewDeptFilter);
+  dataViewPersonFilter = takeFilterDefault('dataView.person', dataViewPersonFilter);
   const body = document.getElementById('contentBody');
   const today = localYMD();
   const mAgo = localYMD(new Date(Date.now()-30*86400000));
@@ -2842,8 +2849,8 @@ function renderDataView(type) {
   const persons = [...new Set(cloudData.users.map(u => u.name))].sort();
   body.innerHTML = `<div class="card filter-card" style="margin-bottom:20px"><div class="card-body">
     <div class="filter-bar">
-      ${multiSelectPanelHtml('dvDept', {label:'部门', options:depts, selected:dataViewDeptFilter, placeholder:'全部部门', onChange:function(arr){ dataViewDeptFilter = arr; loadDataView('${type}'); }})}
-      ${multiSelectPanelHtml('dvPerson', {label:'人员', options:persons, selected:dataViewPersonFilter, placeholder:'全部人员', onChange:function(arr){ dataViewPersonFilter = arr; loadDataView('${type}'); }})}
+      ${multiSelectPanelHtml('dvDept', {label:'部门', options:depts, selected:dataViewDeptFilter, placeholder:'全部部门', defaultKey:'dataView.dept', onChange:function(arr){ dataViewDeptFilter = arr; loadDataView('${type}'); }})}
+      ${multiSelectPanelHtml('dvPerson', {label:'人员', options:persons, selected:dataViewPersonFilter, placeholder:'全部人员', defaultKey:'dataView.person', onChange:function(arr){ dataViewPersonFilter = arr; loadDataView('${type}'); }})}
       <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="fStart" value="${mAgo}"></div>
       <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="fEnd" value="${today}"></div>
       <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="loadDataView('${type}')">🔍 查询</button></div>
@@ -3089,6 +3096,8 @@ function getUniqueChannels(type) {
 }
 
 function renderSubFilters() {
+  summaryFilters.dept = takeFilterDefault('summary.dept', summaryFilters.dept);
+  summaryFilters.person = takeFilterDefault('summary.person', summaryFilters.person);
   const type = document.getElementById('sumType').value;
   const container = document.getElementById('sumSubFilters');
   if (!container) return;
@@ -3099,7 +3108,7 @@ function renderSubFilters() {
     const allChannels = [...new Set([...getChannels('daily').map(ch => ch.name), ...getChannels('weekly').map(ch => ch.name)])];
     summaryChannelOptions.merge = allChannels;
     let h = '<div class="card filter-card" style="margin-bottom:16px"><div class="card-body"><div class="filter-bar">';
-    h += multiSelectPanelHtml('sumDeptM', {label:'筛选部门', options:depts, selected:summaryFilters.dept, placeholder:'全部部门', onChange:function(arr){ summaryFilters.dept = arr; recomputeMergeSummary(); }});
+    h += multiSelectPanelHtml('sumDeptM', {label:'筛选部门', options:depts, selected:summaryFilters.dept, placeholder:'全部部门', defaultKey:'summary.dept', onChange:function(arr){ summaryFilters.dept = arr; recomputeMergeSummary(); }});
     h += summaryChannelPanelHtml('merge', allChannels);
     h += `<div class="form-group"><label>&nbsp;</label><button class="btn btn-outline btn-sm" onclick="summaryFilters={dept:[],person:[],channel:[]};loadMergeSummary()">🔄 重置筛选</button></div>`;
     h += '</div></div></div>';
@@ -3116,16 +3125,16 @@ function renderSubFilters() {
 
   if (summaryTab === 'byPerson') {
     // Filter by department and channel
-    html += multiSelectPanelHtml('sumDeptP', {label:'筛选部门', options:depts, selected:summaryFilters.dept, placeholder:'全部部门', onChange:function(arr){ summaryFilters.dept = arr; recomputeSummary(); }});
+    html += multiSelectPanelHtml('sumDeptP', {label:'筛选部门', options:depts, selected:summaryFilters.dept, placeholder:'全部部门', defaultKey:'summary.dept', onChange:function(arr){ summaryFilters.dept = arr; recomputeSummary(); }});
     html += summaryChannelPanelHtml('reg', channels);
   } else if (summaryTab === 'byDepartment') {
     // Filter by channel and person
     html += summaryChannelPanelHtml('reg', channels);
-    html += multiSelectPanelHtml('sumPersonD', {label:'筛选人员', options:persons.map(p=>p.name), selected:summaryFilters.person, placeholder:'全部人员', onChange:function(arr){ summaryFilters.person = arr; recomputeSummary(); }});
+    html += multiSelectPanelHtml('sumPersonD', {label:'筛选人员', options:persons.map(p=>p.name), selected:summaryFilters.person, placeholder:'全部人员', defaultKey:'summary.person', onChange:function(arr){ summaryFilters.person = arr; recomputeSummary(); }});
   } else if (summaryTab === 'byChannel') {
     // Filter by department and person
-    html += multiSelectPanelHtml('sumDeptC', {label:'筛选部门', options:depts, selected:summaryFilters.dept, placeholder:'全部部门', onChange:function(arr){ summaryFilters.dept = arr; recomputeSummary(); }});
-    html += multiSelectPanelHtml('sumPersonC', {label:'筛选人员', options:persons.map(p=>p.name), selected:summaryFilters.person, placeholder:'全部人员', onChange:function(arr){ summaryFilters.person = arr; recomputeSummary(); }});
+    html += multiSelectPanelHtml('sumDeptC', {label:'筛选部门', options:depts, selected:summaryFilters.dept, placeholder:'全部部门', defaultKey:'summary.dept', onChange:function(arr){ summaryFilters.dept = arr; recomputeSummary(); }});
+        html += multiSelectPanelHtml('sumPersonC', {label:'筛选人员', options:persons.map(p=>p.name), selected:summaryFilters.person, placeholder:'全部人员', defaultKey:'summary.person', onChange:function(arr){ summaryFilters.person = arr; recomputeSummary(); }});
   }
   html += `<div class="form-group"><label>&nbsp;</label><button class="btn btn-outline btn-sm" onclick="summaryFilters={dept:[],person:[],channel:[]};loadSummary()">🔄 重置筛选</button></div>`;
   html += '</div></div></div>';
@@ -3241,6 +3250,7 @@ function multiSelectPanelHtml(id, cfg) {
         <input type="text" class="form-control form-control-sm" id="${id}Search" placeholder="${cfg.searchPlaceholder || '搜索'}" oninput="renderMultiSelectPanel('${id}')" style="flex:1;min-width:0">
         <button type="button" class="btn btn-sm btn-outline" onclick="multiSelectAll('${id}')">全选</button>
         <button type="button" class="btn btn-sm btn-outline" onclick="multiSelectClear('${id}')">清空</button>
+        ${(cfg.defaultKey && hasPermission('admin')) ? `<button type="button" class="btn btn-sm btn-primary" onclick="saveFilterDefault('${cfg.defaultKey}', __msState['${id}'].selected)">💾 存默认</button>` : ''}
       </div>
       <div id="${id}List"></div>
     </div>
@@ -3299,6 +3309,24 @@ function updateMultiSelectLabel(id) {
   const btn = document.getElementById(id + 'Btn'); if (!btn) return;
   const st = __msState[id]; const sel = st ? st.selected : [];
   btn.innerHTML = esc(sel.length ? (sel.length <= 3 ? '已选 ' + sel.length + ' 个: ' + sel.map(msLbl).join(',') : '已选 ' + sel.length + ' 个') : st.placeholder);
+}
+// ===== 全局筛选默认(云端共享,仅 admin 可保存,所有账号生效) =====
+// 每个 key 仅在本会话首次调用时应用云端默认;之后返回当前值,保留个人会话内临时改(刷新后回到全局默认)
+const __filterDefaultApplied = {};
+function takeFilterDefault(key, cur) {
+  if (Object.prototype.hasOwnProperty.call(__filterDefaultApplied, key)) return (cur || []);
+  __filterDefaultApplied[key] = true;
+  const d = cloudData.filterDefaults && cloudData.filterDefaults[key];
+  return (Array.isArray(d) && d.length) ? d.slice() : (cur || []);
+}
+function saveFilterDefault(key, arr) {
+  if (!hasPermission('admin')) { showToast('仅管理员可保存全局默认筛选', 'error'); return; }
+  arr = arr || [];
+  if (!cloudData.filterDefaults) cloudData.filterDefaults = {};
+  cloudData.filterDefaults[key] = arr.slice ? arr.slice() : arr;
+  apiUpdate('filterDefaults', key, cloudData.filterDefaults[key])
+    .then(() => showToast('已保存全局默认: ' + key + ' (' + arr.length + ' 项)', 'success'))
+    .catch(e => showToast('保存失败: ' + e.message, 'error'));
 }
 // 点击空白区域自动收起所有通用多选面板
 document.addEventListener('click', function(e) {
@@ -7192,6 +7220,9 @@ async function ensureVisitDataLoaded() {
 }
 
 async function renderVisitData() {
+  visitDeptFilter = takeFilterDefault('visit.dept', visitDeptFilter);
+  visitPersonFilter = takeFilterDefault('visit.person', visitPersonFilter);
+  visitResultFilter = takeFilterDefault('visit.result', visitResultFilter);
   if (!hasPermission('visitData')) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面</div>';
     return;
@@ -7227,9 +7258,9 @@ async function renderVisitData() {
           <button class="btn btn-outline" onclick="downloadVisitTemplate()">📥 下载模板</button>
           <button class="btn btn-outline" id="visitCleanupBtn" onclick="cleanupVisitDuplicates()" title="按相同 key(联系时间+客户+联系人+手机号+签到事件+员工+部门+签到地址+备注)清理重复,每组仅保留第一条">🧹 清理重复</button>
         </div>
-        ${multiSelectPanelHtml('visitDept', {label:'部门', options:depts, selected:visitDeptFilter, placeholder:'全部部门', onChange:function(arr){ visitDeptFilter = arr; resetVisitPage(); }})}
-        ${multiSelectPanelHtml('visitPerson', {label:'销售', options:persons, selected:visitPersonFilter, placeholder:'全部人员', onChange:function(arr){ visitPersonFilter = arr; resetVisitPage(); }})}
-        ${multiSelectPanelHtml('visitResult', {label:'拜访结果', options:[...(vc.visitResults||[]).map(r=>({v:r,label:r})), {v:'empty',label:'⚠️ 未填写结果'}, {v:'filled',label:'已填写结果'}], selected:visitResultFilter, placeholder:'全部结果', onChange:function(arr){ visitResultFilter = arr; resetVisitPage(); }})}
+        ${multiSelectPanelHtml('visitDept', {label:'部门', options:depts, selected:visitDeptFilter, placeholder:'全部部门', defaultKey:'visit.dept', onChange:function(arr){ visitDeptFilter = arr; resetVisitPage(); }})}
+        ${multiSelectPanelHtml('visitPerson', {label:'销售', options:persons, selected:visitPersonFilter, placeholder:'全部人员', defaultKey:'visit.person', onChange:function(arr){ visitPersonFilter = arr; resetVisitPage(); }})}
+        ${multiSelectPanelHtml('visitResult', {label:'拜访结果', options:[...(vc.visitResults||[]).map(r=>({v:r,label:r})), {v:'empty',label:'⚠️ 未填写结果'}, {v:'filled',label:'已填写结果'}], selected:visitResultFilter, placeholder:'全部结果', defaultKey:'visit.result', onChange:function(arr){ visitResultFilter = arr; resetVisitPage(); }})}
         <div class="form-group" style="min-width:440px"><label>快捷筛选</label><div id="visitFQuickDateChips" class="visit-quick-chips"><button type="button" class="visit-quick-chip" data-type="" onclick="applyVisitQuickDateFilter('')">全部</button><button type="button" class="visit-quick-chip" data-type="today" onclick="applyVisitQuickDateFilter('today')">今天</button><button type="button" class="visit-quick-chip" data-type="yesterday" onclick="applyVisitQuickDateFilter('yesterday')">昨天</button><button type="button" class="visit-quick-chip" data-type="thisWeek" onclick="applyVisitQuickDateFilter('thisWeek')">本周</button><button type="button" class="visit-quick-chip" data-type="lastWeek" onclick="applyVisitQuickDateFilter('lastWeek')">上周</button><button type="button" class="visit-quick-chip" data-type="thisMonth" onclick="applyVisitQuickDateFilter('thisMonth')">本月</button><button type="button" class="visit-quick-chip" data-type="lastMonth" onclick="applyVisitQuickDateFilter('lastMonth')">上月</button><button type="button" class="visit-quick-chip" data-type="thisYear" onclick="applyVisitQuickDateFilter('thisYear')">今年</button></div></div>
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}" onchange="setVisitQuickDateActive('')"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}" onchange="setVisitQuickDateActive('')"></div>
@@ -8406,6 +8437,8 @@ function computeM0VisitRows() {
   return rows;
 }
 function renderM0VisitStats() {
+  m0vChannelFilter = takeFilterDefault('m0visit.channel', m0vChannelFilter);
+  m0vPersonFilter = takeFilterDefault('m0visit.person', m0vPersonFilter);
   // m0vChannelFilter 为空时表示"全部渠道"(不过滤),不自动填入配置默认值(可能与实际数据不一致)
   const s = document.getElementById('visitStatsStart')?.value || '';
   const e = document.getElementById('visitStatsEnd')?.value || '';
@@ -8504,11 +8537,11 @@ function renderM0VisitStats() {
         <h4>📊 M0 陪访统计(有效建联量)</h4>
         <div style="display:flex;align-items:center;gap:6px">
           <label style="font-size:12px;color:var(--gray-500)">渠道</label>
-          ${multiSelectPanelHtml('m0Channel', {label:'渠道', options:[...channelSet], selected:m0vChannelFilter, placeholder:'全部渠道', onChange:function(arr){ m0vChannelFilter = arr; renderM0VisitStats(); toggleMultiSelectPanel('m0Channel', true); }})}
+          ${multiSelectPanelHtml('m0Channel', {label:'渠道', options:[...channelSet], selected:m0vChannelFilter, placeholder:'全部渠道', defaultKey:'m0visit.channel', onChange:function(arr){ m0vChannelFilter = arr; renderM0VisitStats(); toggleMultiSelectPanel('m0Channel', true); }})}
         </div>
         <div style="display:flex;align-items:center;gap:6px">
           <label style="font-size:12px;color:var(--gray-500)">人员</label>
-          ${multiSelectPanelHtml('m0PersonH', {label:'人员', options:allM0s, selected:m0vPersonFilter, placeholder:'全部 M0', onChange:function(arr){ m0vPersonFilter = arr; renderM0VisitStats(); toggleMultiSelectPanel('m0PersonH', true); }})}
+          ${multiSelectPanelHtml('m0PersonH', {label:'人员', options:allM0s, selected:m0vPersonFilter, placeholder:'全部 M0', defaultKey:'m0visit.person', onChange:function(arr){ m0vPersonFilter = arr; renderM0VisitStats(); toggleMultiSelectPanel('m0PersonH', true); }})}
         </div>
         <div style="display:flex;gap:4px">
           <button class="btn btn-sm ${m0vMode==='week'?'btn-primary':'btn-outline'}" onclick="setM0vMode('week')">按周</button>
@@ -8525,7 +8558,7 @@ function renderM0VisitStats() {
       <div class="sec-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px">
         <span>📋 明细数据</span>
         <div style="display:flex;align-items:center;gap:8px">
-          ${multiSelectPanelHtml('m0PersonD', {label:'人员', options:allM0s, selected:m0vPersonFilter, placeholder:'全部 M0', onChange:function(arr){ m0vPersonFilter = arr; renderM0VisitStats(); toggleMultiSelectPanel('m0PersonD', true); }})}
+          ${multiSelectPanelHtml('m0PersonD', {label:'人员', options:allM0s, selected:m0vPersonFilter, placeholder:'全部 M0', defaultKey:'m0visit.person', onChange:function(arr){ m0vPersonFilter = arr; renderM0VisitStats(); toggleMultiSelectPanel('m0PersonD', true); }})}
           <button class="btn btn-sm btn-outline" onclick="exportM0VisitCsv()">📊 CSV</button>
           <button class="btn btn-sm btn-success" onclick="exportM0VisitXlsx()">📥 Excel</button>
         </div>
@@ -9586,6 +9619,9 @@ function toggleSummaryYear(y) {
 }
 
 async function renderSalesDetail() {
+  salesDetailFilters.team = takeFilterDefault('salesDetail.team', salesDetailFilters.team);
+  salesDetailFilters.salesperson = takeFilterDefault('salesDetail.sales', salesDetailFilters.salesperson);
+  salesDetailFilters.docType = takeFilterDefault('salesDetail.docType', salesDetailFilters.docType);
   const canEdit = hasPermission('salesDetail');
   const f = salesDetailFilters;
   // 过滤掉无意义的空白记录(有销售员/团队/日期/客户/单据编号/金额任一有效才展示)
@@ -9714,9 +9750,9 @@ async function renderSalesDetail() {
       <div class="filter-bar">
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="sfStart" value="${f.start}" onchange="applySalesFilters()"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="sfEnd" value="${f.end}" onchange="applySalesFilters()"></div>
-        ${multiSelectPanelHtml('sfTeam', {label:'部门 / 门店', options:teams, selected:f.team, placeholder:'全部', searchPlaceholder:'搜索门店', onChange:function(arr){salesDetailFilters.team=arr; applySalesFilters();}})}
-        ${multiSelectPanelHtml('sfSales', {label:'人员', options:sps, selected:f.salesperson, placeholder:'全部', searchPlaceholder:'搜索人员', onChange:function(arr){salesDetailFilters.salesperson=arr; applySalesFilters();}})}
-        ${multiSelectPanelHtml('sfDocType', {label:'单据类别', options:docTypes, selected:f.docType, placeholder:'全部', searchPlaceholder:'搜索类别', onChange:function(arr){salesDetailFilters.docType=arr; applySalesFilters();}})}
+        ${multiSelectPanelHtml('sfTeam', {label:'部门 / 门店', options:teams, selected:f.team, placeholder:'全部', searchPlaceholder:'搜索门店', defaultKey:'salesDetail.team', onChange:function(arr){salesDetailFilters.team=arr; applySalesFilters();}})}
+        ${multiSelectPanelHtml('sfSales', {label:'人员', options:sps, selected:f.salesperson, placeholder:'全部', searchPlaceholder:'搜索人员', defaultKey:'salesDetail.sales', onChange:function(arr){salesDetailFilters.salesperson=arr; applySalesFilters();}})}
+        ${multiSelectPanelHtml('sfDocType', {label:'单据类别', options:docTypes, selected:f.docType, placeholder:'全部', searchPlaceholder:'搜索类别', defaultKey:'salesDetail.docType', onChange:function(arr){salesDetailFilters.docType=arr; applySalesFilters();}})}
         <div class="form-group"><label>客户(模糊搜索)</label><input type="text" class="form-control" id="sfCustomer" value="${f.customer}" placeholder="输入客户名关键词" onchange="applySalesFilters()" style="min-width:160px"></div>
         <div class="form-group"><button type="button" class="btn btn-outline btn-sm" onclick="resetSalesFilters()">重置</button></div>
       </div>
@@ -9959,11 +9995,12 @@ function sbAllPersons() {
   return [...set].sort((a, b) => a.localeCompare(b, 'zh'));
 }
 function sbTeamFilterHtml(prefix) {
+  sbTeamFilters[prefix] = takeFilterDefault('salesBoard.' + prefix + '.team', sbTeamFilters[prefix] || []);
   const selected = sbTeamFilters[prefix] || [];
   // 兜底：始终保证 SALES_KA_TEAMS 权威清单出现在选项中（不依赖数据加载时机）
   const teams = sbAllTeams();
   (SALES_KA_TEAMS || []).forEach(t => { if (t && !teams.includes(t)) teams.push(t); });
-  return multiSelectPanelHtml('sbTeam_' + prefix, {label:'团队', options:teams, selected:selected, placeholder:'全部团队', searchPlaceholder:'搜索团队', onChange:function(arr){ sbTeamFilterChange(prefix, arr); }});
+  return multiSelectPanelHtml('sbTeam_' + prefix, {label:'团队', options:teams, selected:selected, placeholder:'全部团队', searchPlaceholder:'搜索团队', defaultKey:'salesBoard.' + prefix + '.team', onChange:function(arr){ sbTeamFilterChange(prefix, arr); }});
 }
 function sbPersonPanelHtml(prefix, labelText) {
   return `
@@ -10828,11 +10865,11 @@ function renderSalesBoardCustomer() {
         <div style="flex:1;min-width:320px">
           <div class="filter-bar">
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="csYear" onchange="csRefilter()">${yearOpts}</select></div>
-        ${multiSelectPanelHtml('csTeam', {label:'部门', options:teams, selected:csTeamFilter, placeholder:'全部部门', searchPlaceholder:'搜索部门', onChange:function(arr){csTeamFilter=arr;csRefilter();}})}
-        ${multiSelectPanelHtml('csSales', {label:'人员', options:sps, selected:csSalesFilter, placeholder:'全部人员', searchPlaceholder:'搜索人员', onChange:function(arr){csSalesFilter=arr;csRefilter();}})}
-        ${multiSelectPanelHtml('csSource', {label:'客户来源', options:(csTagCfg.customerSource||[]), selected:csSourceFilter, placeholder:'全部来源', searchPlaceholder:'搜索来源', onChange:function(arr){csSourceFilter=arr;csRefilter();}})}
-        ${multiSelectPanelHtml('csCategory', {label:'品类', options:(csTagCfg.category||[]), selected:csCategoryFilter, placeholder:'全部品类', searchPlaceholder:'搜索品类', onChange:function(arr){csCategoryFilter=arr;csRefilter();}})}
-        ${multiSelectPanelHtml('csProfile', {label:'客户画像', options:(csTagCfg.customerProfile||[]), selected:csProfileFilter, placeholder:'全部画像', searchPlaceholder:'搜索画像', onChange:function(arr){csProfileFilter=arr;csRefilter();}})}
+        ${multiSelectPanelHtml('csTeam', {label:'部门', options:teams, selected:csTeamFilter, placeholder:'全部部门', searchPlaceholder:'搜索部门', defaultKey:'customerSummary.dept', onChange:function(arr){csTeamFilter=arr;csRefilter();}})}
+        ${multiSelectPanelHtml('csSales', {label:'人员', options:sps, selected:csSalesFilter, placeholder:'全部人员', searchPlaceholder:'搜索人员', defaultKey:'customerSummary.person', onChange:function(arr){csSalesFilter=arr;csRefilter();}})}
+        ${multiSelectPanelHtml('csSource', {label:'客户来源', options:(csTagCfg.customerSource||[]), selected:csSourceFilter, placeholder:'全部来源', searchPlaceholder:'搜索来源', defaultKey:'customerSummary.source', onChange:function(arr){csSourceFilter=arr;csRefilter();}})}
+        ${multiSelectPanelHtml('csCategory', {label:'品类', options:(csTagCfg.category||[]), selected:csCategoryFilter, placeholder:'全部品类', searchPlaceholder:'搜索品类', defaultKey:'customerSummary.category', onChange:function(arr){csCategoryFilter=arr;csRefilter();}})}
+        ${multiSelectPanelHtml('csProfile', {label:'客户画像', options:(csTagCfg.customerProfile||[]), selected:csProfileFilter, placeholder:'全部画像', searchPlaceholder:'搜索画像', defaultKey:'customerSummary.profile', onChange:function(arr){csProfileFilter=arr;csRefilter();}})}
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetCustomerSummary()">重置</button></div>
         <div class="cs-switch-wrap">
           <label class="cs-switch" title="只显示 客户来源 / 品类 / 客户画像 中任一未设置的行">
@@ -10915,6 +10952,11 @@ function csPaintTag(sel) {
 }
 
 function renderCustomerSummary() {
+  csTeamFilter = takeFilterDefault('customerSummary.dept', csTeamFilter);
+  csSalesFilter = takeFilterDefault('customerSummary.person', csSalesFilter);
+  csSourceFilter = takeFilterDefault('customerSummary.source', csSourceFilter);
+  csCategoryFilter = takeFilterDefault('customerSummary.category', csCategoryFilter);
+  csProfileFilter = takeFilterDefault('customerSummary.profile', csProfileFilter);
   const year = document.getElementById('csYear').value;
   const months = csMonths; // 数组,空=全部月份
   const dept = csTeamFilter;
@@ -12324,10 +12366,8 @@ let m0ConfigPanelOpen = false;        // 配置面板是否展开
 let m0ConfigDraft = null;             // 编辑中的配置副本(保存前不落库)
 let m0MemberPanelFor = -1;            // 当前展开成员多选的分组索引(-1=无)
 function renderSalesGrade() {
-  if (!salesGradeSpFilterLoaded) {
-    try { const s = localStorage.getItem('sop_sg_sp_filter'); salesGradeSpFilter = s ? JSON.parse(s) : []; } catch (e) { salesGradeSpFilter = []; }
-    salesGradeSpFilterLoaded = true;
-  }
+  salesGradeSpFilter = takeFilterDefault('salesGrade.salesperson', salesGradeSpFilter);
+  salesGradeTeamFilter = takeFilterDefault('salesGrade.team', salesGradeTeamFilter);
   const records = cloudData.salesRecords || [];
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = prevMonth().year.toString();
@@ -12375,13 +12415,13 @@ function renderSalesGrade() {
               </div>
               <div id="sgSpList"></div>
               <div style="display:flex;gap:6px;margin-top:10px;border-top:1px solid var(--gray-100);padding-top:10px">
-                <button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="saveSgSpDefault()">💾 保存为默认</button>
+                ${(hasPermission('admin')) ? `<button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="saveSgSpDefault()">💾 保存为默认</button>` : `<span style="flex:1;font-size:12px;color:var(--gray-400);align-self:center">默认筛选仅管理员可设置</span>`}
                 <button type="button" class="btn btn-sm btn-outline" onclick="toggleSgSpPanel(false)">关闭</button>
               </div>
             </div>
           </div>
           <div class="form-group">
-            ${multiSelectPanelHtml('sgTeamFilter', {label:'团队', options: sgTeamList(year), selected: salesGradeTeamFilter, placeholder:'全部团队', searchPlaceholder:'搜索团队', onChange: function(arr){ sgTeamFilterChange(arr); }})}
+            ${multiSelectPanelHtml('sgTeamFilter', {label:'团队', options: sgTeamList(year), selected: salesGradeTeamFilter, placeholder:'全部团队', searchPlaceholder:'搜索团队', defaultKey:'salesGrade.team', onChange: function(arr){ sgTeamFilterChange(arr); }})}
           </div>
           <div class="form-group">
             <label style="font-size:12px;color:var(--gray-500)">排序</label>
@@ -12461,8 +12501,7 @@ function sgSpClear() {
   if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
 }
 function saveSgSpDefault() {
-  try { localStorage.setItem('sop_sg_sp_filter', JSON.stringify(salesGradeSpFilter)); showToast('已保存为默认筛选(' + salesGradeSpFilter.length + ' 名销售)', 'success'); }
-  catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+  saveFilterDefault('salesGrade.salesperson', salesGradeSpFilter);
   toggleSgSpPanel(false);
 }
 function sgTeamList(year) {
@@ -13779,8 +13818,7 @@ function perfSpClear() {
   perfRefresh();
 }
 function savePerfSpDefault() {
-  try { localStorage.setItem('sop_perf_sp_filter', JSON.stringify(perfSpFilter)); showToast('已保存为默认视图(' + perfSpFilter.length + ' 名销售)', 'success'); }
-  catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+  saveFilterDefault('salesPerf.salesperson', perfSpFilter);
   togglePerfSpPanel(false);
 }
 function perfTeamList(year) {
@@ -13807,10 +13845,8 @@ function perfFilterSp(sp) {
 }
 
 function renderSalesPerf() {
-  if (!perfSpFilterLoaded) {
-    try { const s = localStorage.getItem('sop_perf_sp_filter'); perfSpFilter = s ? JSON.parse(s) : []; } catch (e) { perfSpFilter = []; }
-    perfSpFilterLoaded = true;
-  }
+  perfTeamFilter = takeFilterDefault('salesPerf.team', perfTeamFilter);
+  perfSpFilter = takeFilterDefault('salesPerf.salesperson', perfSpFilter);
   const records = cloudData.salesRecords || [];
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = prevMonth().year.toString();
@@ -13859,13 +13895,13 @@ function renderSalesPerf() {
               </div>
               <div id="perfSpList"></div>
               <div style="display:flex;gap:6px;margin-top:10px;border-top:1px solid var(--gray-100);padding-top:10px">
-                <button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="savePerfSpDefault()">💾 保存为默认视图</button>
+                ${(hasPermission('admin')) ? `<button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="savePerfSpDefault()">💾 保存为默认视图</button>` : `<span style="flex:1;font-size:12px;color:var(--gray-400);align-self:center">默认筛选仅管理员可设置</span>`}
                 <button type="button" class="btn btn-sm btn-outline" onclick="togglePerfSpPanel(false)">关闭</button>
               </div>
             </div>
           </div>
           <div class="form-group">
-            ${multiSelectPanelHtml('perfTeamFilter', {label:'团队', options: perfTeamList(perfYear), selected: perfTeamFilter, placeholder:'全部团队', searchPlaceholder:'搜索团队', onChange: function(arr){ perfTeamFilterChange(arr); }})}
+            ${multiSelectPanelHtml('perfTeamFilter', {label:'团队', options: perfTeamList(perfYear), selected: perfTeamFilter, placeholder:'全部团队', searchPlaceholder:'搜索团队', defaultKey:'salesPerf.team', onChange: function(arr){ perfTeamFilterChange(arr); }})}
           </div>
           <div class="form-group">
             <label style="font-size:12px;color:var(--gray-500)">排序</label>
@@ -14302,13 +14338,11 @@ function m0PerfYearOptions() {
 }
 let m0PerfMount = null;
 function renderM0Perf(mount) {
+  m0PerfTeamFilter = takeFilterDefault('m0Perf.team', m0PerfTeamFilter);
   if (mount) m0PerfMount = mount;
   const target = (typeof m0PerfMount === 'string') ? document.getElementById(m0PerfMount) : m0PerfMount;
   if (!target) return;
-  if (!m0PerfSpFilterLoaded) {
-    try { const s = localStorage.getItem('sop_m0perf_sp_filter'); m0PerfSpFilter = s ? JSON.parse(s) : []; } catch (e) { m0PerfSpFilter = []; }
-    m0PerfSpFilterLoaded = true;
-  }
+  m0PerfSpFilter = takeFilterDefault('m0Perf.salesperson', m0PerfSpFilter);
   const curYear = new Date().getFullYear().toString();
   if (!m0PerfYear || m0PerfYearOptions().indexOf('value="' + m0PerfYear + '"') < 0) m0PerfYear = curYear;
   const isMatrix = m0PerfTab === 'matrix';
@@ -14336,13 +14370,13 @@ function renderM0Perf(mount) {
               </div>
               <div id="m0PerfSpList"></div>
               <div style="display:flex;gap:6px;margin-top:10px;border-top:1px solid var(--gray-100);padding-top:10px">
-                <button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="saveM0PerfSpDefault()">💾 保存为默认视图</button>
+                ${(hasPermission('admin')) ? `<button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="saveM0PerfSpDefault()">💾 保存为默认视图</button>` : `<span style="flex:1;font-size:12px;color:var(--gray-400);align-self:center">默认筛选仅管理员可设置</span>`}
                 <button type="button" class="btn btn-sm btn-outline" onclick="toggleM0PerfSpPanel(false)">关闭</button>
               </div>
             </div>
           </div>
           <div class="form-group">
-            ${multiSelectPanelHtml('m0PerfTeamFilter', {label:'团队', options: m0PerfTeamList(), selected: m0PerfTeamFilter, placeholder:'全部团队', searchPlaceholder:'搜索团队', onChange: function(arr){ m0PerfTeamFilterChange(arr); }})}
+            ${multiSelectPanelHtml('m0PerfTeamFilter', {label:'团队', options: m0PerfTeamList(), selected: m0PerfTeamFilter, placeholder:'全部团队', searchPlaceholder:'搜索团队', defaultKey:'m0Perf.team', onChange: function(arr){ m0PerfTeamFilterChange(arr); }})}
           </div>
           <div class="form-group">
             <label style="font-size:12px;color:var(--gray-500)">排序</label>
@@ -14635,8 +14669,7 @@ function m0PerfSpClear() {
   m0PerfRefresh();
 }
 function saveM0PerfSpDefault() {
-  try { localStorage.setItem('sop_m0perf_sp_filter', JSON.stringify(m0PerfSpFilter)); showToast('已保存为默认视图(' + m0PerfSpFilter.length + ' 名)', 'success'); }
-  catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+  saveFilterDefault('m0Perf.salesperson', m0PerfSpFilter);
   toggleM0PerfSpPanel(false);
 }
 function m0PerfTeamList() {
@@ -14865,11 +14898,9 @@ function mgrPerfYearOptions() {
   return arr.map(y => `<option value="${y}" ${y === mgrPerfYear ? 'selected' : ''}>${y}</option>`).join('');
 }
 function renderMgrPerf() {
+  mgrPerfTeamFilter = takeFilterDefault('mgrPerf.team', mgrPerfTeamFilter);
   if (mgrPerfTab === 'attachments') { renderMgrPerfAttachmentsTab(); return; }
-  if (!mgrPerfSpFilterLoaded) {
-    try { const s = localStorage.getItem('sop_mgrperf_sp_filter'); mgrPerfSpFilter = s ? JSON.parse(s) : []; } catch (e) { mgrPerfSpFilter = []; }
-    mgrPerfSpFilterLoaded = true;
-  }
+  mgrPerfSpFilter = takeFilterDefault('mgrPerf.salesperson', mgrPerfSpFilter);
   const curYear = prevMonth().year.toString();
   if (!mgrPerfYear || mgrPerfYearOptions().indexOf('value="' + mgrPerfYear + '"') < 0) mgrPerfYear = curYear;
   const isMatrix = mgrPerfTab === 'matrix';
@@ -14909,13 +14940,13 @@ function renderMgrPerf() {
               </div>
               <div id="mgrPerfSpList"></div>
               <div style="display:flex;gap:6px;margin-top:10px;border-top:1px solid var(--gray-100);padding-top:10px">
-                <button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="saveMgrPerfSpDefault()">💾 保存为默认视图</button>
+                ${(hasPermission('admin')) ? `<button type="button" class="btn btn-sm btn-primary" style="flex:1" onclick="saveMgrPerfSpDefault()">💾 保存为默认视图</button>` : `<span style="flex:1;font-size:12px;color:var(--gray-400);align-self:center">默认筛选仅管理员可设置</span>`}
                 <button type="button" class="btn btn-sm btn-outline" onclick="toggleMgrPerfSpPanel(false)">关闭</button>
               </div>
             </div>
           </div>
           <div class="form-group">
-            ${multiSelectPanelHtml('mgrPerfTeamFilter', {label:'团队', options: mgrPerfTeamList(), selected: mgrPerfTeamFilter, placeholder:'全部团队', searchPlaceholder:'搜索团队', onChange: function(arr){ mgrPerfTeamFilterChange(arr); }})}
+            ${multiSelectPanelHtml('mgrPerfTeamFilter', {label:'团队', options: mgrPerfTeamList(), selected: mgrPerfTeamFilter, placeholder:'全部团队', searchPlaceholder:'搜索团队', defaultKey:'mgrPerf.team', onChange: function(arr){ mgrPerfTeamFilterChange(arr); }})}
           </div>
           <div class="form-group">
             <label style="font-size:12px;color:var(--gray-500)">排序</label>
@@ -15543,8 +15574,7 @@ function mgrPerfSpClear() {
   mgrPerfRefresh();
 }
 function saveMgrPerfSpDefault() {
-  try { localStorage.setItem('sop_mgrperf_sp_filter', JSON.stringify(mgrPerfSpFilter)); showToast('已保存为默认视图(' + mgrPerfSpFilter.length + ' 名)', 'success'); }
-  catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+  saveFilterDefault('mgrPerf.salesperson', mgrPerfSpFilter);
   toggleMgrPerfSpPanel(false);
 }
 function mgrPerfTeamList() {
