@@ -791,8 +791,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805141012';
-const APP_VERSION = '1.42.8'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805142228';
+const APP_VERSION = '1.42.9'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 function saveCoreConfigCache() {
   try {
@@ -2976,7 +2976,8 @@ async function deleteReport(type, reportId) {
 // ============ Summary ============
 let summaryTab = 'byPerson';
 let summaryData = null;
-let summaryFilters = {dept:'', person:'', channel:''};
+let summaryFilters = {dept:'', person:'', channel:[]};
+let summaryChannelOptions = { reg: [], merge: [] };
 let mergeSummaryData = null;
 
 function renderSummary() {
@@ -3019,13 +3020,13 @@ function renderSummary() {
     <div id="sumSubFilters"></div>
     <div id="sumResults"></div>`;
   // Reset filters when type changes
-  summaryFilters = {dept:'', person:'', channel:''};
+  summaryFilters = {dept:'', person:'', channel:[]};
   loadSummary();
 }
 
 function onSummaryTypeChange() {
   // Reset sub-filters when report type changes
-  summaryFilters = {dept:'', person:'', channel:''};
+  summaryFilters = {dept:'', person:'', channel:[]};
   loadSummary();
 }
 
@@ -3061,10 +3062,11 @@ function renderSubFilters() {
   if (summaryTab === 'merge') {
     const depts = getUniqueDepartments();
     const allChannels = [...new Set([...getChannels('daily').map(ch => ch.name), ...getChannels('weekly').map(ch => ch.name)])];
-    let h = '<div class="card" style="margin-bottom:16px"><div class="card-body"><div class="filter-bar">';
+    summaryChannelOptions.merge = allChannels;
+    let h = '<div class="card filter-card" style="margin-bottom:16px"><div class="card-body"><div class="filter-bar">';
     h += `<div class="form-group"><label>筛选部门</label><select class="form-control" onchange="summaryFilters.dept=this.value;loadMergeSummary()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}" ${summaryFilters.dept===d?'selected':''}>${d}</option>`).join('')}</select></div>`;
-    h += `<div class="form-group"><label>筛选渠道</label><select class="form-control" onchange="summaryFilters.channel=this.value;loadMergeSummary()"><option value="">全部渠道</option>${allChannels.map(c => `<option value="${c}" ${summaryFilters.channel===c?'selected':''}>${c}</option>`).join('')}</select></div>`;
-    h += `<div class="form-group"><label>&nbsp;</label><button class="btn btn-outline btn-sm" onclick="summaryFilters={dept:'',person:'',channel:''};loadMergeSummary()">🔄 重置筛选</button></div>`;
+    h += summaryChannelPanelHtml('merge', allChannels);
+    h += `<div class="form-group"><label>&nbsp;</label><button class="btn btn-outline btn-sm" onclick="summaryFilters={dept:'',person:'',channel:[]};loadMergeSummary()">🔄 重置筛选</button></div>`;
     h += '</div></div></div>';
     container.innerHTML = h;
     return;
@@ -3073,28 +3075,115 @@ function renderSubFilters() {
   const depts = getUniqueDepartments();
   const persons = getUniquePersons();
   const channels = getUniqueChannels(type);
+  summaryChannelOptions.reg = channels;
 
-  let html = '<div class="card" style="margin-bottom:16px"><div class="card-body"><div class="filter-bar">';
+  let html = '<div class="card filter-card" style="margin-bottom:16px"><div class="card-body"><div class="filter-bar">';
 
   if (summaryTab === 'byPerson') {
     // Filter by department and channel
     html += `<div class="form-group"><label>筛选部门</label><select class="form-control" onchange="summaryFilters.dept=this.value;loadSummary()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}" ${summaryFilters.dept===d?'selected':''}>${d}</option>`).join('')}</select></div>`;
-    html += `<div class="form-group"><label>筛选渠道</label><select class="form-control" onchange="summaryFilters.channel=this.value;loadSummary()"><option value="">全部渠道</option>${channels.map(c => `<option value="${c}" ${summaryFilters.channel===c?'selected':''}>${c}</option>`).join('')}</select></div>`;
+    html += summaryChannelPanelHtml('reg', channels);
   } else if (summaryTab === 'byDepartment') {
     // Filter by channel and person
-    html += `<div class="form-group"><label>筛选渠道</label><select class="form-control" onchange="summaryFilters.channel=this.value;loadSummary()"><option value="">全部渠道</option>${channels.map(c => `<option value="${c}" ${summaryFilters.channel===c?'selected':''}>${c}</option>`).join('')}</select></div>`;
+    html += summaryChannelPanelHtml('reg', channels);
     html += `<div class="form-group"><label>筛选人员</label><select class="form-control" onchange="summaryFilters.person=this.value;loadSummary()"><option value="">全部人员</option>${persons.map(p => `<option value="${p.name}" ${summaryFilters.person===p.name?'selected':''}>${p.name}${p.dept?'('+p.dept+')':''}</option>`).join('')}</select></div>`;
   } else if (summaryTab === 'byChannel') {
     // Filter by department and person
     html += `<div class="form-group"><label>筛选部门</label><select class="form-control" onchange="summaryFilters.dept=this.value;loadSummary()"><option value="">全部部门</option>${depts.map(d => `<option value="${d}" ${summaryFilters.dept===d?'selected':''}>${d}</option>`).join('')}</select></div>`;
     html += `<div class="form-group"><label>筛选人员</label><select class="form-control" onchange="summaryFilters.person=this.value;loadSummary()"><option value="">全部人员</option>${persons.map(p => `<option value="${p.name}" ${summaryFilters.person===p.name?'selected':''}>${p.name}${p.dept?'('+p.dept+')':''}</option>`).join('')}</select></div>`;
   }
-  html += `<div class="form-group"><label>&nbsp;</label><button class="btn btn-outline btn-sm" onclick="summaryFilters={dept:'',person:'',channel:''};loadSummary()">🔄 重置筛选</button></div>`;
+  html += `<div class="form-group"><label>&nbsp;</label><button class="btn btn-outline btn-sm" onclick="summaryFilters={dept:'',person:'',channel:[]};loadSummary()">🔄 重置筛选</button></div>`;
   html += '</div></div></div>';
   container.innerHTML = html;
 }
 
-function loadSummary() {
+// ============ 团队汇总:渠道多选筛选面板 ============
+function summaryChannelPanelHtml(prefix, channels) {
+  summaryChannelOptions[prefix] = channels;
+  const sel = summaryFilters.channel || [];
+  const label = sel.length ? (sel.length <= 3 ? '已选 ' + sel.length + ' 个:' + sel.join(',') : '已选 ' + sel.length + ' 个渠道') : '全部渠道';
+  return `<div class="form-group" style="position:relative">
+    <label style="font-size:12px;color:var(--gray-500)">筛选渠道</label>
+    <button type="button" class="form-control" id="${prefix}ChannelBtn" onclick="toggleSummaryChannelPanel('${prefix}')" style="text-align:left;cursor:pointer;color:var(--gray-700)">${label}</button>
+    <div id="${prefix}ChannelPanel" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:260px;max-height:340px;overflow:auto;padding:10px">
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <input type="text" class="form-control form-control-sm" id="${prefix}ChannelSearch" placeholder="搜索渠道" oninput="renderSummaryChannelPanel('${prefix}')" style="flex:1;min-width:0">
+        <button type="button" class="btn btn-sm btn-outline" onclick="summaryChannelSelectAll('${prefix}')">全选</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="summaryChannelClear('${prefix}')">清空</button>
+      </div>
+      <div id="${prefix}ChannelList"></div>
+    </div>
+  </div>`;
+}
+function toggleSummaryChannelPanel(prefix, force) {
+  const p = document.getElementById(prefix + 'ChannelPanel');
+  if (!p) return;
+  if (typeof force === 'boolean') p.style.display = force ? 'block' : 'none';
+  else p.style.display = p.style.display === 'block' ? 'none' : 'block';
+  if (p.style.display === 'block') { renderSummaryChannelPanel(prefix); const s = document.getElementById(prefix + 'ChannelSearch'); if (s) s.value = ''; }
+}
+function renderSummaryChannelPanel(prefix) {
+  const list = summaryChannelOptions[prefix] || [];
+  const sEl = document.getElementById(prefix + 'ChannelSearch');
+  const q = (sEl ? sEl.value : '').trim();
+  const box = document.getElementById(prefix + 'ChannelList');
+  if (!box) return;
+  const filtered = q ? list.filter(n => n.indexOf(q) >= 0) : list;
+  if (!filtered.length) { box.innerHTML = '<div style="padding:8px;color:var(--gray-400);font-size:12px">无匹配渠道</div>'; return; }
+  const arr = summaryFilters.channel || [];
+  box.innerHTML = filtered.map(n => {
+    const absIdx = list.indexOf(n);
+    const chk = arr.indexOf(n) >= 0 ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:4px;font-size:13px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background='transparent'"><input type="checkbox" ${chk} onchange="summaryChannelToggle('${prefix}', ${absIdx})"> ${esc(n)}</label>`;
+  }).join('');
+}
+function summaryChannelToggle(prefix, idx) {
+  const list = summaryChannelOptions[prefix] || [];
+  const ch = list[idx];
+  if (ch == null) return;
+  if (!summaryFilters.channel) summaryFilters.channel = [];
+  const i = summaryFilters.channel.indexOf(ch);
+  if (i >= 0) summaryFilters.channel.splice(i, 1); else summaryFilters.channel.push(ch);
+  updateSummaryChannelLabel(prefix);
+  summaryChannelRefresh(prefix);
+}
+function summaryChannelSelectAll(prefix) {
+  const list = summaryChannelOptions[prefix] || [];
+  const sEl = document.getElementById(prefix + 'ChannelSearch');
+  const q = (sEl ? sEl.value : '').trim();
+  const filtered = q ? list.filter(n => n.indexOf(q) >= 0) : list;
+  const set = new Set(summaryFilters.channel || []); filtered.forEach(n => set.add(n));
+  summaryFilters.channel = [...set];
+  updateSummaryChannelLabel(prefix);
+  renderSummaryChannelPanel(prefix); summaryChannelRefresh(prefix);
+}
+function summaryChannelClear(prefix) {
+  summaryFilters.channel = [];
+  updateSummaryChannelLabel(prefix);
+  renderSummaryChannelPanel(prefix); summaryChannelRefresh(prefix);
+}
+function updateSummaryChannelLabel(prefix) {
+  const btn = document.getElementById(prefix + 'ChannelBtn');
+  if (!btn) return;
+  const sel = summaryFilters.channel || [];
+  btn.innerHTML = sel.length ? (sel.length <= 3 ? '已选 ' + sel.length + ' 个:' + sel.join(',') : '已选 ' + sel.length + ' 个渠道') : '全部渠道';
+}
+function summaryChannelRefresh(prefix) {
+  if (prefix === 'merge') recomputeMergeSummary();
+  else recomputeSummary();
+}
+// 点击空白区域自动收起渠道多选面板
+document.addEventListener('click', function(e) {
+  ['reg', 'merge'].forEach(function(prefix) {
+    var panel = document.getElementById(prefix + 'ChannelPanel');
+    if (!panel || panel.style.display !== 'block') return;
+    var btn = document.getElementById(prefix + 'ChannelBtn');
+    if (panel.contains(e.target) || (btn && btn.contains(e.target))) return;
+    panel.style.display = 'none';
+  });
+});
+
+function recomputeSummary() {
   const type = document.getElementById('sumType').value;
   const s = document.getElementById('sumStart').value;
   const e = document.getElementById('sumEnd').value;
@@ -3119,8 +3208,8 @@ function loadSummary() {
     if(!byD[r.department])byD[r.department]={department:r.department,newLeads:0,effectiveContacts:0,abIntent:0,closedCustomers:0,dealAmount:0,targetAmount:0,count:0};
     byP[r.name].count++;byD[r.department].count++;
     (r.channels||[]).forEach(ch => {
-      // Apply channel filter (skip this channel)
-      if (summaryFilters.channel && ch.channel !== summaryFilters.channel) return;
+      // Apply channel filter (skip channels not in the selected set)
+      if (summaryFilters.channel.length && summaryFilters.channel.indexOf(ch.channel) < 0) return;
 
       const nl=parseFloat(ch.newLeads)||0,ec=parseFloat(ch.effectiveContacts)||0,ab=parseFloat(ch.abIntent)||0,cc=parseFloat(ch.closedCustomers)||0,da=parseFloat(ch.dealAmount)||0,ta=parseFloat(ch.targetAmount)||0;
       byP[r.name].newLeads+=nl;byP[r.name].effectiveContacts+=ec;byP[r.name].abIntent+=ab;byP[r.name].closedCustomers+=cc;byP[r.name].dealAmount+=da;byP[r.name].targetAmount+=ta;
@@ -3134,8 +3223,11 @@ function loadSummary() {
   const cr=o=>{o.contactToAbRate=o.effectiveContacts>0?(o.abIntent/o.effectiveContacts*100).toFixed(1)+'%':'0%';o.completionRate=o.targetAmount>0?(o.dealAmount/o.targetAmount*100).toFixed(1)+'%':'0%'};
   Object.values(byP).forEach(cr);Object.values(byD).forEach(cr);Object.values(byC).forEach(cr);cr(t);
   summaryData = {byPerson:Object.values(byP),byDepartment:Object.values(byD),byChannel:Object.values(byC),totals:t,count:reports.length,reports:reports};
-  renderSubFilters();
   renderSummaryTab();
+}
+function loadSummary() {
+  recomputeSummary();
+  renderSubFilters();
 }
 
 function switchTab(tab){
@@ -3152,7 +3244,7 @@ function switchTab(tab){
   // Clear filters not relevant to the new tab
   if (tab === 'byPerson') { summaryFilters.person = ''; }
   else if (tab === 'byDepartment') { summaryFilters.dept = ''; }
-  else if (tab === 'byChannel') { summaryFilters.channel = ''; }
+  else if (tab === 'byChannel') { summaryFilters.channel = []; }
   document.querySelectorAll('.summary-tab').forEach(t=>t.classList.remove('active'));
   const tabEl = document.querySelector(`.summary-tab[data-t="${tab}"]`);
   if (tabEl) tabEl.classList.add('active');
@@ -3199,7 +3291,7 @@ function renderSummaryTab() {
       const dept=r.department||'未分组';
       if(!deptChannels[dept])deptChannels[dept]={};
       (r.channels||[]).forEach(ch=>{
-        if(summaryFilters.channel && ch.channel!==summaryFilters.channel) return;
+        if(summaryFilters.channel.length && summaryFilters.channel.indexOf(ch.channel) < 0) return;
         const cn=ch.channel;
         if(!deptChannels[dept][cn])deptChannels[dept][cn]={channel:cn,newLeads:0,effectiveContacts:0,abIntent:0,closedCustomers:0,dealAmount:0,targetAmount:0,count:0};
         const x=deptChannels[dept][cn];
@@ -3300,7 +3392,7 @@ function renderSummaryTab() {
 }
 
 // ============ Merge Summary (日报+周报合并统计) ============
-function loadMergeSummary() {
+function recomputeMergeSummary() {
   const ds=document.getElementById('mergeDailyStart').value;
   const de=document.getElementById('mergeDailyEnd').value;
   const ws=document.getElementById('mergeWeeklyStart').value;
@@ -3329,7 +3421,7 @@ function loadMergeSummary() {
       deptSummary[dept].count++;
       if(source==='daily')deptSummary[dept].dailyCount++;else deptSummary[dept].weeklyCount++;
       (r.channels||[]).forEach(ch=>{
-        if(summaryFilters.channel&&ch.channel!==summaryFilters.channel)return;
+        if(summaryFilters.channel.length&&summaryFilters.channel.indexOf(ch.channel)<0)return;
         const key=ch.channel+'|||'+source;
         if(!deptChannels[dept][key])deptChannels[dept][key]={channel:ch.channel,source:source,newLeads:0,effectiveContacts:0,abIntent:0,closedCustomers:0,dealAmount:0,targetAmount:0,count:0};
         const x=deptChannels[dept][key];
@@ -3346,8 +3438,11 @@ function loadMergeSummary() {
   Object.values(deptSummary).forEach(cr);
   mergeSummaryData={deptChannels,deptSummary,dailyCount:dailyReports.length,weeklyCount:weeklyReports.length,dailyRange:{start:ds,end:de},weeklyRange:{start:ws,end:we}};
   summaryData=mergeSummaryData;
-  renderSubFilters();
   renderSummaryTab();
+}
+function loadMergeSummary() {
+  recomputeMergeSummary();
+  renderSubFilters();
 }
 
 function renderMergeSummary() {
@@ -3450,7 +3545,7 @@ function exportMergeSummaryCSV() {
   rows.push('# 日报时间: '+(dailyRange.start||'全部')+' 至 '+(dailyRange.end||'全部')+' ('+dailyCount+'条)');
   rows.push('# 周报时间: '+(weeklyRange.start||'全部')+' 至 '+(weeklyRange.end||'全部')+' ('+weeklyCount+'条)');
   rows.push('# 筛选部门: '+(summaryFilters.dept||'全部部门'));
-  rows.push('# 筛选渠道: '+(summaryFilters.channel||'全部渠道'));
+  rows.push('# 筛选渠道: '+(summaryFilters.channel.length?summaryFilters.channel.join(', '):'全部渠道'));
   rows.push('# 导出时间: '+new Date().toLocaleString('zh-CN'));
   const headers=['渠道','来源','报告数','新增线索','有效建联','AB意向','成交客户','成交金额','建联转AB率','目标金额','完成率'];
   Object.keys(deptChannels).sort().forEach(dept=>{
@@ -3481,7 +3576,7 @@ function exportMergeSummaryCSV() {
   if(dailyRange.start)nameParts.push('日报'+dailyRange.start+'至'+dailyRange.end);
   if(weeklyRange.start)nameParts.push('周报'+weeklyRange.start+'至'+weeklyRange.end);
   if(summaryFilters.dept)nameParts.push(summaryFilters.dept);
-  if(summaryFilters.channel)nameParts.push(summaryFilters.channel);
+  if(summaryFilters.channel.length)nameParts.push(summaryFilters.channel.join(','));
   nameParts.push(new Date().toISOString().split('T')[0]);
   a.download=nameParts.join('_')+'.csv';
   document.body.appendChild(a);
@@ -3662,7 +3757,7 @@ function exportSummaryCSV() {
       const dept = r.department || '未分组';
       if (!deptChannels[dept]) deptChannels[dept] = {};
       (r.channels || []).forEach(ch => {
-        if (summaryFilters.channel && ch.channel !== summaryFilters.channel) return;
+        if (summaryFilters.channel.length && summaryFilters.channel.indexOf(ch.channel) < 0) return;
         const cn = ch.channel;
         if (!deptChannels[dept][cn]) deptChannels[dept][cn] = {channel:cn, newLeads:0, effectiveContacts:0, abIntent:0, closedCustomers:0, dealAmount:0, targetAmount:0, count:0};
         const x = deptChannels[dept][cn];
@@ -3716,7 +3811,7 @@ function exportSummaryCSV() {
   // Add filter info at top
   const deptLabel = summaryFilters.dept || '全部部门';
   const personLabel = summaryFilters.person || '全部人员';
-  const channelLabel = summaryFilters.channel || '全部渠道';
+  const channelLabel = summaryFilters.channel.length ? summaryFilters.channel.join(', ') : '全部渠道';
   const filterInfo = [
     '# ' + typeLabel + '汇总数据导出',
     '# 查询区间: ' + (s||'全部') + ' 至 ' + (e||'全部'),
@@ -3737,7 +3832,7 @@ function exportSummaryCSV() {
   if (s || e) nameParts.push((s||'') + '至' + (e||''));
   if (summaryFilters.dept) nameParts.push(summaryFilters.dept);
   if (summaryFilters.person) nameParts.push(summaryFilters.person);
-  if (summaryFilters.channel) nameParts.push(summaryFilters.channel);
+  if (summaryFilters.channel.length) nameParts.push(summaryFilters.channel.join(','));
   nameParts.push(new Date().toISOString().split('T')[0]);
   a.download = nameParts.join('_') + '.csv';
   a.click();
