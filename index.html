@@ -159,8 +159,9 @@ tr:hover > .perf-freeze{
 .filter-bar .form-group{margin-bottom:0;min-width:140px}
 .filter-bar .form-group label{font-size:12px}
 /* 含下拉/弹层(select、人员多选面板等)的筛选卡片不得被 .card{overflow:hidden} 裁剪:
-   否则弹出的下拉会被卡片底边裁掉、被下方表格遮挡。filter-card 放开裁剪;弹层自带 z-index 即可浮于表之上。 */
-.filter-card{overflow:visible !important}
+   否则弹出的下拉会被卡片底边裁掉、被下方表格遮挡。filter-card 放开裁剪;弹层自带 z-index 即可浮于表之上。
+   ⚠️ position:relative + z-index 使整个筛选卡片(含溢出弹层)层叠于后续兄弟卡片(表格等)之上,防止 DOM 后续元素遮挡弹层。 */
+.filter-card{overflow:visible !important;position:relative;z-index:10}
 .filter-card .filter-bar{position:relative;z-index:2}
 /* 日报/周报数据:报告卡片默认两列网格(容器变窄→表格列宽自然缩小) */
 .dw-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
@@ -791,8 +792,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805180128';
-const APP_VERSION = '1.42.21'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805181115';
+const APP_VERSION = '1.42.22'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -2402,7 +2403,7 @@ function renderReportForm(type) {
   const isMobile = window.innerWidth <= 768;
   body.innerHTML = `<div style="max-width:1500px">
     <div id="formAlert"></div>
-    <div class="card" style="margin-bottom:16px"><div class="card-body" style="padding:14px 18px">
+    <div class="card filter-card" style="margin-bottom:16px"><div class="card-body" style="padding:14px 18px">
       <div class="filter-bar">
         ${reportUserControl}
         <div class="form-group"><label>${isDaily?'填写日期':'周报起始日(周一)'}</label><input type="date" class="form-control" id="reportDate" value="${isDaily?today:ws}" ${isDaily?'onchange="checkExistingReport(\'daily\')"':'onchange="onWeekStartChange();checkExistingReport(\'weekly\')"'}></div>
@@ -2940,7 +2941,7 @@ function editReport(type, reportId) {
 
   showModal(`编辑${isDaily?'日报':'周报'} - ${r.name} (${dl})`, `
     <div id="editAlert"></div>
-    <div class="card" style="margin-bottom:16px"><div class="card-body">
+    <div class="card filter-card" style="margin-bottom:16px"><div class="card-body">
       <div class="filter-bar">
         <div class="form-group"><label>${isDaily?'填写日期':'周报起始日(周一)'}</label><input type="date" class="form-control" id="editDate" value="${isDaily?r.reportDate:r.weekStart}" ${isDaily?'':'onchange="onEditWeekStartChange()"'}></div>
         ${!isDaily?`<div class="form-group"><label>周报结束日</label><input type="date" class="form-control" id="editWeekEnd" value="${r.weekEnd}" readonly></div>`:''}
@@ -3026,7 +3027,7 @@ function renderSummary() {
   const body = document.getElementById('contentBody');
   const today = localYMD();
   const mAgo = localYMD(new Date(Date.now()-30*86400000));
-  body.innerHTML = `<div class="card" id="regularFilterCard" style="margin-bottom:20px"><div class="card-body">
+  body.innerHTML = `<div class="card filter-card" id="regularFilterCard" style="margin-bottom:20px"><div class="card-body">
     <div class="filter-bar">
       <div class="form-group"><label>类型</label><select class="form-control" id="sumType" onchange="onSummaryTypeChange()"><option value="daily">日报</option><option value="weekly">周报</option></select></div>
       <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="sumStart" value="${mAgo}"></div>
@@ -3042,7 +3043,7 @@ function renderSummary() {
       <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="loadSummary()">🔍 汇总查询</button></div>
       <div class="form-group"><label>&nbsp;</label>${hasPermission('exportData')?'<button class="btn btn-success" onclick="exportSummaryCSV()">📥 导出汇总数据</button>':''}</div>
     </div></div></div>
-    <div class="card" id="mergeFilterCard" style="margin-bottom:20px;display:none"><div class="card-body">
+    <div class="card filter-card" id="mergeFilterCard" style="margin-bottom:20px;display:none"><div class="card-body">
     <div class="filter-bar">
       <div class="form-group"><label>日报开始</label><input type="date" class="form-control" id="mergeDailyStart" value="${mAgo}"></div>
       <div class="form-group"><label>日报结束</label><input type="date" class="form-control" id="mergeDailyEnd" value="${today}"></div>
@@ -7974,7 +7975,7 @@ async function renderMgrReport() {
   const mgrMonths = Object.keys(_mgrMonths).sort().reverse();
 
   body.innerHTML = `
-    <div class="card" style="margin-bottom:20px">
+    <div class="card filter-card" style="margin-bottom:20px">
       <div class="card-header"><h4 id="mgrFormTitle">📝 新建管理周报</h4></div>
       <div class="card-body">
         <div class="filter-bar" style="margin-bottom:16px">
@@ -8009,7 +8010,7 @@ async function renderMgrReport() {
         </div>
       </div>
     </div>
-    <div class="card">
+    <div class="card filter-card">
       <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <h4>📋 已提交的管理周报</h4>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -8632,7 +8633,7 @@ async function renderVisitStats() {
       <div class="summary-tab visit-stats-tab ${visitStatsTab==='person'?'active':''}" onclick="switchVisitStatsTab('person', this)">👤 个人拜访类型统计</div>
       <div class="summary-tab visit-stats-tab ${visitStatsTab==='m0visit'?'active':''}" onclick="switchVisitStatsTab('m0visit', this)">👥 M0陪访统计</div>
     </div>
-    <div class="card" style="margin-bottom:20px"><div class="card-body">
+    <div class="card filter-card" style="margin-bottom:20px"><div class="card-body">
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap" id="visitDateBtns">
         <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('today', this)">今天</button>
         <button class="btn btn-sm btn-outline" onclick="setVisitDateRange('yesterday', this)">昨天</button>
@@ -15135,7 +15136,7 @@ function renderMgrPerfAttachmentsTab() {
   });
 
   document.getElementById('contentBody').innerHTML = `
-    <div class="card">
+    <div class="card filter-card">
       <div class="card-header">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <h4>管理绩效统计</h4>
