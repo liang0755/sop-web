@@ -791,8 +791,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805152325';
-const APP_VERSION = '1.42.10'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805152807';
+const APP_VERSION = '1.42.11'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 function saveCoreConfigCache() {
   try {
@@ -3242,6 +3242,8 @@ function multiSelectToggle(id, idx) {
   if (i >= 0) st.selected.splice(i, 1); else st.selected.push(v);
   updateMultiSelectLabel(id);
   if (st.onChange) st.onChange(st.selected.slice());
+  // onChange 可能整体重绘页面(导致面板被重建为收起),这里强制重新展开并保持勾选态
+  const p = document.getElementById(id + 'Panel'); if (p) { p.style.display = 'block'; renderMultiSelectPanel(id); }
 }
 function multiSelectAll(id) {
   const st = __msState[id]; if (!st) return;
@@ -3252,12 +3254,14 @@ function multiSelectAll(id) {
   st.selected = [...set];
   updateMultiSelectLabel(id); renderMultiSelectPanel(id);
   if (st.onChange) st.onChange(st.selected.slice());
+  const p = document.getElementById(id + 'Panel'); if (p) { p.style.display = 'block'; renderMultiSelectPanel(id); }
 }
 function multiSelectClear(id) {
   const st = __msState[id]; if (!st) return;
   st.selected = [];
   updateMultiSelectLabel(id); renderMultiSelectPanel(id);
   if (st.onChange) st.onChange(st.selected.slice());
+  const p = document.getElementById(id + 'Panel'); if (p) { p.style.display = 'block'; renderMultiSelectPanel(id); }
 }
 function updateMultiSelectLabel(id) {
   const btn = document.getElementById(id + 'Btn'); if (!btn) return;
