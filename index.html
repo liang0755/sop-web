@@ -667,7 +667,7 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
   <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="菜单">☰</button>
   <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
   <div class="sidebar" id="sidebar">
-    <div class="sidebar-header"><div class="logo-icon" id="sidebarLogo">📊</div><h2 id="sidebarTitle">SOP数据管理</h2><p id="sidebarSubtitle">Team SOP System</p></div>
+    <div class="sidebar-header"><div class="logo-icon" id="sidebarLogo">📊</div><h2 id="sidebarTitle">SOP数据管理</h2><p id="sidebarSubtitle">Team SOP System</p><p id="appVersionTag" style="font-size:11px;color:#94a3b8;margin-top:6px;letter-spacing:.5px;opacity:.85">v—</p></div>
     <div class="sidebar-refresh"><button class="sidebar-refresh-btn" id="sidebarRefreshBtn" onclick="sidebarRefresh()">🔄 刷新数据</button><span class="sidebar-refresh-time" id="sidebarRefreshTime"></span></div>
     <div class="nav-menu">
       <div class="nav-section-title">工作台</div>
@@ -791,7 +791,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805120440';
+const APP_CACHE_VER = '20260805125314';
+const APP_VERSION = '1.42.3'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 function saveCoreConfigCache() {
   try {
@@ -1766,6 +1767,8 @@ function applyBrandConfig() {
   if (ll) { ll.innerHTML = bc.loginLogo && bc.loginLogo.startsWith('data:image') ? `<img src="${bc.loginLogo}" alt="logo">` : (bc.loginLogo || '📊'); }
   if (lt) lt.textContent = bc.loginTitle;
   if (ls) ls.textContent = bc.loginSubtitle;
+  const av = document.getElementById('appVersionTag');
+  if (av) av.textContent = 'v' + APP_VERSION;
 }
 
 // ============ Field & Channel Config ============
@@ -9707,10 +9710,12 @@ let csOnlyBlank = false; // 客户汇总"未填报"筛选开关:true=只显示 �
 // 团队筛选(空=全部);人员多选(空数组=全部)
 const sbTeamFilters = { src: '', profile: '', sig: '' };
 const sbPersonFilters = { src: [], profile: [] };
-const sbMonthFilters = { src: [], profile: [] }; // 月份多选筛选,空=全部12月
-// 全部团队(来自记录的 team + 用户 department,跨年稳定)
+const sbMonthFilters = { src: { start: '01', end: '12' }, profile: { start: '01', end: '12' } }; // 月份区间筛选(start~end 含两端,默认1-12月=全部)
+// 全部团队(权威清单 SALES_KA_TEAMS + 来自记录的 team + 用户 department,跨年稳定)
 function sbAllTeams() {
   const teams = new Set();
+  // 权威团队清单(始终可用,不依赖销售数据是否加载):KA 三大团队
+  (SALES_KA_TEAMS || []).forEach(t => { if (t) teams.add(t); });
   (cloudData.salesRecords || []).forEach(r => {
     const sp = (r.salesperson || '').trim(); if (!sp) return;
     const t = r.team || getSalesTeam(sp); if (t) teams.add(t);
@@ -9804,33 +9809,18 @@ function sbTeamRefresh(prefix) {
   else if (prefix === 'sig') { const y = document.getElementById('sigYear') ? document.getElementById('sigYear').value : new Date().getFullYear().toString(); renderSalesSigningTable(y); }
 }
 
-// ===== 月份多选筛选(客户来源汇总 / 客户画像汇总)=====
-function sbMonthChipsHtml(prefix) {
-  const sel = sbMonthFilters[prefix] || [];
-  const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
-  let h = '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">';
-  months.forEach(m => {
-    const active = sel.includes(m) ? ' active' : '';
-    h += `<button type="button" class="month-chip${active}" onclick="sbToggleMonth('${prefix}','${m}')">${parseInt(m, 10)}月</button>`;
-  });
-  const allActive = sel.length === 0 ? ' active' : '';
-  h += `<button type="button" class="month-chip month-chip-all${allActive}" onclick="sbClearMonths('${prefix}')">全部</button>`;
-  h += '</div>';
-  return h;
+// ===== 月份区间筛选(客户来源汇总 / 客户画像汇总)=====
+// 用「开始月 ~ 结束月」区间筛选,比逐个勾选(快捷键)更方便;表格只显示区间内的月份列
+function sbMonthRangeHtml(prefix) {
+  const mf = sbMonthFilters[prefix] || { start: '01', end: '12' };
+  const opts = which => CS_MONTHS.map(x => `<option value="${x}" ${x === mf[which] ? 'selected' : ''}>${parseInt(x, 10)}月</option>`).join('');
+  return `<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份区间</label><div style="display:flex;align-items:center;gap:6px"><select class="form-control" id="${prefix}MonthStart" onchange="sbMonthRangeChange('${prefix}','start',this.value)">${opts('start')}</select><span style="color:var(--gray-500)">至</span><select class="form-control" id="${prefix}MonthEnd" onchange="sbMonthRangeChange('${prefix}','end',this.value)">${opts('end')}</select></div></div>`;
 }
-function sbToggleMonth(prefix, m) {
-  const arr = sbMonthFilters[prefix];
-  const i = arr.indexOf(m);
-  if (i >= 0) arr.splice(i, 1); else arr.push(m);
-  const box = document.getElementById(prefix + 'MonthChips');
-  if (box) box.innerHTML = sbMonthChipsHtml(prefix);
-  sbMonthRefresh(prefix);
-}
-function sbClearMonths(prefix) {
-  sbMonthFilters[prefix] = [];
-  const box = document.getElementById(prefix + 'MonthChips');
-  if (box) box.innerHTML = sbMonthChipsHtml(prefix);
-  sbMonthRefresh(prefix);
+function sbMonthRangeChange(prefix, which, val) {
+  if (!sbMonthFilters[prefix]) sbMonthFilters[prefix] = { start: '01', end: '12' };
+  sbMonthFilters[prefix][which] = val;
+  if (prefix === 'src') refreshSalesBoardSource();
+  else if (prefix === 'profile') refreshSalesBoardProfile();
 }
 
 async function renderSalesBoard() {
@@ -9961,7 +9951,7 @@ function renderSalesBoardSource() {
         ${sbPersonPanelHtml('src', sbPersonLabel('src'))}
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesBoardSource()">重置为今年</button></div>
         <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportSourceSummary()">📤 导出</button></div>
-        <div class="form-group" style="min-width:100%;flex-basis:100%;margin-bottom:0"><label style="font-size:12px;color:var(--gray-500)">月份(可多选,默认全部)</label><div id="srcMonthChips">${sbMonthChipsHtml('src')}</div></div>
+        ${sbMonthRangeHtml('src')}
       </div></div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="srcTableWrap"></div></div></div>`;
@@ -10007,13 +9997,13 @@ function aggregateSourceSummary(year) {
   // 第二步:按客户来源 + 月份聚合(单数=去重客户数)
   // 只认可表单配置中的来源选项;非配置值(如导入残留的"生意通/销货宝")归入"(未设置)"
   const cfgSrc = (cloudData.formConfig && cloudData.formConfig.customerTags && cloudData.formConfig.customerTags.customerSource) || [];
-  const selMonths = sbMonthFilters.src || [];
+  const selMonths = csActiveMonths('source');
   const srcMap = {};
   Object.values(groups).forEach(g => {
     let src = g.customerSource || '(未设置)';
     if (src !== '(未设置)' && !cfgSrc.includes(src)) src = '(未设置)';
     const mm = g.docMonth.slice(5);
-    if (selMonths.length && !selMonths.includes(mm)) return; // 月份筛选
+    if (!selMonths.includes(mm)) return; // 月份区间筛选
     if (!srcMap[src]) srcMap[src] = {};
     if (!srcMap[src][mm]) srcMap[src][mm] = { countSet: new Set(), amount: 0 };
     srcMap[src][mm].countSet.add(g.customer);
@@ -10025,10 +10015,12 @@ function aggregateSourceSummary(year) {
 // ===== 客户来源/画像汇总 表头排序 =====
 const CS_MONTHS = ['01','02','03','04','05','06','07','08','09','10','11','12'];
 let csSort = { source: { col: 'name', dir: 'asc' }, profile: { col: 'name', dir: 'asc' } };
-// 当前生效的月份列表(受月份筛选控制):空选=全部12月
+// 当前生效的月份列表(受月份区间筛选控制):start~end 含两端,默认1-12月=全部
 function csActiveMonths(board) {
-  const sel = sbMonthFilters[board === 'source' ? 'src' : 'profile'] || [];
-  return sel.length ? sel : CS_MONTHS;
+  const mf = sbMonthFilters[board === 'source' ? 'src' : 'profile'] || { start: '01', end: '12' };
+  let lo = mf.start || '01', hi = mf.end || '12';
+  if (lo > hi) { const t = lo; lo = hi; hi = t; } // 用户颠倒起止也兜底
+  return CS_MONTHS.filter(m => m >= lo && m <= hi);
 }
 function csSortVal(map, label, col, board) {
   const months = csActiveMonths(board);
@@ -10200,7 +10192,7 @@ function renderSalesBoardProfile() {
         ${sbPersonPanelHtml('profile', sbPersonLabel('profile'))}
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesBoardProfile()">重置为今年</button></div>
         <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportProfileSummary()">📤 导出</button></div>
-        <div class="form-group" style="min-width:100%;flex-basis:100%;margin-bottom:0"><label style="font-size:12px;color:var(--gray-500)">月份(可多选,默认全部)</label><div id="profileMonthChips">${sbMonthChipsHtml('profile')}</div></div>
+        ${sbMonthRangeHtml('profile')}
       </div></div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="profileTableWrap"></div></div></div>`;
@@ -10246,13 +10238,13 @@ function aggregateProfileSummary(year) {
   // 第二步:按客户画像 + 月份聚合(单数=去重客户数)
   // 只认可表单配置中的画像选项;非配置值归入"(未设置)"
   const cfgProfile = (cloudData.formConfig && cloudData.formConfig.customerTags && cloudData.formConfig.customerTags.customerProfile) || [];
-  const selMonths = sbMonthFilters.profile || [];
+  const selMonths = csActiveMonths('profile');
   const profileMap = {};
   Object.values(groups).forEach(g => {
     let prof = g.customerProfile || '(未设置)';
     if (prof !== '(未设置)' && !cfgProfile.includes(prof)) prof = '(未设置)';
     const mm = g.docMonth.slice(5);
-    if (selMonths.length && !selMonths.includes(mm)) return; // 月份筛选
+    if (!selMonths.includes(mm)) return; // 月份区间筛选
     if (!profileMap[prof]) profileMap[prof] = {};
     if (!profileMap[prof][mm]) profileMap[prof][mm] = { countSet: new Set(), amount: 0 };
     profileMap[prof][mm].countSet.add(g.customer);
