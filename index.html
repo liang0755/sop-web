@@ -792,8 +792,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805184904';
-const APP_VERSION = '1.42.23'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805185622';
+const APP_VERSION = '1.42.24'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -3313,20 +3313,23 @@ function updateMultiSelectLabel(id) {
 }
 // ===== 全局筛选默认(云端共享,仅 admin 可保存,所有账号生效) =====
 // 每个 key 仅在本会话首次调用时应用云端默认;之后返回当前值,保留个人会话内临时改(刷新后回到全局默认)
+// ⚠️ Firebase RTDB REST API 中 URL 路径的 . 会被当作嵌路径分隔符(非 key 名的一部分)
+//    统一通过 __fdSafeKey() 将 defaultKey 中的 . 替换为 _ ，确保 PUT 到 /filterDefaults/{safeKey}.json 操作的是扁平叶子节点
 const __filterDefaultApplied = {};
+function __fdSafeKey(key) { return (key || '').replace(/\./g, '_'); }
 function takeFilterDefault(key, cur) {
   if (Object.prototype.hasOwnProperty.call(__filterDefaultApplied, key)) return (cur || []);
   __filterDefaultApplied[key] = true;
-  const d = cloudData.filterDefaults && cloudData.filterDefaults[key];
+  const d = cloudData.filterDefaults && cloudData.filterDefaults[__fdSafeKey(key)];
   return (Array.isArray(d) && d.length) ? d.slice() : (cur || []);
 }
 function saveFilterDefault(key, arr) {
   if (!hasPermission('admin')) { showToast('仅管理员可保存全局默认筛选', 'error'); return; }
   arr = arr || [];
   if (!cloudData.filterDefaults) cloudData.filterDefaults = {};
-  cloudData.filterDefaults[key] = arr.slice ? arr.slice() : arr;
+  cloudData.filterDefaults[__fdSafeKey(key)] = arr.slice ? arr.slice() : arr;
   // 使用 PUT 而非 PATCH：filterDefaults 是顶层节点，PUT 可创建/覆盖，避免对新节点 PATCH 返回 400
-  fetch(FB_BASE + '/filterDefaults/' + encodeURIComponent(key) + '.json', {
+  fetch(FB_BASE + '/filterDefaults/' + encodeURIComponent(__fdSafeKey(key)) + '.json', {
     method:'PUT', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(cloudData.filterDefaults[key])
   }).then(function(res) {
@@ -3342,16 +3345,17 @@ function saveFilterDefault(key, arr) {
 function takeSelectDefault(key, cur) {
   if (Object.prototype.hasOwnProperty.call(__filterDefaultApplied, key)) return cur;
   __filterDefaultApplied[key] = true;
-  const d = cloudData.filterDefaults && cloudData.filterDefaults[key];
+  const d = cloudData.filterDefaults && cloudData.filterDefaults[__fdSafeKey(key)];
   // 数组型 defaultKey 存的是数组(给 multiSelectPanel 用);字符串型存的是字符串/数字(给 select 用)
   if (Array.isArray(d)) return cur; // 跳过数组型的 key
   return (d !== undefined && d !== null && d !== '') ? String(d) : cur;
 }
 function saveSelectDefault(key, val) {
   if (!hasPermission('admin')) { showToast('仅管理员可保存全局默认筛选', 'error'); return; }
+  const safe = __fdSafeKey(key);
   if (!cloudData.filterDefaults) cloudData.filterDefaults = {};
-  cloudData.filterDefaults[key] = (val !== undefined && val !== null) ? String(val) : '';
-  fetch(FB_BASE + '/filterDefaults/' + encodeURIComponent(key) + '.json', {
+  cloudData.filterDefaults[safe] = (val !== undefined && val !== null) ? String(val) : '';
+  fetch(FB_BASE + '/filterDefaults/' + encodeURIComponent(safe) + '.json', {
     method:'PUT', headers:{'Content-Type':'application/json'},
     body: JSON.stringify(cloudData.filterDefaults[key])
   }).then(function(res) {
