@@ -791,8 +791,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805162826';
-const APP_VERSION = '1.42.14'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805163617';
+const APP_VERSION = '1.42.15'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -9927,6 +9927,9 @@ let csSortState = null; // 客户汇总排序状态:{ col: 'docMonth'|'salespers
 let csOnlyBlank = false; // 客户汇总"未填报"筛选开关:true=只显示 客户来源/品类/客户画像 任一未设置的聚合行
 let csTeamFilter = [];   // 客户汇总:按部门筛选(空=全部)
 let csSalesFilter = [];  // 客户汇总:按人员筛选(空=全部)
+let csSourceFilter = [];   // 客户汇总:按客户来源筛选(空=全部,多选)
+let csCategoryFilter = []; // 客户汇总:按品类筛选(空=全部,多选)
+let csProfileFilter = [];  // 客户汇总:按客户画像筛选(空=全部,多选)
 
 // ===== 客户来源汇总 / 客户画像汇总 / 销售签约分析 的团队&人员筛选 =====
 // 团队筛选(空=全部);人员多选(空数组=全部)
@@ -10804,6 +10807,7 @@ function renderSalesBoardCustomer() {
   csMonths = [def.month];
   const note = (cloudData.formConfig && cloudData.formConfig.customerSummaryNote) || '';
   const noteHtml = esc(note).replace(/\n/g, '<br>');
+  const csTagCfg = (cloudData.formConfig && cloudData.formConfig.customerTags) || { customerSource: [], category: [], customerProfile: [] };
   const cont = document.getElementById('sbContent');
   cont.innerHTML = `
     <div class="card filter-card">
@@ -10814,6 +10818,9 @@ function renderSalesBoardCustomer() {
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年份</label><select class="form-control" id="csYear" onchange="csRefilter()">${yearOpts}</select></div>
         ${multiSelectPanelHtml('csTeam', {label:'部门', options:teams, selected:csTeamFilter, placeholder:'全部部门', searchPlaceholder:'搜索部门', onChange:function(arr){csTeamFilter=arr;csRefilter();}})}
         ${multiSelectPanelHtml('csSales', {label:'人员', options:sps, selected:csSalesFilter, placeholder:'全部人员', searchPlaceholder:'搜索人员', onChange:function(arr){csSalesFilter=arr;csRefilter();}})}
+        ${multiSelectPanelHtml('csSource', {label:'客户来源', options:(csTagCfg.customerSource||[]), selected:csSourceFilter, placeholder:'全部来源', searchPlaceholder:'搜索来源', onChange:function(arr){csSourceFilter=arr;csRefilter();}})}
+        ${multiSelectPanelHtml('csCategory', {label:'品类', options:(csTagCfg.category||[]), selected:csCategoryFilter, placeholder:'全部品类', searchPlaceholder:'搜索品类', onChange:function(arr){csCategoryFilter=arr;csRefilter();}})}
+        ${multiSelectPanelHtml('csProfile', {label:'客户画像', options:(csTagCfg.customerProfile||[]), selected:csProfileFilter, placeholder:'全部画像', searchPlaceholder:'搜索画像', onChange:function(arr){csProfileFilter=arr;csRefilter();}})}
         <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetCustomerSummary()">重置</button></div>
         <div class="cs-switch-wrap">
           <label class="cs-switch" title="只显示 客户来源 / 品类 / 客户画像 中任一未设置的行">
@@ -10857,12 +10864,13 @@ function resetCustomerSummary() {
   csRenderMonthChips();
   csTeamFilter = [];
   csSalesFilter = [];
+  csSourceFilter = [];
+  csCategoryFilter = [];
+  csProfileFilter = [];
   csOnlyBlank = false;
-  const blankEl = document.getElementById('csOnlyBlank');
-  if (blankEl) blankEl.checked = false;
   csPage = 1;
   csSelectedKeys.clear();
-  renderCustomerSummary();
+  renderSalesBoardCustomer();
 }
 
 function csTagColorStyle(val, opts) {
@@ -10909,6 +10917,9 @@ function renderCustomerSummary() {
     if (months.length && !months.includes(mm)) return false;
     if (dept.length && !dept.some(t => normDeptKey(r.team || '') === normDeptKey(t))) return false;
     if (person.length && person.indexOf(r.salesperson || '') < 0) return false;
+    if (csSourceFilter.length && csSourceFilter.indexOf(r.customerSource || '') < 0) return false;
+    if (csCategoryFilter.length && csCategoryFilter.indexOf(r.category || '') < 0) return false;
+    if (csProfileFilter.length && csProfileFilter.indexOf(r.customerProfile || '') < 0) return false;
     return true;
   });
   const groups = {};
