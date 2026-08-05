@@ -791,9 +791,10 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805160512';
-const APP_VERSION = '1.42.13'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805162826';
+const APP_VERSION = '1.42.14'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
+const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
   try {
     const payload = { t: Date.now(), v: 1,
@@ -812,6 +813,7 @@ function loadCoreConfigCache() {
     if (!raw) return false;
     const p = JSON.parse(raw);
     if (!p || p.v !== 1 || typeof p.t !== 'number') return false;
+    if (Date.now() - p.t > CORE_CONFIG_CACHE_TTL) return false;  // 过期 → 走网络拉取最新配置,确保其他账号改动能在 TTL 内自动同步
     cloudData.formConfig = p.formConfig || cloudData.formConfig;
     cloudData.brandConfig = p.brandConfig || cloudData.brandConfig;
     cloudData.departments = p.departments || cloudData.departments;
@@ -1005,6 +1007,7 @@ async function loadCoreDataFresh() {
     normalizeHonorRecords();
     saveCoreConfigCache(); // 缓存本次拉取到的(已迁移)核心配置,加速复访
     isCloudAvailable = true;
+    if (dataLoaded) rerenderCurrentPage(); // 应用已加载完成后,配置有更新则自动重绘当前页(让其他账号看到最新配置)
   } catch(e) {
     console.warn('Core config fetch failed:', e.message);
     cloudData.formConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -1089,7 +1092,7 @@ function needsAllReports() {
 
 // ---------- 报表数据本地缓存:加速普通成员打开系统 / 填写日报周报 ----------
 const REPORTS_CACHE_KEY = 'sop_reports_cache_' + APP_CACHE_VER;
-const REPORTS_CACHE_TTL = 30 * 60 * 1000; // 30 分钟
+const REPORTS_CACHE_TTL = 5 * 60 * 1000; // 5 分钟(原 30 分钟):缩短以加快跨账号同步,代价是 Firebase 读次数略增
 function saveReportsCache() {
   try {
     const payload = {
@@ -1187,9 +1190,12 @@ async function loadReportData(opts) {
   saveReportsCache();
 }
 
-// 后台静默刷新(不阻塞界面):拿到最新数据后更新内存 + 缓存,并刷新当前已打开的报表页
+// 后台静默刷新(不阻塞界面):拿到最新数据后更新内存 + 缓存,并刷新当前已打开的页面
+// 覆盖范围:报表数据 + 核心配置(formConfig 等) + 角色相关评级/绩效记录,确保任一数据改动后其他账号都能自动同步
 async function refreshReportsInBackground() {
+  if (!dataLoaded) return; // 仅在应用已加载完成后做增量刷新,避免初始化阶段重复拉取
   try {
+    // 报表数据
     const data = await fetchReportsFromCloud();
     cloudData.dailyReports = data.daily;
     cloudData.weeklyReports = data.weekly;
@@ -1197,12 +1203,37 @@ async function refreshReportsInBackground() {
     if (data.mgr !== undefined) cloudData.mgrReports = data.mgr;
     if (data.sales !== undefined) cloudData.salesRecords = data.sales;
     saveReportsCache();
-    const activePage = document.querySelector('.nav-item.active')?.dataset.page;
-    // 重绘当前所在页面(覆盖全部模块,不再只限 4 个),确保后台拉到的最新数据真正渲染到屏幕
-    if (activePage) {
-      ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf,mgrReport:renderMgrReportList}[activePage]||(()=>{}))();
-    }
+    // 核心配置(修 formConfig 永不过期导致的跨账号不同步)
+    await loadCoreDataFresh();
+    // 评级/绩效记录(角色相关,原后台刷新不重拉 → 改动后其他账号看不到)
+    await loadRoleScopedData();
+    // 重绘当前所在页面(覆盖全部模块),确保后台拉到的最新数据真正渲染到屏幕
+    rerenderCurrentPage();
   } catch(e) {}
+}
+
+// 是否允许后台自动重绘:避免打断用户正在进行的输入/未保存编辑
+function canAutoRerender() {
+  const appLayout = document.getElementById('appLayout');
+  if (!appLayout || appLayout.classList.contains('hidden')) return false;
+  const a = document.activeElement;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')) return false;
+  if ((sgPending && Object.keys(sgPending).length) || (m0Pending && Object.keys(m0Pending).length)) return false;
+  return true;
+}
+function rerenderCurrentPage() {
+  if (!canAutoRerender()) return;
+  const activePage = document.querySelector('.nav-item.active')?.dataset.page;
+  if (!activePage) return;
+  ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf,mgrReport:renderMgrReportList}[activePage]||(()=>{}))();
+}
+
+// 后台定时增量刷新:让"已打开页面的其他账号"也能自动同步(配合 config 5min + reports 5min TTL)
+let _bgPollStarted = false;
+function startBackgroundPolling() {
+  if (_bgPollStarted) return;
+  _bgPollStarted = true;
+  setInterval(() => { if (dataLoaded) refreshReportsInBackground(); }, 120000); // 每 2 分钟
 }
 
 // Full load (for refresh scenarios - always re-fetches everything)
@@ -1217,6 +1248,7 @@ async function loadCloudData() {
   await _coreDataPromise;
   await loadRoleScopedData();
   await loadReportData({force: true});
+  startBackgroundPolling(); // 启动后台定时增量刷新(让已打开页面的其他账号自动同步)
   return cloudData;
 }
 
