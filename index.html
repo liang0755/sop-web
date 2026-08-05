@@ -792,8 +792,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805192738';
-const APP_VERSION = '1.42.27'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805194428';
+const APP_VERSION = '1.42.28'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1018,9 +1018,10 @@ async function loadCoreDataFresh() {
     cloudData.filterDefaults = (fdData && typeof fdData === 'object') ? fdData : {};
     if (!cloudData.filterDefaults || typeof cloudData.filterDefaults !== 'object') cloudData.filterDefaults = {};
     filterDefaultsLoaded = true; // 标记云端默认值已就绪:此后 takeFilterDefault/takeSelectDefault 才会应用并锁守卫
+    applyFilterDefaultsToRenderedDOM(); // 直接回填已渲染 DOM(绕过整页重绘时序/canAutoRerender 拦截)
     saveCoreConfigCache(); // 缓存本次拉取到的(已迁移)核心配置,加速复访
     isCloudAvailable = true;
-    if (dataLoaded) rerenderCurrentPage(); // 应用已加载完成后,配置有更新则自动重绘当前页(让其他账号看到最新配置)
+    if (dataLoaded) rerenderCurrentPage(true); // 应用已加载完成后,强制重绘当前页(让其他账号看到最新配置与默认值)
   } catch(e) {
     console.warn('Core config fetch failed:', e.message);
     cloudData.formConfig = JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -1237,8 +1238,8 @@ function canAutoRerender() {
   if ((sgPending && Object.keys(sgPending).length) || (m0Pending && Object.keys(m0Pending).length)) return false;
   return true;
 }
-function rerenderCurrentPage() {
-  if (!canAutoRerender()) return;
+function rerenderCurrentPage(force) {
+  if (!force && !canAutoRerender()) return;
   const activePage = document.querySelector('.nav-item.active')?.dataset.page;
   if (!activePage) return;
   ({dashboard:renderDashboard,dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,visitData:renderVisitData,visitStats:renderVisitStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf,mgrReport:renderMgrReportList}[activePage]||(()=>{}))();
@@ -1265,6 +1266,10 @@ async function loadCloudData() {
   await loadRoleScopedData();
   await loadReportData({force: true});
   startBackgroundPolling(); // 启动后台定时增量刷新(让已打开页面的其他账号自动同步)
+  // 数据已全部加载完成:此时 filterDefaults 必然就绪(缓存命中或后台 loadCoreDataFresh 已完成),
+  // 强制重绘一次当前页 + 直接回填默认值到 DOM,确保保存的全局筛选默认值必定生效(不依赖首屏渲染时序)
+  applyFilterDefaultsToRenderedDOM();
+  rerenderCurrentPage(true);
   return cloudData;
 }
 
@@ -3240,10 +3245,12 @@ document.addEventListener('click', function(e) {
 
 // ============ 通用多选面板组件(供所有筛选类下拉复用) ============
 const __msState = {};
+const __msDefaultMap = {}; // id -> defaultKey(多选面板存默认用)
 function msVal(o){ return (typeof o==='object' && o!==null)? o.v : o; }
 function msLbl(o){ return (typeof o==='object' && o!==null)? o.label : o; }
 function multiSelectPanelHtml(id, cfg) {
   // cfg: {label, options:[], selected:[], placeholder, searchPlaceholder, onChange}
+  if (cfg.defaultKey) __msDefaultMap[id] = cfg.defaultKey;
   __msState[id] = {
     options: (cfg.options || []).slice(),
     selected: (cfg.selected || []).slice(),
@@ -3383,9 +3390,37 @@ function saveSelectDefault(key, val) {
   });
 }
 // 生成紧贴 select 右侧的 💾 存默认按钮 HTML(仅 admin 可见)
+// 同时登记 id→defaultKey 映射,供 filterDefaults 加载完成后直接回填已渲染 DOM(不依赖整页重绘时序)
+const __selectDefaultMap = {};
 function selectSaveBtnHtml(id, defaultKey) {
   if (!defaultKey || !hasPermission('admin')) return '';
+  __selectDefaultMap[id] = defaultKey;
   return `<button type="button" title="保存当前选择为全局默认" style="flex-shrink:0;margin-left:4px;border:1px solid var(--gray-300);background:var(--gray-50);border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px;color:var(--gray-600);line-height:22px" onclick="saveSelectDefault('${defaultKey}',document.getElementById('${id}')?.value)">💾</button>`;
+}
+// filterDefaults 加载完成后,直接将默认值回填到已渲染的原生 <select>(绕过整页重绘时序/canAutoRerender 拦截)
+function applyFilterDefaultsToRenderedDOM() {
+  if (!filterDefaultsLoaded) return;
+  Object.keys(__selectDefaultMap).forEach(function(id) {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const key = __selectDefaultMap[id];
+    const val = cloudData.filterDefaults[__fdSafeKey(key)];
+    if (val !== undefined && val !== null && val !== '') {
+      const s = String(val);
+      if (sel.value !== s) { sel.value = s; }
+    }
+  });
+  // 多选面板:回填 __msState[id].selected 并刷新标签(数组型默认值)
+  Object.keys(__msDefaultMap).forEach(function(id) {
+    const st = __msState[id];
+    if (!st) return;
+    const key = __msDefaultMap[id];
+    const arr = cloudData.filterDefaults[__fdSafeKey(key)];
+    if (Array.isArray(arr) && arr.length) {
+      st.selected = arr.slice();
+      try { updateMultiSelectLabel(id); renderMultiSelectPanel(id); } catch(e) {}
+    }
+  });
 }
 
 // 点击空白区域自动收起所有通用多选面板
