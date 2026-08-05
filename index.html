@@ -792,8 +792,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805194428';
-const APP_VERSION = '1.42.28'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805202040';
+const APP_VERSION = '1.42.29'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1522,6 +1522,8 @@ function navTo(page) {
   document.title = (titles[page] ? titles[page] + ' · ' : '') + '团队SOP数据管理系统';
   ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
   closeSidebar();
+  // 进入任意页面后立即把云端保存的全局筛选默认值回填到已渲染的 select/多选面板(绕过整页重绘时序),确保"保存默认"必定生效
+  if (filterDefaultsLoaded) applyFilterDefaultsToRenderedDOM();
   // Background refresh: silently fetch latest data (non-blocking, only for read-only pages)
   silentRefresh(page, true);
 }
@@ -3296,6 +3298,7 @@ function renderMultiSelectPanel(id) {
   }).join('');
 }
 function multiSelectToggle(id, idx) {
+  if (Object.prototype.hasOwnProperty.call(__msDefaultMap, id)) __fdDirty['__ms__' + id] = true;
   const st = __msState[id]; if (!st) return;
   const v = msVal(st.options[idx]); if (v == null) return;
   const i = st.selected.indexOf(v);
@@ -3306,6 +3309,7 @@ function multiSelectToggle(id, idx) {
   const p = document.getElementById(id + 'Panel'); if (p) { p.style.display = 'block'; renderMultiSelectPanel(id); }
 }
 function multiSelectAll(id) {
+  if (Object.prototype.hasOwnProperty.call(__msDefaultMap, id)) __fdDirty['__ms__' + id] = true;
   const st = __msState[id]; if (!st) return;
   const sEl = document.getElementById(id + 'Search');
   const q = (sEl ? sEl.value : '').trim();
@@ -3317,6 +3321,7 @@ function multiSelectAll(id) {
   const p = document.getElementById(id + 'Panel'); if (p) { p.style.display = 'block'; renderMultiSelectPanel(id); }
 }
 function multiSelectClear(id) {
+  if (Object.prototype.hasOwnProperty.call(__msDefaultMap, id)) __fdDirty['__ms__' + id] = true;
   const st = __msState[id]; if (!st) return;
   st.selected = [];
   updateMultiSelectLabel(id); renderMultiSelectPanel(id);
@@ -3397,10 +3402,23 @@ function selectSaveBtnHtml(id, defaultKey) {
   __selectDefaultMap[id] = defaultKey;
   return `<button type="button" title="保存当前选择为全局默认" style="flex-shrink:0;margin-left:4px;border:1px solid var(--gray-300);background:var(--gray-50);border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px;color:var(--gray-600);line-height:22px" onclick="saveSelectDefault('${defaultKey}',document.getElementById('${id}')?.value)">💾</button>`;
 }
+// 用户在本会话手动改过某筛选(原生 select 或多选面板)后,标记为 dirty,applyFilterDefaultsToRenderedDOM 不再用云端默认值覆盖它
+// (保留个人临时改;刷新页面后 dirty 清空,回到全局默认)。注意:程序化设置 .value 不会触发 change 事件,故不会误标 dirty。
+const __fdDirty = {};
+document.addEventListener('change', function(e) {
+  const id = e.target && e.target.id;
+  if (id && Object.prototype.hasOwnProperty.call(__selectDefaultMap, id)) __fdDirty[id] = true;
+});
+// 取年份类 select 应显示的值:优先云端默认,无则回退 fallbackYear(避免硬性覆盖成计算当前年,导致保存的默认不生效)
+function __fdYearValue(key, fallbackYear) {
+  const dv = cloudData.filterDefaults && cloudData.filterDefaults[__fdSafeKey(key)];
+  return (dv !== undefined && dv !== null && dv !== '') ? String(dv) : (fallbackYear !== undefined ? fallbackYear : '');
+}
 // filterDefaults 加载完成后,直接将默认值回填到已渲染的原生 <select>(绕过整页重绘时序/canAutoRerender 拦截)
 function applyFilterDefaultsToRenderedDOM() {
   if (!filterDefaultsLoaded) return;
   Object.keys(__selectDefaultMap).forEach(function(id) {
+    if (__fdDirty[id]) return; // 本会话用户手动改过,保留其选择,不覆盖云端默认
     const sel = document.getElementById(id);
     if (!sel) return;
     const key = __selectDefaultMap[id];
@@ -3412,6 +3430,7 @@ function applyFilterDefaultsToRenderedDOM() {
   });
   // 多选面板:回填 __msState[id].selected 并刷新标签(数组型默认值)
   Object.keys(__msDefaultMap).forEach(function(id) {
+    if (__fdDirty['__ms__' + id]) return; // 本会话用户手动改过,保留其选择,不覆盖云端默认
     const st = __msState[id];
     if (!st) return;
     const key = __msDefaultMap[id];
@@ -10288,7 +10307,7 @@ function renderSalesBoardStats() {
     <div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><div><h4 style="display:inline">📊 报表看板1 · 销售业绩统计</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">销售员(纵向)× 月份(横向)</span></div><button class="btn btn-outline btn-sm" onclick="exportSalesBoard1()">📤 导出</button></div><div class="card-body"><div class="table-wrap"><table id="sbBoard1"></table></div></div></div>
     <div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><div><h4 style="display:inline">📊 报表看板2 · 团队业绩统计</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">团队/门店(纵向)× 月份(横向),含月目标完成率</span></div><button class="btn btn-outline btn-sm" onclick="exportSalesBoard2()">📤 导出</button></div><div class="card-body"><div class="table-wrap"><table id="sbBoard2"></table></div></div></div>
     <div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><div><h4 style="display:inline">📊 报表看板3 · 团队人效统计</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">团队/门店(纵向)× 月份(横向),含月人数与人均业绩(人效=业绩÷人数)</span></div><button class="btn btn-outline btn-sm" onclick="exportSalesBoard3()">📤 导出</button></div><div class="card-body"><div class="table-wrap"><table id="sbBoard3"></table></div></div></div>`;
-  const yEl = document.getElementById('sbYear'); if (yEl) yEl.value = year;
+  const yEl = document.getElementById('sbYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.stats.year', year);
   document.getElementById('sbMFrom').value = '01';
   document.getElementById('sbMTo').value = '12';
   refreshSalesBoardStats();
@@ -10335,7 +10354,7 @@ function renderSalesBoardSource() {
       </div></div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="srcTableWrap"></div></div></div>`;
-  const yEl = document.getElementById('srcYear'); if (yEl) yEl.value = year;
+  const yEl = document.getElementById('srcYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.source.year', year);
   refreshSalesBoardSource();
 }
 
@@ -10344,7 +10363,7 @@ function resetSalesBoardSource() {
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
-  const yEl = document.getElementById('srcYear'); if (yEl) yEl.value = year;
+  const yEl = document.getElementById('srcYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.source.year', year);
   refreshSalesBoardSource();
 }
 
@@ -10576,7 +10595,7 @@ function renderSalesBoardProfile() {
       </div></div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="profileTableWrap"></div></div></div>`;
-  const yEl = document.getElementById('profileYear'); if (yEl) yEl.value = year;
+  const yEl = document.getElementById('profileYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.profile.year', year);
   refreshSalesBoardProfile();
 }
 
@@ -10585,7 +10604,7 @@ function resetSalesBoardProfile() {
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
-  const yEl = document.getElementById('profileYear'); if (yEl) yEl.value = year;
+  const yEl = document.getElementById('profileYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.profile.year', year);
   refreshSalesBoardProfile();
 }
 
@@ -10741,14 +10760,14 @@ function renderSalesBoardSigning() {
       </div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="sigTableWrap"></div></div></div>`;
-  const yEl = document.getElementById('sigYear'); if (yEl) yEl.value = year;
+  const yEl = document.getElementById('sigYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.signing.year', year);
   renderSalesSigningTable(year);
 }
 function resetSalesSigningYear() {
   const years = [...new Set((cloudData.salesRecords || []).map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
-  const yEl = document.getElementById('sigYear'); if (yEl) yEl.value = year;
+  const yEl = document.getElementById('sigYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.signing.year', year);
   const mfr = sbMonthFilters.sig; if (mfr) { mfr.start = '01'; mfr.end = sbMonthEnd; }
   renderSalesSigningTable(year);
 }
@@ -10993,7 +11012,7 @@ function renderSalesBoardCustomer() {
       </div>
       <div class="card-body"><div class="table-wrap" id="csTableWrap"></div><div id="csBatchBar" class="sticky-submit-bar" style="display:none"></div></div>
     </div>`;
-  const yEl = document.getElementById('csYear'); if (yEl) yEl.value = year;
+  const yEl = document.getElementById('csYear'); if (yEl) yEl.value = __fdYearValue('customerSummary.year', year);
   renderCustomerSummary();
 }
 
@@ -11003,7 +11022,7 @@ function resetCustomerSummary() {
   const curYear = new Date().getFullYear().toString();
   const def = csDefaultMonthState();
   const year = years.includes(def.year) ? def.year : (years.includes(curYear) ? curYear : (years[years.length - 1] || def.year));
-  document.getElementById('csYear').value = year;
+  document.getElementById('csYear').value = __fdYearValue('customerSummary.year', year);
   csMonths = [def.month];
   csRenderMonthChips();
   csTeamFilter = [];
@@ -12468,7 +12487,7 @@ function renderSalesGrade() {
   const curYear = prevMonth().year.toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
   // 应用云端默认值(仅本会话首次)
-  salesGradeYear = takeSelectDefault('salesGrade.year', year);
+  salesGradeYear = takeSelectDefault('salesGrade.year', salesGradeYear || year);
   salesGradeMonth = takeSelectDefault('salesGrade.month', String(salesGradeMonth));
   salesGradeSortBy = takeSelectDefault('salesGrade.sortBy', salesGradeSortBy);
   const yearOpts = years.length ? years.map(y => `<option value="${y}" ${y === salesGradeYear ? 'selected' : ''}>${y}</option>`).join('') : `<option value="${salesGradeYear}">${salesGradeYear}</option>`;
@@ -12496,7 +12515,7 @@ function renderSalesGrade() {
       <div class="card-body">
         <div class="filter-bar">
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><div style="display:flex;align-items:center"><select class="form-control" id="sgYear" onchange="sgYearDispatch()">${yearOpts}</select>${selectSaveBtnHtml('sgYear','salesGrade.year')}</div></div>
-          ${(salesGradeTab==='single'||salesGradeTab==='m0single')?`<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><div style="display:flex;align-items:center"><select class="form-control" id="sgMonth" onchange="salesGradeMonth=parseInt(this.value,10);sgRefreshDispatch()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===salesGradeMonth?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('sgMonth','salesGrade.month')}</div></div>`:''}
+          ${(salesGradeTab==='single'||salesGradeTab==='m0single')?`<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><div style="display:flex;align-items:center"><select class="form-control" id="sgMonth" onchange="salesGradeMonth=parseInt(this.value,10);sgRefreshDispatch()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===Number(salesGradeMonth)?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('sgMonth','salesGrade.month')}</div></div>`:''}
           ${isM0 ? `
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">M0 计算范围</label>
@@ -12544,7 +12563,7 @@ function renderSalesGrade() {
         <div class="table-wrap"><table id="sgTable"></table></div>
       </div>
     </div>`;
-  if (document.getElementById('sgYear')) document.getElementById('sgYear').value = year;
+  if (document.getElementById('sgYear')) document.getElementById('sgYear').value = __fdYearValue('salesGrade.year', year);
   if (salesGradeTab === 'single') refreshSalesGradeSingle();
   else if (salesGradeTab === 'm0matrix') refreshM0Grade();
   else if (salesGradeTab === 'm0single') refreshM0GradeSingle();
@@ -14042,7 +14061,7 @@ function renderSalesPerf() {
     const mount = document.getElementById('m0PerfMount');
     if (mount) renderM0Perf(mount);
   } else {
-    if (document.getElementById('perfYear')) document.getElementById('perfYear').value = perfYear;
+    if (document.getElementById('perfYear')) document.getElementById('perfYear').value = __fdYearValue('salesPerf.year', perfYear);
     perfRefresh();
   }
 }
