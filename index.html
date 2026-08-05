@@ -792,8 +792,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260805202040';
-const APP_VERSION = '1.42.29'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260805202340';
+const APP_VERSION = '1.42.30'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -10307,7 +10307,7 @@ function renderSalesBoardStats() {
     <div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><div><h4 style="display:inline">📊 报表看板1 · 销售业绩统计</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">销售员(纵向)× 月份(横向)</span></div><button class="btn btn-outline btn-sm" onclick="exportSalesBoard1()">📤 导出</button></div><div class="card-body"><div class="table-wrap"><table id="sbBoard1"></table></div></div></div>
     <div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><div><h4 style="display:inline">📊 报表看板2 · 团队业绩统计</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">团队/门店(纵向)× 月份(横向),含月目标完成率</span></div><button class="btn btn-outline btn-sm" onclick="exportSalesBoard2()">📤 导出</button></div><div class="card-body"><div class="table-wrap"><table id="sbBoard2"></table></div></div></div>
     <div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><div><h4 style="display:inline">📊 报表看板3 · 团队人效统计</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">团队/门店(纵向)× 月份(横向),含月人数与人均业绩(人效=业绩÷人数)</span></div><button class="btn btn-outline btn-sm" onclick="exportSalesBoard3()">📤 导出</button></div><div class="card-body"><div class="table-wrap"><table id="sbBoard3"></table></div></div></div>`;
-  const yEl = document.getElementById('sbYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.stats.year', year);
+  const yEl = document.getElementById('sbYear'); if (yEl && !__fdDirty['sbYear']) yEl.value = __fdYearValue('salesBoard.stats.year', year);
   document.getElementById('sbMFrom').value = '01';
   document.getElementById('sbMTo').value = '12';
   refreshSalesBoardStats();
@@ -10354,7 +10354,7 @@ function renderSalesBoardSource() {
       </div></div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="srcTableWrap"></div></div></div>`;
-  const yEl = document.getElementById('srcYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.source.year', year);
+  const yEl = document.getElementById('srcYear'); if (yEl && !__fdDirty['srcYear']) yEl.value = __fdYearValue('salesBoard.source.year', year);
   refreshSalesBoardSource();
 }
 
@@ -10363,7 +10363,7 @@ function resetSalesBoardSource() {
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
-  const yEl = document.getElementById('srcYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.source.year', year);
+  const yEl = document.getElementById('srcYear'); if (yEl && !__fdDirty['srcYear']) yEl.value = __fdYearValue('salesBoard.source.year', year);
   refreshSalesBoardSource();
 }
 
@@ -10595,7 +10595,7 @@ function renderSalesBoardProfile() {
       </div></div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="profileTableWrap"></div></div></div>`;
-  const yEl = document.getElementById('profileYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.profile.year', year);
+  const yEl = document.getElementById('profileYear'); if (yEl && !__fdDirty['profileYear']) yEl.value = __fdYearValue('salesBoard.profile.year', year);
   refreshSalesBoardProfile();
 }
 
@@ -10604,7 +10604,7 @@ function resetSalesBoardProfile() {
   const years = [...new Set(records.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
-  const yEl = document.getElementById('profileYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.profile.year', year);
+  const yEl = document.getElementById('profileYear'); if (yEl && !__fdDirty['profileYear']) yEl.value = __fdYearValue('salesBoard.profile.year', year);
   refreshSalesBoardProfile();
 }
 
@@ -10760,14 +10760,14 @@ function renderSalesBoardSigning() {
       </div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="sigTableWrap"></div></div></div>`;
-  const yEl = document.getElementById('sigYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.signing.year', year);
+  const yEl = document.getElementById('sigYear'); if (yEl && !__fdDirty['sigYear']) yEl.value = __fdYearValue('salesBoard.signing.year', year);
   renderSalesSigningTable(year);
 }
 function resetSalesSigningYear() {
   const years = [...new Set((cloudData.salesRecords || []).map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
   const curYear = new Date().getFullYear().toString();
   const year = years.includes(curYear) ? curYear : (years[years.length - 1] || curYear);
-  const yEl = document.getElementById('sigYear'); if (yEl) yEl.value = __fdYearValue('salesBoard.signing.year', year);
+  const yEl = document.getElementById('sigYear'); if (yEl && !__fdDirty['sigYear']) yEl.value = __fdYearValue('salesBoard.signing.year', year);
   const mfr = sbMonthFilters.sig; if (mfr) { mfr.start = '01'; mfr.end = sbMonthEnd; }
   renderSalesSigningTable(year);
 }
@@ -11012,7 +11012,7 @@ function renderSalesBoardCustomer() {
       </div>
       <div class="card-body"><div class="table-wrap" id="csTableWrap"></div><div id="csBatchBar" class="sticky-submit-bar" style="display:none"></div></div>
     </div>`;
-  const yEl = document.getElementById('csYear'); if (yEl) yEl.value = __fdYearValue('customerSummary.year', year);
+  const yEl = document.getElementById('csYear'); if (yEl && !__fdDirty['csYear']) yEl.value = __fdYearValue('customerSummary.year', year);
   renderCustomerSummary();
 }
 
@@ -11022,7 +11022,7 @@ function resetCustomerSummary() {
   const curYear = new Date().getFullYear().toString();
   const def = csDefaultMonthState();
   const year = years.includes(def.year) ? def.year : (years.includes(curYear) ? curYear : (years[years.length - 1] || def.year));
-  document.getElementById('csYear').value = __fdYearValue('customerSummary.year', year);
+  if (!__fdDirty['csYear']) document.getElementById('csYear').value = __fdYearValue('customerSummary.year', year);
   csMonths = [def.month];
   csRenderMonthChips();
   csTeamFilter = [];
@@ -12563,7 +12563,7 @@ function renderSalesGrade() {
         <div class="table-wrap"><table id="sgTable"></table></div>
       </div>
     </div>`;
-  if (document.getElementById('sgYear')) document.getElementById('sgYear').value = __fdYearValue('salesGrade.year', year);
+  if (document.getElementById('sgYear') && !__fdDirty['sgYear']) document.getElementById('sgYear').value = __fdYearValue('salesGrade.year', year);
   if (salesGradeTab === 'single') refreshSalesGradeSingle();
   else if (salesGradeTab === 'm0matrix') refreshM0Grade();
   else if (salesGradeTab === 'm0single') refreshM0GradeSingle();
@@ -14061,7 +14061,7 @@ function renderSalesPerf() {
     const mount = document.getElementById('m0PerfMount');
     if (mount) renderM0Perf(mount);
   } else {
-    if (document.getElementById('perfYear')) document.getElementById('perfYear').value = __fdYearValue('salesPerf.year', perfYear);
+    if (document.getElementById('perfYear') && !__fdDirty['perfYear']) document.getElementById('perfYear').value = __fdYearValue('salesPerf.year', perfYear);
     perfRefresh();
   }
 }
