@@ -797,8 +797,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260807114129';
-const APP_VERSION = '1.42.39'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260807142644';
+const APP_VERSION = '1.42.40'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -12550,7 +12550,7 @@ function renderSalesGrade() {
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <h4>🎯 销售评级看板</h4>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn btn-sm ${salesGradeTab==='matrix'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='matrix';renderSalesGrade()">升降级矩阵</button>
+            <button class="btn btn-sm ${salesGradeTab==='matrix'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='matrix';renderSalesGrade()">销售升降级看板</button>
             <button class="btn btn-sm ${salesGradeTab==='single'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='single';renderSalesGrade()">单月评级看板</button>
             <button class="btn btn-sm ${salesGradeTab==='m0matrix'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='m0matrix';m0ConfigPanelOpen=false;renderSalesGrade()">M0 升降级看板</button>
             <button class="btn btn-sm ${salesGradeTab==='m0single'?'btn-primary':'btn-outline'}" onclick="salesGradeTab='m0single';m0ConfigPanelOpen=false;renderSalesGrade()">M0 单月评级看板</button>
@@ -12567,7 +12567,7 @@ function renderSalesGrade() {
       <div class="card-body">
         <div class="filter-bar">
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">年度</label><div style="display:flex;align-items:center"><select class="form-control" id="sgYear" onchange="sgYearDispatch()">${yearOpts}</select>${selectSaveBtnHtml('sgYear','salesGrade.year')}</div></div>
-          ${(salesGradeTab==='single'||salesGradeTab==='m0single')?`<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><div style="display:flex;align-items:center"><select class="form-control" id="sgMonth" onchange="salesGradeMonth=parseInt(this.value,10);sgRefreshDispatch()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===Number(salesGradeMonth)?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('sgMonth','salesGrade.month')}</div></div>`:''}
+          ${(salesGradeTab==='single'||salesGradeTab==='m0single'||salesGradeTab==='matrix'||salesGradeTab==='m0matrix')?`<div class="form-group"><label style="font-size:12px;color:var(--gray-500)">月份</label><div style="display:flex;align-items:center"><select class="form-control" id="sgMonth" onchange="salesGradeMonth=parseInt(this.value,10);sgRefreshDispatch()">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===Number(salesGradeMonth)?'selected':''}>${m}月</option>`).join('')}</select>${selectSaveBtnHtml('sgMonth','salesGrade.month')}</div></div>`:''}
           ${isM0 ? `
           <div class="form-group" style="position:relative">
             <label style="font-size:12px;color:var(--gray-500)">M0 计算范围</label>
@@ -12655,19 +12655,19 @@ function sgSpToggle(name) {
   const i = salesGradeSpFilter.indexOf(name);
   if (i >= 0) salesGradeSpFilter.splice(i, 1); else salesGradeSpFilter.push(name);
   const btn = document.getElementById('sgSpBtn'); if (btn) btn.textContent = sgSpLabel();
-  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else if (salesGradeTab === 'm0matrix') refreshM0Grade(); else refreshSalesGrade();
 }
 function sgSpSelectAll() {
   salesGradeSpFilter = sgSpActiveList().slice();
   renderSgSpPanel();
   const btn = document.getElementById('sgSpBtn'); if (btn) btn.textContent = sgSpLabel();
-  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else if (salesGradeTab === 'm0matrix') refreshM0Grade(); else refreshSalesGrade();
 }
 function sgSpClear() {
   salesGradeSpFilter = [];
   renderSgSpPanel();
   const btn = document.getElementById('sgSpBtn'); if (btn) btn.textContent = sgSpLabel();
-  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else if (salesGradeTab === 'm0matrix') refreshM0Grade(); else refreshSalesGrade();
 }
 function saveSgSpDefault() {
   saveFilterDefault('salesGrade.salesperson', salesGradeSpFilter);
@@ -12688,11 +12688,11 @@ function sgTeamList(year) {
 }
 function sgTeamFilterChange(val) {
   salesGradeTeamFilter = val || [];
-  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else if (salesGradeTab === 'm0matrix') refreshM0Grade(); else refreshSalesGrade();
 }
 function sgSortChange(val) {
   salesGradeSortBy = val;
-  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else refreshSalesGrade();
+  if (salesGradeTab === 'single') refreshSalesGradeSingle(); else if (salesGradeTab === 'm0matrix') refreshM0Grade(); else refreshSalesGrade();
 }
 function sgPassTeamFilter(sp) {
   if (!salesGradeTeamFilter.length) return true;
@@ -12899,7 +12899,9 @@ function sgYearDispatch() {
 }
 function sgRefreshDispatch() {
   if (salesGradeTab === 'single') refreshSalesGradeSingle();
+  else if (salesGradeTab === 'm0matrix') refreshM0Grade();
   else if (salesGradeTab === 'm0single') refreshM0GradeSingle();
+  else refreshSalesGrade();
 }
 function sgExportDispatch() {
   if (salesGradeTab === 'single') exportSalesGradeSingle();
@@ -12921,7 +12923,7 @@ function refreshM0Grade() {
   const groups = (cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || [];
   const { base } = buildAllSalesBase(year);
   const statusMap = buildUserStatusMap();
-  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
+  const months = (salesGradeTab === 'm0matrix') ? [salesGradeMonth] : [1,2,3,4,5,6,7,8,9,10,11,12];
   const m0GradeCfg = (cloudData.formConfig && cloudData.formConfig.m0GradeConfig) || [];
   const m0GradeOpts = [''].concat(m0GradeCfg.length ? m0GradeCfg.map(l => l.name) : ['初级M0','中级M0','高级M0']);
   const rows = groups.map(g => {
@@ -13093,7 +13095,7 @@ function refreshSalesGrade() {
     base[sp][m] = (base[sp][m] || 0) + toNum(r.amount);
     spSet.add(sp);
   });
-  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
+  const months = (salesGradeTab === 'matrix') ? [salesGradeMonth] : [1,2,3,4,5,6,7,8,9,10,11,12];
   const rows = [...spSet].filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp)).map(sp => {
     const row = { sp, team: getSalesTeam(sp) || '', roll: {}, single: base[sp] || {} };
     months.forEach(m => {
@@ -13106,7 +13108,8 @@ function refreshSalesGrade() {
   if (salesGradeSortBy === 'team') {
     rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
   } else {
-    rows.sort((a, b) => b.roll[12] - a.roll[12] || a.sp.localeCompare(b.sp, 'zh'));
+    const sortMonth = (salesGradeTab === 'matrix') ? salesGradeMonth : 12;
+    rows.sort((a, b) => b.roll[sortMonth] - a.roll[sortMonth] || a.sp.localeCompare(b.sp, 'zh'));
   }
   let h = '<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">(在职)</span></th><th>团队</th>';
   months.forEach(m => { h += `<th class="num">${m}月</th>`; });
