@@ -797,8 +797,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260807113431';
-const APP_VERSION = '1.42.37'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260807114118';
+const APP_VERSION = '1.42.38'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -13005,7 +13005,7 @@ function refreshM0GradeSingle() {
        + `<td class="num" style="font-weight:600">${fmtSalesMoney(row.v)}</td>`
        + `<td>${badge}<select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="m0Stage('${k}', {grade:this.value})">${gradeOpts}</select></td>`
        + `<td style="text-align:center;font-weight:700;color:${chgColor}">${chgAuto || '-'}</td>`
-       + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:12px;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="m0Stage('${k}', {note:this.value})">${esc(note)}</textarea></td>`
+       + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:13px;color:#dc2626;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="m0Stage('${k}', {note:this.value})">${esc(note)}</textarea></td>`
        + `<td class="sg-prev-col" style="text-align:center">${esc(prevGrade)}</td>`
        + `<td class="sg-prev-col"><span style="font-size:11px;color:var(--gray-500)">${esc(prevNote)}</span></td></tr>`;
   });
@@ -13288,7 +13288,7 @@ function refreshSalesGradeSingle() {
        + `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div></td>`
        + `<td>${badge}<div style="display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:24px;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div></td>`
        + `<td style="text-align:center">${upFlag}</td>`
-       + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:12px;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="sgStage('${k}', {note:this.value})">${esc(note)}</textarea></td>`
+       + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:13px;color:#dc2626;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="sgStage('${k}', {note:this.value})">${esc(note)}</textarea></td>`
        + `<td class="sg-prev-col" style="text-align:center">${esc(prevGrade)}</td>`
        + `<td class="sg-prev-col"><div style="font-size:12px;color:var(--gray-600);white-space:pre-wrap;max-width:240px;max-height:60px;overflow:auto;padding:2px 4px;border-radius:3px">${esc(prevNote) || '<span style="color:var(--gray-300)">-</span>'}</div></td>`
        + `</tr>`;
