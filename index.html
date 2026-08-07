@@ -797,8 +797,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260807164912';
-const APP_VERSION = '1.42.48'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260807172809';
+const APP_VERSION = '1.42.49'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -12608,7 +12608,7 @@ function renderSalesGrade() {
           ${(salesGradeTab==='single'||salesGradeTab==='m0single')?(function(){
             const k = sgBoardNoteKey();
             const v = sgBoardNoteGet(k);
-            return `<div class="form-group" style="flex:1;min-width:260px;max-width:520px">
+            return `<div class="form-group" style="flex:1;min-width:260px">
               <label style="font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:6px">📝 页面备注 <span style="color:var(--gray-400);font-weight:400">(全局唯一,与月份无关,输入即自动存云端)</span></label>
               <textarea class="form-control" id="sgBoardNote" rows="3" placeholder="可填写本期复核要点,关注事项,考核口径说明等"
                 oninput="sgBoardNoteSave(sgBoardNoteKey(), this.value)"
