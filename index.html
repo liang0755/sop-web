@@ -797,8 +797,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260807144018';
-const APP_VERSION = '1.42.43'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260807145637';
+const APP_VERSION = '1.42.44'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -12921,7 +12921,7 @@ function sgNoteText() {
     const cnt = ((cloudData.formConfig.m0Config && cloudData.formConfig.m0Config.groups) || []).length;
     return '说明:M0 看板考核业绩 = <b>M0 人员当月业绩</b> + 所选<b>累加人员当月业绩</b>之和(仅取当月,不滚动 3 月),<b>评级</b>为下拉选择(取值"表单配置-M0评级",修改后先<b>暂存</b>,点"💾 最终保存"才写入云端);<b>升降级</b>为<b>自动</b>按当月评级对比上月评级得出(升级 / 降级 / 持平),不与手动输入联动,' + (cnt ? '' : ' <b style="color:#dc2626">当前未配置 M0 计算范围,请在上方"⚙️ M0 计算范围"中设置,</b>');
   }
-  return `说明:每个单元格为"滚动3个月评级业绩"= 该销售员当月及前 2 个月业绩之和(如 3月 = 1月+2月+3月),纵向仅显示在册<b>在职</b>销售,横向为所选月份区间(${sgMStart}-${sgMEnd}月),每个单元格含:滚动业绩,单月业绩,<b>当月评级</b>(按"表单配置-评级标准配置"自动评定,可手动修改),<b>备注</b>(手动填写);▲升级 / ▼降级 为<b>实时</b>按当月职级对比上月职级自动计算,<b>评级支持"暂存 + 最终保存"</b>:修改评级或点"🔄 按月份自动填充"会先<b>暂存</b>(格子显示 ●暂存,可点 ↺ 恢复为自动评级),最后点"💾 最终保存"才写入;也可"↩️ 放弃改动",`;
+  return `说明:每个单元格为"滚动3个月评级业绩"= 该销售员当月及前 2 个月业绩之和(如 3月 = 1月+2月+3月),纵向仅显示在册<b>在职</b>销售,横向为所选月份区间(${sgMStart}-${sgMEnd}月),每个单元格含:滚动业绩,单月业绩,<b>当月评级</b>(按"表单配置-评级标准配置"自动评定,可手动修改),<b>备注</b>(手动填写);单元格<b>底纹</b>为<b>实时</b>按当月职级对比上月职级自动计算:<b style="color:#dc2626">升级</b>浅红底 / <b style="color:#16a34a">降级</b>浅绿底(持平无底色),<b>评级支持"暂存 + 最终保存"</b>:修改评级或点"🔄 按月份自动填充"会先<b>暂存</b>(格子显示 ●暂存,可点 ↺ 恢复为自动评级),最后点"💾 最终保存"才写入;也可"↩️ 放弃改动",`;
 }
 function refreshM0Grade() {
   const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
@@ -12957,12 +12957,11 @@ function refreshM0Grade() {
       const note = m0EffectiveNote(k, rec.note || '');
       const gradeOpts = m0GradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${(o===grade)?'selected':''}>${o?o:'(未评级)'}</option>`).join('');
       const chgAuto = m0ChgAuto(year, m0, m, grade);
-      const chgColor = chgAuto === '升级' ? '#16a34a' : (chgAuto === '降级' ? '#dc2626' : 'var(--gray-500)');
+      const chgBg = chgAuto === '升级' ? 'background-color:#fdecec' : (chgAuto === '降级' ? 'background-color:#e8f5ec' : '');
       const isPending = !!m0Pending[k];
       const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600">●暂存</span> ` : '';
-      h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div>`
-         + `<div style="margin-top:4px">${badge}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="m0Stage('${k}', {grade:this.value})">${gradeOpts}</select></div>`
-         + `<div style="margin-top:3px;text-align:center;font-size:11px;font-weight:700;color:${chgColor}">${chgAuto || '-'}</div></td>`;
+      h += `<td class="num" style="${chgBg}"><div style="font-weight:600">${fmtSalesMoney(v)}</div>`
+         + `<div style="margin-top:4px">${badge}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="m0Stage('${k}', {grade:this.value})">${gradeOpts}</select></div></td>`;
     });
     totalAll += row.total;
     h += `<td class="num" style="font-weight:700">${fmtSalesMoney(row.total)}</td></tr>`;
@@ -13136,23 +13135,19 @@ function refreshSalesGrade() {
       const p = sgPending[k];
       const grade = rowGrades[m].effName;
       const note = (p && p.note !== undefined) ? p.note : (rec.note || '');
-      let upFlag = '<span style="color:var(--gray-400)">-</span>';
-      if (m === 1) {
-        upFlag = '<span style="color:var(--gray-400)">-</span>';
-      } else {
-        const prevGrade = rowGrades[m - 1].effName;
+      let chgBg = '';
+      if (m > 1) {
         const ci = rowGrades[m].effRank, pi = rowGrades[m - 1].effRank;
-        if (ci > pi) upFlag = '<span style="color:#16a34a">▲升级</span>';
-        else if (ci < pi) upFlag = '<span style="color:#dc2626">▼降级</span>';
-        else upFlag = '<span style="color:var(--gray-400)">-</span>';
+        if (ci > pi) chgBg = 'background-color:#fdecec';
+        else if (ci < pi) chgBg = 'background-color:#e8f5ec';
       }
       const isPending = !!(p && (p.grade !== undefined || p.note !== undefined));
       const canRestore = (!!rec.grade && rec.grade !== auto) || (p && p.grade !== undefined && p.grade !== GRADE_AUTO);
       const restoreBtn = canRestore ? `<button type="button" title="恢复为自动评级" onclick="sgStage('${k}', {grade:GRADE_AUTO})" style="padding:0;width:22px;height:22px;font-size:13px;line-height:1;border:1px solid #d6deeb;border-radius:6px;background:#fff;cursor:pointer;color:var(--gray-500);flex-shrink:0">↺</button>` : '';
       const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600;margin-right:4px">●暂存</span>` : '';
       const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
-      h += `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div>`
-         + `<div style="margin-top:4px;display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:24px;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div><div style="font-size:10px;min-height:14px;line-height:14px;text-align:center;margin-top:2px">${badge}${upFlag}</div></td>`;
+      h += `<td class="num" style="${chgBg}"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div>`
+         + `<div style="margin-top:4px;display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:24px;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div><div style="font-size:10px;min-height:14px;line-height:14px;text-align:center;margin-top:2px">${badge}</div></td>`;
     });
     h += `</tr>`;
   });
