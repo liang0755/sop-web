@@ -487,8 +487,14 @@ tr:hover > .perf-freeze{
   .ch-ref-box{font-size:11px}
 
   /* 销售评级看板·移动端优化 */
-  /* 表格列多(单月8列 / 矩阵多月),强制最小宽度→横向滚动而非挤压变形;table-wrap 已有 overflow-x:auto */
-  #sgTable{min-width:720px}
+  /* 根因:桌面端 #sgTable 用 table-layout:fixed + 窄列,长金额(¥1,234,567)在固定布局下会横向溢出到相邻单元格(td 默认不裁剪)→ 叠字。
+     移动端改为 table-layout:auto:列按内容自适应,金额不再被压进窄列,表格整体超出视口时由 .table-wrap 横向滚动查看,无叠字。桌面端固定比例不变。 */
+  #sgTable{table-layout:auto!important;min-width:0!important}
+  /* 表头与数值列(含金额)禁止换行,保证一行一数据、靠横向滚动而非挤压变形 */
+  #sgTable th{white-space:nowrap}
+  #sgTable td.num{white-space:nowrap}
+  /* 单月备注输入框在移动端限宽,避免备注列过宽导致横向滚动过长(矩阵看板无 textarea,不受影响) */
+  #sgTable textarea{width:160px!important}
   /* 页面备注块内联 flex:1 在竖向堆叠时会被纵向拉伸,重置为不拉伸 */
   .filter-bar .form-group[style*="flex:1"]{flex:none!important}
   /* 月份区间起止下拉在窄屏等比分配宽度,避免溢出 */
@@ -810,8 +816,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260807230826';
-const APP_VERSION = '1.42.52'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260807231802';
+const APP_VERSION = '1.42.53'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
