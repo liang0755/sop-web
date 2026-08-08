@@ -357,7 +357,7 @@ tr:hover > .perf-freeze{
 .ai-msg-file{display:inline-flex;align-items:center;background:var(--gray-100,#f1f5f9);border:1px solid var(--gray-300,#cbd5e1);border-radius:6px;padding:2px 8px;font-size:12px;color:var(--gray-600,#475569)}
 <omitted>
 /* ============ Mobile Navigation ============ */
-.mobile-menu-btn{display:none;position:fixed;top:12px;left:12px;z-index:1001;background:var(--gray-900);color:#fff;border:none;border-radius:10px;width:50px;height:50px;font-size:24px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 2px 12px rgba(0,0,0,.25)}
+.mobile-menu-btn{display:none;position:fixed;bottom:20px;right:20px;z-index:1001;background:var(--gray-900);color:#fff;border:none;border-radius:50%;width:50px;height:50px;font-size:24px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,.3)}
 .sidebar-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:998;opacity:0;transition:opacity .3s}
 .sidebar-overlay.show{display:block;opacity:1}
 
@@ -820,8 +820,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260808095253';
-const APP_VERSION = '1.42.59'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260808105900';
+const APP_VERSION = '1.42.60'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
