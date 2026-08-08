@@ -820,8 +820,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260808092822';
-const APP_VERSION = '1.42.55'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260808093939';
+const APP_VERSION = '1.42.56'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -7394,6 +7394,7 @@ let visitDataLoaded = false; // track whether visitRecords have been fetched
 let visitPageSize = 30;      // 拜访数据每页条数(默认 30,可选 30/50/100/200)
 let visitCurrentPage = 1;    // 拜访数据当前页码
 let visitStatsTab = 'team';  // 拜访统计 tab:team=团队拜访卡点统计 / person=个人拜访类型统计
+let visitStatsPersonFilter = [];  // 个人拜访类型统计:人员多选筛选
 let visitDeptFilter = [];     // 拜访数据:部门多选筛选
 let visitPersonFilter = [];  // 拜访数据:人员多选筛选
 let visitResultFilter = [];  // 拜访数据:拜访结果多选筛选
@@ -8829,6 +8830,7 @@ async function renderVisitStats() {
       <div class="filter-bar">
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitStatsStart" value="${mAgo}"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitStatsEnd" value="${today}"></div>
+        ${visitStatsTab === 'person' ? multiSelectPanelHtml('vsPerson', {label:'人员', options:[...new Set(cloudData.visitRecords.map(r=>r.employee))].sort(), selected:visitStatsPersonFilter, placeholder:'全部人员', defaultKey:'visitStats.person', onChange:function(arr){ visitStatsPersonFilter = arr; loadVisitStats(); }}) : ''}
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="loadVisitStats()">🔍 统计</button></div>
       </div>
     </div></div>
@@ -8892,6 +8894,10 @@ function loadVisitStats() {
     const d = normContactTime(r.contactTime).split(' ')[0];
     return (!s || d >= s) && (!e || d <= e);
   });
+  // 个人拜访类型统计:按选中人员筛选
+  if (visitStatsTab === 'person' && visitStatsPersonFilter.length) {
+    records = records.filter(r => visitStatsPersonFilter.indexOf(r.employee) >= 0);
+  }
   const c = document.getElementById('visitStatsResults');
   if (!records.length) {
     c.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无拜访数据</div>';
