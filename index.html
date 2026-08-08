@@ -820,8 +820,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260808124430';
-const APP_VERSION = '1.42.64'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260808163423';
+const APP_VERSION = '1.42.65'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -8737,6 +8737,10 @@ function renderM0VisitStats() {
           <button class="btn btn-sm ${m0vMode==='week'?'btn-primary':'btn-outline'}" onclick="setM0vMode('week')">按周</button>
           <button class="btn btn-sm ${m0vMode==='month'?'btn-primary':'btn-outline'}" onclick="setM0vMode('month')">按月</button>
         </div>
+        <div style="display:flex;gap:4px;margin-left:auto">
+          <button class="btn btn-sm btn-outline" onclick="exportM0MatrixCsv()">📊 导出CSV</button>
+          <button class="btn btn-sm btn-success" onclick="exportM0MatrixXlsx()">📥 导出Excel</button>
+        </div>
       </div>
     </div>
     <div class="card-body">
@@ -8793,6 +8797,131 @@ function exportM0VisitXlsx() {
   XLSX.utils.book_append_sheet(wb, ws, 'M0陪访明细');
   XLSX.writeFile(wb, 'M0陪访统计_' + (document.getElementById('visitStatsStart')?.value || '') + '_' + (document.getElementById('visitStatsEnd')?.value || '') + '.xlsx');
   showToast('已导出 Excel(' + (aoa.length - 1) + ' 行)', 'success');
+}
+
+// ===== M0 陪访矩阵导出(汇总矩阵: M0 × 周期) =====
+function exportM0MatrixCsv() {
+  const rows = computeM0VisitRows();
+  const fRows = m0vPersonFilter.length ? rows.filter(r => m0vPersonFilter.indexOf(r.m0) >= 0) : rows;
+  if (!fRows.length) { showToast('当前筛选条件下无数据可导出', 'warning'); return; }
+  const s = document.getElementById('visitStatsStart')?.value || '';
+  const e = document.getElementById('visitStatsEnd')?.value || '';
+  // build periods
+  const periods = [];
+  if (m0vMode === 'month') {
+    let sy = 2000, sm = 1, ey = 2099, em = 12;
+    if (s) { const p = s.slice(0, 7).split('-').map(Number); sy = p[0]; sm = p[1]; }
+    if (e) { const p = e.slice(0, 7).split('-').map(Number); ey = p[0]; em = p[1]; }
+    let y = sy, m = sm;
+    while (y < ey || (y === ey && m <= em)) {
+      periods.push(y + '-' + String(m).padStart(2, '0'));
+      m++; if (m > 12) { m = 1; y++; }
+    }
+  } else if (s && e) {
+    let cur = new Date(s + 'T00:00:00');
+    const end = new Date(e + 'T00:00:00');
+    const seen = new Set();
+    while (cur <= end) {
+      const k = m0vWeekKey(localYMD(cur));
+      if (!seen.has(k.key)) { seen.add(k.key); periods.push(k.label); }
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+  const m0Set = [...new Set(fRows.map(r => r.m0))].sort((a, b) => a.localeCompare(b, 'zh'));
+  const m0Map = {};
+  fRows.forEach(r => {
+    if (!m0Map[r.m0]) m0Map[r.m0] = {};
+    const pk = m0vMode === 'month' ? r.date.slice(0, 7) : m0vWeekKey(r.date).key;
+    m0Map[r.m0][pk] = (m0Map[r.m0][pk] || 0) + r.cnt;
+  });
+  const header = ['M0', ...periods, '合计'];
+  const lines = [header.map(csvCell).join(',')];
+  m0Set.forEach(m0 => {
+    const cells = [m0];
+    let rowSum = 0;
+    periods.forEach(p => {
+      const v = m0Map[m0][p] || 0;
+      rowSum += v; cells.push(v);
+    });
+    cells.push(rowSum);
+    lines.push(cells.map(csvCell).join(','));
+  });
+  // 合计行
+  const tCells = ['合计'];
+  let grand = 0;
+  periods.forEach(p => {
+    let colSum = 0;
+    m0Set.forEach(m0 => colSum += (m0Map[m0][p] || 0));
+    tCells.push(colSum); grand += colSum;
+  });
+  tCells.push(grand);
+  lines.push(tCells.map(csvCell).join(','));
+  const blob = new Blob(['' + lines.join('\n')], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'M0陪访矩阵_' + (s||'起') + '_' + (e||'止') + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('已导出 M0 陪访矩阵 CSV', 'success');
+}
+function exportM0MatrixXlsx() {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载,请刷新页面后重试', 'error'); return; }
+  const rows = computeM0VisitRows();
+  const fRows = m0vPersonFilter.length ? rows.filter(r => m0vPersonFilter.indexOf(r.m0) >= 0) : rows;
+  if (!fRows.length) { showToast('当前筛选条件下无数据可导出', 'warning'); return; }
+  const s = document.getElementById('visitStatsStart')?.value || '';
+  const e = document.getElementById('visitStatsEnd')?.value || '';
+  const periods = [];
+  if (m0vMode === 'month') {
+    let sy = 2000, sm = 1, ey = 2099, em = 12;
+    if (s) { const p = s.slice(0, 7).split('-').map(Number); sy = p[0]; sm = p[1]; }
+    if (e) { const p = e.slice(0, 7).split('-').map(Number); ey = p[0]; em = p[1]; }
+    let y = sy, m = sm;
+    while (y < ey || (y === ey && m <= em)) {
+      periods.push(y + '-' + String(m).padStart(2, '0'));
+      m++; if (m > 12) { m = 1; y++; }
+    }
+  } else if (s && e) {
+    let cur = new Date(s + 'T00:00:00');
+    const end = new Date(e + 'T00:00:00');
+    const seen = new Set();
+    while (cur <= end) {
+      const k = m0vWeekKey(localYMD(cur));
+      if (!seen.has(k.key)) { seen.add(k.key); periods.push(k.label); }
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+  const m0Set = [...new Set(fRows.map(r => r.m0))].sort((a, b) => a.localeCompare(b, 'zh'));
+  const m0Map = {};
+  fRows.forEach(r => {
+    if (!m0Map[r.m0]) m0Map[r.m0] = {};
+    const pk = m0vMode === 'month' ? r.date.slice(0, 7) : m0vWeekKey(r.date).key;
+    m0Map[r.m0][pk] = (m0Map[r.m0][pk] || 0) + r.cnt;
+  });
+  const header = ['M0', ...periods, '合计'];
+  const aoa = [header];
+  m0Set.forEach(m0 => {
+    const cells = [m0];
+    let rowSum = 0;
+    periods.forEach(p => {
+      const v = m0Map[m0][p] || 0;
+      rowSum += v; cells.push(v);
+    });
+    cells.push(rowSum);
+    aoa.push(cells);
+  });
+  const tCells = ['合计']; let grand = 0;
+  periods.forEach(p => {
+    let colSum = 0;
+    m0Set.forEach(m0 => colSum += (m0Map[m0][p] || 0));
+    tCells.push(colSum); grand += colSum;
+  });
+  tCells.push(grand);
+  aoa.push(tCells);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'M0陪访矩阵');
+  XLSX.writeFile(wb, 'M0陪访矩阵_' + (s||'起') + '_' + (e||'止') + '.xlsx');
+  showToast('已导出 M0 陪访矩阵 Excel', 'success');
 }
 
 async function renderVisitStats() {
