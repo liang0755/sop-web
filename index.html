@@ -820,8 +820,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260808163423';
-const APP_VERSION = '1.42.65'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260808164012';
+const APP_VERSION = '1.42.66'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -12112,7 +12112,7 @@ function exportSalesBoard2() {
     arr.push(row.dt); arr.push(row.dl); arr.push(dyPct(row.dy));
     aoa.push(arr);
   });
-  // 合计行在 Excel 中也拆为 3 行:目标 / 同比 / 完成率(与看板一致)
+  // 合计行：与数据行列数完全一致(每月3列+合计3列+动态对比3列)
   let gAct = 0, gTgt = 0;
   months.forEach(m => { gAct += (colAct[m] || 0); gTgt += (colTgt[m] || 0); });
   let gDt = 0, gDl = 0; rows.forEach(r => { gDt += r.dt; gDl += r.dl; });
@@ -12124,10 +12124,17 @@ function exportSalesBoard2() {
     Object.keys(sbLastYearTeamMap).forEach(k => { s += sbLastYearTeamMap[k][lyKey] || 0; });
     colLy[m] = s;
   });
-  const tgtRow = ['合计 / 目标']; months.forEach(m => { tgtRow.push(colTgt[m] || 0); }); tgtRow.push(gTgt);
-  const yoyRow = ['合计 / 同比']; months.forEach(m => { const a = colAct[m] || 0, lt = colLy[m] || 0; yoyRow.push(lt > 0 ? Math.round((a - lt) / lt * 1000) / 10 : '-'); }); yoyRow.push(gDl > 0 ? Math.round((gDt - gDl) / gDl * 1000) / 10 : '-');
-  const rateRow = ['合计 / 完成率']; months.forEach(m => { const a = colAct[m] || 0, tg = colTgt[m] || 0; rateRow.push(tg > 0 ? Math.round(a / tg * 1000) / 10 + '%' : '-'); }); rateRow.push(gTgt > 0 ? Math.round(gAct / gTgt * 1000) / 10 + '%' : '-');
-  aoa.push(tgtRow); aoa.push(yoyRow); aoa.push(rateRow);
+  const sumRow = ['合计'];
+  months.forEach(m => {
+    const a = colAct[m] || 0;
+    const tg = colTgt[m] || 0;
+    sumRow.push(a);
+    sumRow.push(tg);
+    sumRow.push(tg > 0 ? Math.round(a / tg * 1000) / 10 + '%' : '-');
+  });
+  sumRow.push(gAct); sumRow.push(gTgt); sumRow.push(gTgt > 0 ? Math.round(gAct / gTgt * 1000) / 10 + '%' : '-');
+  sumRow.push(gDt); sumRow.push(gDl); sumRow.push(gDl > 0 ? Math.round((gDt - gDl) / gDl * 1000) / 10 + '%': '-');
+  aoa.push(sumRow);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const merges = []; let ci = 1; months.forEach(() => { merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ci += 3; }); merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ci += 3; merges.push({ s: { r: 0, c: ci }, e: { r: 0, c: ci + 2 } }); ws['!merges'] = merges;
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '团队业绩统计');
