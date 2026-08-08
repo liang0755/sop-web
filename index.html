@@ -820,8 +820,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260808164012';
-const APP_VERSION = '1.42.66'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260808172017';
+const APP_VERSION = '1.42.67'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -5608,20 +5608,24 @@ async function callAI(messages) {
   const config = getAIConfig();
   if (!config.apiKey) throw new Error('尚未配置API Key,请先在上方"AI模型配置"中设置');
   const url = config.apiUrl.replace(/\/+$/, '') + '/chat/completions';
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + config.apiKey
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages: messages,
-      max_tokens: 4096,
-      temperature: 0.3,
-      stream: false
-    })
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120000);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + config.apiKey
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: messages,
+        max_tokens: 16384,
+        temperature: 0.3,
+        stream: false
+      }),
+      signal: controller.signal
+    });
   if (!res.ok) {
     let errText = '';
     try { errText = await res.text(); } catch(e) {}
@@ -5632,6 +5636,9 @@ async function callAI(messages) {
   const data = await res.json();
   if (!data.choices || !data.choices[0]) throw new Error('AI返回数据格式异常');
   return data.choices[0].message.content;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function escapeAIHTML(text) {
@@ -6046,6 +6053,9 @@ async function sendAIMessage() {
     const ti = document.getElementById('aiTypingIndicator');
     if (ti) ti.remove();
     let errMsg = err.message || '未知错误';
+    if (err.name === 'AbortError' || errMsg.includes('abort')) {
+      errMsg = 'AI请求超时(120秒),可能原因:\n1. 数据量过大导致AI生成时间过长\n2. 网络不稳定\n建议:简化问题或稍后重试';
+    }
     if (errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError')) {
       errMsg = '网络请求失败,可能是CORS跨域限制或网络不通,请尝试:\n1. 检查API地址是否正确\n2. 确认该API支持浏览器跨域访问(CORS)\n3. 如使用OpenAI,需确保网络能访问api.openai.com';
     }
