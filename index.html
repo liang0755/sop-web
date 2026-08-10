@@ -820,8 +820,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260808172017';
-const APP_VERSION = '1.42.67'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260810163614';
+const APP_VERSION = '1.42.68'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -9037,6 +9037,8 @@ function loadVisitStats() {
   if (visitStatsTab === 'person' && visitStatsPersonFilter.length) {
     records = records.filter(r => visitStatsPersonFilter.indexOf(r.employee) >= 0);
   }
+  // 存当前矩阵的筛选后记录，供单元格点击明细用
+  window.__blockerMatrixRecords = records;
   const c = document.getElementById('visitStatsResults');
   if (!records.length) {
     c.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无拜访数据</div>';
@@ -9089,18 +9091,18 @@ function loadVisitStats() {
     const deptCells = depts.map((dept, idx) => {
       const val = countMap[res][dept];
       const color = dColors[idx % dColors.length];
-      return `<td style="text-align:center;${val ? 'font-weight:600;color:' + color : 'color:var(--gray-300)'}">${val || '-'}</td>`;
+      return `<td style="text-align:center;cursor:pointer;${val ? 'font-weight:600;color:' + color : 'color:var(--gray-300)'}" onclick="showBlockerCellDetail('${res.replace(/'/g,"\\'")}','${dept.replace(/'/g,"\\'")}')">${val || '-'}</td>`;
     }).join('');
     return `<tr>
       <td style="min-width:140px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${kColor};margin-right:6px"></span><strong>${res}</strong></td>
       ${deptCells}
-      <td style="text-align:center;font-weight:700;background:var(--gray-50)">${resultTotals[res]}</td>
+      <td style="text-align:center;font-weight:700;background:var(--gray-50);cursor:pointer" onclick="showBlockerCellDetail('${res.replace(/'/g,"\\'")}','__ALL__')">${resultTotals[res]}</td>
     </tr>`;
   }).join('');
   const totalRow = `<tr style="font-weight:700;background:var(--gray-100);border-top:2px solid var(--gray-300)">
     <td>汇总</td>
-    ${depts.map(dept => `<td style="text-align:center">${deptTotals[dept]}</td>`).join('')}
-    <td style="text-align:center;background:var(--primary-light);color:var(--primary)">${grandTotal}</td>
+    ${depts.map(dept => `<td style="text-align:center;cursor:pointer" onclick="showBlockerCellDetail('__ALL__','${dept.replace(/'/g,"\\'")}')">${deptTotals[dept]}</td>`).join('')}
+    <td style="text-align:center;background:var(--primary-light);color:var(--primary);cursor:pointer" onclick="showBlockerCellDetail('__ALL__','__ALL__')">${grandTotal}</td>
   </tr>`;
   const groupHtml = `<div class="card" style="margin-bottom:16px;overflow:hidden">
     <div class="card-header" style="background:var(--gray-50)">
@@ -9224,6 +9226,49 @@ function exportVisitTable(mode, kind){
   const tabLabel = mode === 'person' ? '个人拜访类型统计' : '团队拜访类型统计';
   downloadCsv(visitExportFilename(tabLabel, t.label, data.s, data.e), t.headers, t.rows);
 }
+// 各团队拜访卡点汇总：点击单元格数字 → 弹出对应拜访明细
+function showBlockerCellDetail(resultLabel, deptKey) {
+  const records = window.__blockerMatrixRecords || [];
+  let filtered = records;
+  if (resultLabel !== '__ALL__') filtered = filtered.filter(r => (r.visitResult || '未标记') === resultLabel);
+  if (deptKey !== '__ALL__') filtered = filtered.filter(r => canonDept(r.department || '未分组') === deptKey);
+  if (!filtered.length) { showToast('该组合下无明细记录', 'warning'); return; }
+  const titleParts = [];
+  if (resultLabel !== '__ALL__') titleParts.push('\u300C' + resultLabel + '\u300D');
+  if (deptKey !== '__ALL__') titleParts.push(deptKey);
+  const title = '\u62DC\u8BBF\u660E\u7EC6\uFF1A' + (titleParts.length ? titleParts.join(' \xD7 ') : '\u5168\u90E8') + '\uFF08' + filtered.length + ' \u6761\uFF09';
+  let rowsHtml = '';
+  filtered.forEach((r, i) => {
+    const vr = r.visitResult || '';
+    const se = r.signinEvent || '';
+    const bn = (r.blockerNote || '').replace(/\n/g, '<br>');
+    rowsHtml += '<tr><td style="white-space:nowrap">' + (i+1) + '</td><td style="white-space:nowrap">' + escHtml(r.contactTime||'') + '</td><td>' + escHtml(r.customer||'') + '</td><td>' + escHtml(r.contactPerson||'') + '</td><td>' + escHtml(r.employee||'') + '</td><td>' + escHtml(canonDept(r.department||'')) + '</td><td><span style="color:' + (vr ? 'var(--primary)' : 'var(--gray-400)') + '">' + (escHtml(vr) || '<span style="color:var(--gray-300)">\u672A\u6807\u8BB0</span>') + '</span></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="' + escAttr(bn) + '">' + (bn || '-') + '</td></tr>';
+  });
+  const html = '<div id="blockerDetailModal" style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;box-sizing:border-box" onclick="if(event.target===this)this.remove()"><div style="background:#fff;border-radius:12px;width:100%;max-width:960px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.25)"><div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200);flex-shrink:0"><h4 style="margin:0;font-size:15px">\uD83D\uDCCB ' + title + '</h4><button style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--gray-400);line-height:1;padding:0 4px" onclick="document.getElementById(\'blockerDetailModal\').remove()">\u2715</button></div><div style="padding:16px 20px;overflow:auto;flex:1"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50);position:sticky;top:0"><th style="text-align:left;padding:8px 6px">#</th><th style="text-align:left;padding:8px 6px;min-width:140px">\u8054\u7CFB\u65F6\u95F4</th><th style="text-align:left;padding:8px 6px">\u5BA2\u6237</th><th style="text-align:left;padding:8px 6px">\u8054\u7CFB\u4EBA</th><th style="text-align:left;padding:8px 6px">\u5458\u5DE5</th><th style="text-align:left;padding:8px 6px">\u90E8\u95E8</th><th style="text-align:left;padding:8px 6px">\u62DF\u8BBF\u7ED3\u679C</th><th style="text-align:left;padding:8px 6px">\u5361\u70B9\u8BF4\u660E</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div><div style="padding:12px 20px;border-top:1px solid var(--gray-200);text-align:right;flex-shrink:0"><span style="font-size:12px;color:var(--gray-500);margin-right:12px">\u5171 ' + filtered.length + ' \u6761</span><button class="btn btn-sm btn-primary" onclick="exportBlockerCellDetail(\'' + escJsStr(resultLabel) + '\',\'' + escJsStr(deptKey) + '\')">\uD83D\uDCE5 \u5BFC\u51FAExcel</button><button class="btn btn-sm btn-outline" onclick="document.getElementById(\'blockerDetailModal\').remove()">\u5173\u95ED</button></div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+function exportBlockerCellDetail(resultLabel, deptKey) {
+  if (typeof XLSX === 'undefined') { showToast('\u8868\u683C\u7EC4\u4EF6\u672A\u52A0\u8F7D', 'error'); return; }
+  const records = window.__blockerMatrixRecords || [];
+  let filtered = records;
+  if (resultLabel !== '__ALL__') filtered = filtered.filter(r => (r.visitResult || '\u672A\u6807\u8BB0') === resultLabel);
+  if (deptKey !== '__ALL__') filtered = filtered.filter(r => canonDept(r.department || '\u672A\u5206\u7EC4') === deptKey);
+  if (!filtered.length) return;
+  filtered.sort((a, b) => (a.contactTime||'').localeCompare(b.contactTime||''));
+  const headers = ['#','\u8054\u7CFB\u65F6\u95F4','\u5BA2\u6237','\u8054\u7CFB\u4EBA','\u5458\u5DE5','\u90E8\u95E8','\u7B7E\u5230\u4E8B\u4EF6','\u62DF\u8BBF\u7ED3\u679C','\u5361\u70B9\u8BF4\u660E','\u5907\u6CE8'];
+  const aoa = [headers];
+  filtered.forEach((r, i) => { aoa.push([i+1, r.contactTime||'', r.customer||'', r.contactPerson||'', r.employee||'', canonDept(r.department||''), r.signinEvent||'', r.visitResult||'\u672A\u6807\u8BB0', r.blockerNote||'', r.remark||'']); });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '\u62DF\u8BBF\u660E\u7EC6');
+  const fname = resultLabel==='\u005F\u005FALL\u005F\u005F'?'\u5168\u90E8':resultLabel;
+  const dname = deptKey==='\u005F\u005FALL\u005F\u005F'?'\u5168\u90E8':deptKey;
+  XLSX.writeFile(wb, '\u5361\u70B9\u660E\u7EC6_' + fname + '_' + dname + '.xlsx');
+  showToast('\u5DF2\u5BFC\u51FA ' + filtered.length + ' \u6761', 'success');
+}
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function escJsStr(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"').replace(/\n/g,'\\n'); }
 function exportTeamCardCsv(){
   const d = window.__teamCardExport;
   if (!d) { showToast('请先渲染团队拜访卡点统计再导出', 'warning'); return; }
