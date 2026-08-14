@@ -338,11 +338,10 @@ tr:hover > .perf-freeze{
 .ai-send-btn{width:36px;height:36px;border-radius:50%;background:var(--primary);border:none;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;flex-shrink:0}
 .ai-send-btn:hover{background:#1d4ed8;transform:scale(1.05)}
 .ai-send-btn:active{transform:scale(.95)}
-/* Ai工作台(首页底部嵌入:聊天 + Skill 快捷区) */
-.ai-workbench-area{display:none;padding:4px 28px 28px}
-.ai-workbench{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:stretch;margin-top:4px}
-.ai-workbench-chat{border:1px solid var(--gray-200);border-radius:14px;overflow:hidden;background:#fff;height:600px;display:flex;flex-direction:column}
-.ai-workbench-skills{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:16px;height:600px;overflow-y:auto;display:flex;flex-direction:column}
+/* Ai工作台(独立整页:聊天 + Skill 快捷区) */
+.ai-workbench{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:stretch;margin-top:4px;height:calc(100vh - 150px)}
+.ai-workbench-chat{border:1px solid var(--gray-200);border-radius:14px;overflow:hidden;background:#fff;height:100%;display:flex;flex-direction:column}
+.ai-workbench-skills{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:16px;height:100%;overflow-y:auto;display:flex;flex-direction:column}
 .ai-workbench-skills-head{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
 .ai-workbench-skills-head h4{margin:0;font-size:15px;font-weight:600}
 .skill-list{display:flex;flex-direction:column;gap:10px}
@@ -354,7 +353,7 @@ tr:hover > .perf-freeze{
 .skill-card-del:hover{background:#fee2e2;color:#ef4444}
 .skill-empty{font-size:13px;color:var(--gray-500);text-align:center;padding:24px 8px;line-height:1.6}
 @media (max-width:900px){
-  .ai-workbench{grid-template-columns:1fr;gap:16px}
+  .ai-workbench{grid-template-columns:1fr;gap:16px;height:auto}
   .ai-workbench-chat{height:520px}
   .ai-workbench-skills{height:auto}
 }
@@ -722,6 +721,7 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
     <div class="nav-menu">
       <div class="nav-section-title">工作台</div>
       <div class="nav-item active" data-page="dashboard" onclick="navTo('dashboard')"><span class="icon">🏠</span> 首页</div>
+      <div class="nav-item" data-page="aiWorkbench" onclick="navTo('aiWorkbench')" id="navAIWorkbench"><span class="icon">🤖</span> AI工作台</div>
 
       <div class="nav-section-title">日报周报</div>
       <div class="nav-item" data-page="dailyForm" onclick="navTo('dailyForm')"><span class="icon">📝</span> 日报填写</div>
@@ -760,7 +760,6 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
   <div class="main-content">
     <div class="top-bar"><h3 id="pageTitle">首页</h3><div style="display:flex;align-items:center;gap:14px"><span id="userWelcome" style="color:var(--gray-600);font-size:14px"></span><button class="btn btn-outline btn-sm" onclick="doLogout()">退出登录</button></div></div>
     <div class="content-body" id="contentBody"></div>
-    <div class="ai-workbench-area" id="aiWorkbenchArea"></div>
   </div>
 </div>
 
@@ -841,8 +840,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260814141705';
-const APP_VERSION = '1.42.69'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260814145015';
+const APP_VERSION = '1.42.70'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1460,9 +1459,6 @@ async function doRegister(e) {
 
 function doLogout() {
   currentUser = null;
-  aiWorkbenchInited = false; // 下次登录重新挂载 Ai工作台(避免复用上一账号的聊天区)
-  const wb = document.getElementById('aiWorkbenchArea');
-  if (wb) { wb.innerHTML = ''; wb.style.display = 'none'; }
   localStorage.removeItem(SESSION_KEY);
   document.getElementById('loginView').classList.remove('hidden');
   document.getElementById('appLayout').classList.add('hidden');
@@ -1572,19 +1568,11 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计',mgrPerf:'管理绩效统计'};
+  const titles = {dashboard:'首页',aiWorkbench:'AI工作台',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计',mgrPerf:'管理绩效统计'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
   // 浏览器标签页标题带上功能模块名,便于在多标签间区分(主标签与新标签均生效)
   document.title = (titles[page] ? titles[page] + ' · ' : '') + '团队SOP数据管理系统';
-  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
-  // Ai工作台:仅首页(仪表盘)展示;聊天区独立于 contentBody,后台刷新不会重绘它
-  if (page === 'dashboard') {
-    const wb = document.getElementById('aiWorkbenchArea');
-    if (wb) { wb.style.display = 'block'; renderAiWorkbench(); }
-  } else {
-    const wb = document.getElementById('aiWorkbenchArea');
-    if (wb) wb.style.display = 'none';
-  }
+  ({dashboard:renderDashboard,aiWorkbench:renderAiWorkbench,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
   closeSidebar();
   // 进入任意页面后立即把云端保存的全局筛选默认值回填到已渲染的 select/多选面板(绕过整页重绘时序),确保"保存默认"必定生效
   applyFilterDefaultsToRenderedDOM();
@@ -1594,7 +1582,7 @@ function navTo(page) {
 
 // 通过 URL 参数确定新标签/直达应打开的模块(登录后默认首页)
 function getInitialPage() {
-  const valid = ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','settings','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
+  const valid = ['dashboard','aiWorkbench','dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','settings','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
   const p = new URLSearchParams(location.search).get('page');
   return (p && valid.includes(p)) ? p : 'dashboard';
 }
@@ -4931,14 +4919,12 @@ function aiChatInnerHTML() {
   </div>`;
 }
 
-// ============ Ai工作台(首页底部嵌入:聊天 + Skill 快捷区) ============
-let aiWorkbenchInited = false;
+// ============ Ai工作台(独立整页:聊天 + Skill 快捷区) ============
 function renderAiWorkbench() {
-  const area = document.getElementById('aiWorkbenchArea');
-  if (!area) return;
-  if (aiWorkbenchInited) return; // 已挂载则复用,避免后台刷新 / 切换导航丢失对话
+  const body = document.getElementById('contentBody');
+  body.className = 'content-body';
   const canAdmin = hasPermission('admin');
-  area.innerHTML = `<div class="ai-workbench">
+  body.innerHTML = `<div class="ai-workbench">
     <div class="ai-workbench-chat">${aiChatInnerHTML()}</div>
     <div class="ai-workbench-skills">
       <div class="ai-workbench-skills-head">
@@ -4956,7 +4942,6 @@ function renderAiWorkbench() {
   aiPendingFiles = [];
   initAIChat();
   renderSkillList();
-  aiWorkbenchInited = true;
 }
 
 // 重新渲染 Skill 列表(新建 / 上传 / 删除后调用,不影响聊天区)
