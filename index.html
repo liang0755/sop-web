@@ -338,6 +338,27 @@ tr:hover > .perf-freeze{
 .ai-send-btn{width:36px;height:36px;border-radius:50%;background:var(--primary);border:none;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;flex-shrink:0}
 .ai-send-btn:hover{background:#1d4ed8;transform:scale(1.05)}
 .ai-send-btn:active{transform:scale(.95)}
+/* Ai工作台(首页底部嵌入:聊天 + Skill 快捷区) */
+.ai-workbench-area{display:none;padding:4px 28px 28px}
+.ai-workbench{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:stretch;margin-top:4px}
+.ai-workbench-chat{border:1px solid var(--gray-200);border-radius:14px;overflow:hidden;background:#fff;height:600px;display:flex;flex-direction:column}
+.ai-workbench-skills{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:16px;height:600px;overflow-y:auto;display:flex;flex-direction:column}
+.ai-workbench-skills-head{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.ai-workbench-skills-head h4{margin:0;font-size:15px;font-weight:600}
+.skill-list{display:flex;flex-direction:column;gap:10px}
+.skill-card{border:1px solid var(--gray-200);border-radius:10px;padding:12px 14px;cursor:pointer;transition:.15s;background:var(--gray-50);position:relative}
+.skill-card:hover{border-color:var(--primary);box-shadow:0 2px 8px rgba(37,99,235,.12)}
+.skill-card .skill-name{font-weight:600;font-size:14px;margin-bottom:4px;padding-right:22px;color:var(--gray-900)}
+.skill-card .skill-desc{font-size:12px;color:var(--gray-600);line-height:1.5}
+.skill-card-del{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--gray-400);background:var(--gray-100);cursor:pointer}
+.skill-card-del:hover{background:#fee2e2;color:#ef4444}
+.skill-empty{font-size:13px;color:var(--gray-500);text-align:center;padding:24px 8px;line-height:1.6}
+@media (max-width:900px){
+  .ai-workbench{grid-template-columns:1fr;gap:16px}
+  .ai-workbench-chat{height:520px}
+  .ai-workbench-skills{height:auto}
+}
+@media (max-width:600px){ .ai-workbench-area{padding:4px 12px 20px} }
 .ai-send-btn:disabled{background:var(--gray-300);cursor:not-allowed;transform:none}
 /* AI image upload */
 .ai-input-images{display:flex;gap:8px;flex-wrap:wrap;padding:0 0 8px}
@@ -727,7 +748,6 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
       <div class="nav-item" data-page="userManagement" onclick="navTo('userManagement')" id="navUserMgmt"><span class="icon">👤</span> 用户管理</div>
       <div class="nav-item" data-page="roleConfig" onclick="navTo('roleConfig')" id="navRoleConfig"><span class="icon">🛡️</span> 角色权限</div>
       <div class="nav-item" data-page="formConfig" onclick="navTo('formConfig')" id="navFormConfig"><span class="icon">⚙️</span> 表单配置</div>
-      <div class="nav-item" data-page="aiChat" onclick="navTo('aiChat')" id="navAIChat"><span class="icon">🤖</span> AI助手</div>
       <div class="nav-item" data-page="settings" onclick="navTo('settings')"><span class="icon">🔧</span> 设置</div>
     </div>
     <div class="sidebar-footer">
@@ -740,6 +760,7 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
   <div class="main-content">
     <div class="top-bar"><h3 id="pageTitle">首页</h3><div style="display:flex;align-items:center;gap:14px"><span id="userWelcome" style="color:var(--gray-600);font-size:14px"></span><button class="btn btn-outline btn-sm" onclick="doLogout()">退出登录</button></div></div>
     <div class="content-body" id="contentBody"></div>
+    <div class="ai-workbench-area" id="aiWorkbenchArea"></div>
   </div>
 </div>
 
@@ -750,7 +771,7 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}, honorRecords:{}, filterDefaults:{}};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}, honorRecords:{}, filterDefaults:{}, skills:{}};
 let currentUser = null;
 let isCloudAvailable = false;
 let cloudConfirmedViaSibling = false; // 已通过兄弟标签页确认云端可达:loadUsersOnly 拉取失败时不再把 isCloudAvailable 下探为 false
@@ -820,8 +841,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260810163614';
-const APP_VERSION = '1.42.68'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260814141705';
+const APP_VERSION = '1.42.69'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -895,7 +916,7 @@ async function loadCoreData() {
 }
 async function loadCoreDataFresh() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes, hRes, fdRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes, hRes, fdRes, sRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
@@ -903,7 +924,8 @@ async function loadCoreDataFresh() {
       fetch(FB_BASE + '/roleConfig.json'),
       fetch(FB_BASE + '/visitConfig.json'),
       fetch(FB_BASE + '/honorRecords.json'),
-      fetch(FB_BASE + '/filterDefaults.json')
+      fetch(FB_BASE + '/filterDefaults.json'),
+      fetch(FB_BASE + '/skills.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -1045,6 +1067,9 @@ async function loadCoreDataFresh() {
     const fdData = fdRes.ok ? await fdRes.json() : null;
     cloudData.filterDefaults = (fdData && typeof fdData === 'object') ? fdData : {};
     if (!cloudData.filterDefaults || typeof cloudData.filterDefaults !== 'object') cloudData.filterDefaults = {};
+    const skData = sRes.ok ? await sRes.json() : null;
+    cloudData.skills = (skData && typeof skData === 'object') ? skData : {};
+    if (typeof renderSkillList === 'function') renderSkillList(); // 核心配置加载完成后,若 Ai工作台已挂载则刷新 Skill 列表
     filterDefaultsLoaded = true; // 标记云端默认值已就绪:此后 takeFilterDefault/takeSelectDefault 才会应用并锁守卫
     applyFilterDefaultsToRenderedDOM(); // 直接回填已渲染 DOM(绕过整页重绘时序/canAutoRerender 拦截)
     saveCoreConfigCache(); // 缓存本次拉取到的(已迁移)核心配置,加速复访
@@ -1067,6 +1092,7 @@ async function loadCoreDataFresh() {
     cloudData.mgrPerformanceRecords = {};
     cloudData.mgrPerformanceSnapshots = {};
     cloudData.honorRecords = {};
+    cloudData.skills = {};
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
     }
@@ -1434,6 +1460,9 @@ async function doRegister(e) {
 
 function doLogout() {
   currentUser = null;
+  aiWorkbenchInited = false; // 下次登录重新挂载 Ai工作台(避免复用上一账号的聊天区)
+  const wb = document.getElementById('aiWorkbenchArea');
+  if (wb) { wb.innerHTML = ''; wb.style.display = 'none'; }
   localStorage.removeItem(SESSION_KEY);
   document.getElementById('loginView').classList.remove('hidden');
   document.getElementById('appLayout').classList.add('hidden');
@@ -1515,7 +1544,6 @@ function updateNavVisibility() {
     'navUserMgmt': 'userManagement',
     'navRoleConfig': 'roleConfig',
     'navFormConfig': 'formConfig',
-    'navAIChat': 'aiChat',
     'navVisitData': 'visitData',
     'navVisitStats': 'visitStats',
     'navMgrReport': 'mgrReport'
@@ -1536,7 +1564,7 @@ function navTo(page) {
   const cb = document.getElementById('contentBody');
   cb.className = 'content-body';
   // Check page permission (dashboard and settings are always allowed)
-  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
+  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
   if (restrictedPages.includes(page) && !hasPermission(page)) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面,请联系管理员,</div>';
     closeSidebar();
@@ -1544,11 +1572,19 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',aiChat:'AI助手',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计',mgrPerf:'管理绩效统计'};
+  const titles = {dashboard:'首页',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计',mgrPerf:'管理绩效统计'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
   // 浏览器标签页标题带上功能模块名,便于在多标签间区分(主标签与新标签均生效)
   document.title = (titles[page] ? titles[page] + ' · ' : '') + '团队SOP数据管理系统';
-  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,aiChat:renderAIChat,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
+  ({dashboard:renderDashboard,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
+  // Ai工作台:仅首页(仪表盘)展示;聊天区独立于 contentBody,后台刷新不会重绘它
+  if (page === 'dashboard') {
+    const wb = document.getElementById('aiWorkbenchArea');
+    if (wb) { wb.style.display = 'block'; renderAiWorkbench(); }
+  } else {
+    const wb = document.getElementById('aiWorkbenchArea');
+    if (wb) wb.style.display = 'none';
+  }
   closeSidebar();
   // 进入任意页面后立即把云端保存的全局筛选默认值回填到已渲染的 select/多选面板(绕过整页重绘时序),确保"保存默认"必定生效
   applyFilterDefaultsToRenderedDOM();
@@ -1558,22 +1594,18 @@ function navTo(page) {
 
 // 通过 URL 参数确定新标签/直达应打开的模块(登录后默认首页)
 function getInitialPage() {
-  const valid = ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','aiChat','settings','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
+  const valid = ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','settings','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
   const p = new URLSearchParams(location.search).get('page');
   return (p && valid.includes(p)) ? p : 'dashboard';
 }
 
-// 侧边栏导航:默认在当前页打开(走 navTo);仅 AI助手 模块保留新标签页打开
-function navToNewTab(page) {
-  window.open('?page=' + encodeURIComponent(page), '_blank');
-}
+// 侧边栏导航:所有模块均在当前页打开(走 navTo)
 document.querySelectorAll('.sidebar .nav-item').forEach(el => {
   el.removeAttribute('onclick');
   el.addEventListener('click', () => {
     const p = el.getAttribute('data-page');
     if (!p) return;
-    if (p === 'aiChat') { navToNewTab(p); }   // 仅 AI 助手在新标签打开
-    else { navTo(p); }                         // 其余模块在当前页打开
+    navTo(p);
   });
 });
 
@@ -1729,7 +1761,7 @@ const DEFAULT_ROLE_CONFIG = {
       permissions: {
         dashboard: true, dailyForm: true, weeklyForm: true,
         dailyData: true, weeklyData: true, summary: true,
-        userManagement: true, formConfig: true, aiChat: true,
+        userManagement: true, formConfig: true,
         roleConfig: true, settings: true,
         editOthers: true, deleteOthers: true, exportData: true,
         brandConfig: true, aiConfig: true,
@@ -1741,7 +1773,7 @@ const DEFAULT_ROLE_CONFIG = {
       permissions: {
         dashboard: true, dailyForm: true, weeklyForm: true,
         dailyData: true, weeklyData: true, summary: true,
-        userManagement: false, formConfig: false, aiChat: true,
+        userManagement: false, formConfig: false,
         roleConfig: false, settings: true,
         editOthers: true, deleteOthers: false, exportData: true,
         brandConfig: false, aiConfig: false,
@@ -1753,7 +1785,7 @@ const DEFAULT_ROLE_CONFIG = {
       permissions: {
         dashboard: true, dailyForm: true, weeklyForm: true,
         dailyData: true, weeklyData: true, summary: true,
-        userManagement: false, formConfig: false, aiChat: false,
+        userManagement: false, formConfig: false,
         roleConfig: false, settings: true,
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
@@ -1765,7 +1797,7 @@ const DEFAULT_ROLE_CONFIG = {
       permissions: {
         dashboard: true, dailyForm: false, weeklyForm: false,
         dailyData: true, weeklyData: true, summary: true,
-        userManagement: false, formConfig: false, aiChat: false,
+        userManagement: false, formConfig: false,
         roleConfig: false, settings: true,
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
@@ -1779,7 +1811,7 @@ const DEFAULT_ROLE_CONFIG = {
 const PERMISSION_LABELS = {
   dashboard: '首页', dailyForm: '日报填写', weeklyForm: '周报填写',
   dailyData: '日报数据', weeklyData: '周报数据', summary: '团队汇总',
-  userManagement: '用户管理', formConfig: '表单配置', aiChat: 'AI助手',
+  userManagement: '用户管理', formConfig: '表单配置',
   roleConfig: '角色权限配置', settings: '设置',
   editOthers: '编辑他人数据', deleteOthers: '删除他人数据', exportData: '导出数据',
   brandConfig: '品牌配置', aiConfig: 'AI模型配置',
@@ -1788,7 +1820,7 @@ const PERMISSION_LABELS = {
 
 const PERMISSION_GROUPS = [
   { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'] },
-  { title: '管理功能', keys: ['userManagement','formConfig','aiChat','roleConfig','settings','brandConfig','aiConfig'] },
+  { title: '管理功能', keys: ['userManagement','formConfig','roleConfig','settings','brandConfig','aiConfig'] },
   { title: '数据操作', keys: ['editOthers','deleteOthers','exportData'] }
 ];
 
@@ -4856,15 +4888,12 @@ function exportCSV(type) {
 let aiPendingImages = [];      // 图片附件(base64,走视觉通道)
 let aiPendingFiles = [];       // 文件附件(文本 / 表格解析后的文本,走文本通道)
 
-function renderAIChat() {
-  const body = document.getElementById('contentBody');
-  body.className = 'content-body content-body-ai';
+function aiChatInnerHTML() {
   const ai = getAIConfig();
   const providerLabel = ai.apiKey ? (AI_PROVIDERS[ai.provider]?.label || ai.provider) + ' · ' + ai.model : '⚠️ 请先在设置中配置API';
-
-  body.innerHTML = `<div class="ai-fullpage-wrap">
+  return `<div class="ai-fullpage-wrap">
     <div class="ai-fullpage-header">
-      <h4>🤖 AI数据分析助手</h4>
+      <h4>🤖 Ai工作台</h4>
       <div style="display:flex;align-items:center;gap:10px">
         <span class="ai-provider-badge">${providerLabel}</span>
         <button class="btn btn-outline btn-sm" onclick="clearAIChat()" title="清空对话">🗑️ 清空</button>
@@ -4900,10 +4929,162 @@ function renderAIChat() {
       </div>
     </div>
   </div>`;
+}
 
+// ============ Ai工作台(首页底部嵌入:聊天 + Skill 快捷区) ============
+let aiWorkbenchInited = false;
+function renderAiWorkbench() {
+  const area = document.getElementById('aiWorkbenchArea');
+  if (!area) return;
+  if (aiWorkbenchInited) return; // 已挂载则复用,避免后台刷新 / 切换导航丢失对话
+  const canAdmin = hasPermission('admin');
+  area.innerHTML = `<div class="ai-workbench">
+    <div class="ai-workbench-chat">${aiChatInnerHTML()}</div>
+    <div class="ai-workbench-skills">
+      <div class="ai-workbench-skills-head">
+        <h4>🧩 Skill 快捷区</h4>
+        ${canAdmin ? `<div style="display:flex;gap:6px;margin-left:auto">
+          <button class="btn btn-primary btn-sm" onclick="openSkillCreateModal()">➕ 新建</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('skillFileInput').click()">📤 上传</button>
+          <input type="file" id="skillFileInput" accept=".json" multiple style="display:none" onchange="handleSkillUpload(event)">
+        </div>` : ''}
+      </div>
+      <div class="skill-list" id="skillListArea"></div>
+    </div>
+  </div>`;
   aiPendingImages = [];
   aiPendingFiles = [];
   initAIChat();
+  renderSkillList();
+  aiWorkbenchInited = true;
+}
+
+// 重新渲染 Skill 列表(新建 / 上传 / 删除后调用,不影响聊天区)
+function renderSkillList() {
+  const list = document.getElementById('skillListArea');
+  if (!list) return;
+  const skills = cloudData.skills || {};
+  const ids = Object.keys(skills);
+  if (ids.length === 0) {
+    list.innerHTML = '<div class="skill-empty">暂无 Skill。' + (hasPermission('admin') ? '点击右上角「➕ 新建」创建,或「📤 上传」JSON 文件。' : '请联系管理员添加。') + '</div>';
+    return;
+  }
+  list.innerHTML = ids.map(id => {
+    const s = skills[id] || {};
+    const name = escapeHtml(s.name || '未命名');
+    const desc = escapeHtml(s.desc || '');
+    const delBtn = hasPermission('admin') ? `<span class="skill-card-del" title="删除" onclick="event.stopPropagation();deleteSkill('${id}')">✕</span>` : '';
+    return `<div class="skill-card" onclick="useSkill('${id}')">
+      <div class="skill-name">${name}</div>
+      ${desc ? `<div class="skill-desc">${desc}</div>` : ''}
+      ${delBtn}
+    </div>`;
+  }).join('');
+}
+
+// 点击 Skill 卡片:把提示词填入聊天输入框
+function useSkill(id) {
+  const s = (cloudData.skills || {})[id];
+  if (!s) return;
+  fillAIInput(s.prompt || '');
+}
+
+// ---------- Skill 新建(仅管理员) ----------
+function openSkillCreateModal() {
+  if (!hasPermission('admin')) return;
+  const content = `<div id="skillFormAlert"></div>
+    <div class="form-group"><label>名称 <span style="color:#ef4444">*</span></label><input type="text" class="form-control" id="skillName" placeholder="如:周报数据汇总分析" maxlength="40"></div>
+    <div class="form-group"><label>描述</label><input type="text" class="form-control" id="skillDesc" placeholder="简要说明这个 Skill 的用途" maxlength="120"></div>
+    <div class="form-group"><label>提示词(Prompt) <span style="color:#ef4444">*</span></label><textarea class="form-control" id="skillPrompt" rows="6" placeholder="写给 AI 的完整指令,例如:你是一名销售数据分析师,请基于本月各部门日报..."></textarea></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveSkill()">保存</button>
+    </div>`;
+  showModal('➕ 新建 Skill', content, true);
+  setTimeout(() => { const el = document.getElementById('skillName'); if (el) el.focus(); }, 30);
+}
+function saveSkill() {
+  if (!hasPermission('admin')) return;
+  const name = (document.getElementById('skillName')?.value || '').trim();
+  const desc = (document.getElementById('skillDesc')?.value || '').trim();
+  const prompt = (document.getElementById('skillPrompt')?.value || '').trim();
+  const alert = document.getElementById('skillFormAlert');
+  if (!name || !prompt) {
+    if (alert) alert.innerHTML = '<div class="alert alert-danger">请填写名称和提示词</div>';
+    return;
+  }
+  const id = 'sk_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const data = { id, name, desc, prompt };
+  apiCreate('skills', data).then(() => {
+    cloudData.skills = cloudData.skills || {};
+    cloudData.skills[id] = data;
+    renderSkillList();
+    closeModal();
+    showToast('Skill「' + name + '」已创建', 'success');
+  }).catch(err => {
+    if (alert) alert.innerHTML = '<div class="alert alert-danger">保存失败:' + escapeHtml(err.message) + '</div>';
+  });
+}
+
+// ---------- Skill 上传(JSON 文件,支持多选 / 数组 / 单对象 / 对象映射) ----------
+function handleSkillUpload(event) {
+  if (!hasPermission('admin')) return;
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
+  const input = event.target;
+  let pending = files.length;
+  let okCount = 0, failCount = 0;
+  function finishAll() {
+    if (pending > 0) return;
+    renderSkillList();
+    showToast('Skill 上传完成:成功 ' + okCount + ' 个' + (failCount ? ',跳过 ' + failCount + ' 个(格式无效)' : ''), failCount ? 'warning' : 'success');
+    input.value = '';
+  }
+  Array.from(files).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let arr = [];
+      try { arr = normalizeSkillImport(JSON.parse(reader.result || '')); } catch(e) { failCount++; }
+      if (!arr.length) { failCount++; finishAll(); return; }
+      let done = 0;
+      arr.forEach(item => {
+        const name = (item.name || '').trim();
+        const prompt = (item.prompt || '').trim();
+        if (!name || !prompt) { failCount++; if (++done === arr.length) finishAll(); return; }
+        const id = 'sk_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        const data = { id, name, desc: (item.desc || '').trim(), prompt };
+        apiCreate('skills', data).then(() => {
+          cloudData.skills = cloudData.skills || {};
+          cloudData.skills[id] = data;
+          if (++done === arr.length) finishAll();
+        }).catch(() => { failCount++; if (++done === arr.length) finishAll(); });
+      });
+    };
+    reader.onerror = () => { failCount++; finishAll(); };
+    reader.readAsText(file);
+  });
+}
+function normalizeSkillImport(parsed) {
+  if (Array.isArray(parsed)) return parsed.filter(x => x && (x.name || x.prompt));
+  if (parsed && typeof parsed === 'object') {
+    if (parsed.name || parsed.prompt) return [parsed]; // 单对象
+    const arr = Object.values(parsed).filter(x => x && (x.name || x.prompt)); // 对象映射 {id:{...}}
+    if (arr.length) return arr;
+  }
+  return [];
+}
+
+// ---------- Skill 删除(仅管理员) ----------
+function deleteSkill(id) {
+  if (!hasPermission('admin')) return;
+  const s = (cloudData.skills || {})[id];
+  if (!s) return;
+  if (!confirm('确定删除 Skill「' + (s.name || id) + '」?')) return;
+  apiDelete('skills', id).then(() => {
+    delete cloudData.skills[id];
+    renderSkillList();
+    showToast('Skill 已删除', 'success');
+  }).catch(err => showToast('删除失败:' + (err.message || ''), 'error'));
 }
 
 // ============ Settings ============
@@ -5806,7 +5987,7 @@ function initAIChat() {
   if (!cfg.apiKey) {
     msgArea.innerHTML = '<div class="ai-msg system">⚠️ 请先在"设置 → AI模型配置"中设置API Key,保存后即可开始对话</div>';
   } else {
-    msgArea.innerHTML = `<div class="ai-msg assistant">👋 你好!我是AI数据分析助手,我可以读取系统全部数据(用户,日报,周报,拜访,业绩,管理周报,客户汇总,渠道配置)进行分析,
+    msgArea.innerHTML = `<div class="ai-msg assistant">👋 你好!我是Ai工作台,我可以读取系统全部数据(用户,日报,周报,拜访,业绩,管理周报,客户汇总,渠道配置)进行分析,
 你也可以直接上传图片,文档或表格(CSV / TXT / JSON / Excel 等)让我解读,
 点击下方快捷提问,或直接输入你的问题 ✨</div>`;
   }
