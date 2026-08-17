@@ -849,8 +849,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260817104912';
-const APP_VERSION = '1.42.72'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260817111601';
+const APP_VERSION = '1.42.73'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -8881,15 +8881,15 @@ function renderM0VisitStats() {
       periods.forEach(p => {
         const v = m0Map[m0][p.key] || 0;
         rowSum += v; colTotals[p.key] = (colTotals[p.key] || 0) + v;
-        tds += `<td style="text-align:center">${v || ''}</td>`;
+        tds += `<td class="drill-td" style="text-align:center" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(m0+' '+p.label)}','${drillPut(fRows.filter(r => { const pk = m0vMode === 'month' ? r.date.slice(0, 7) : m0vWeekKey(r.date).key; return pk === p.key && r.m0 === m0; }))}')">${v || ''}</td>`;
       });
       grand += rowSum;
-      tds += `<td style="text-align:center;font-weight:700;background:#FFF8EE">${rowSum}</td>`;
+      tds += `<td class="drill-td" style="text-align:center;font-weight:700;background:#FFF8EE" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(m0+' 合计')}','${drillPut(fRows.filter(r => r.m0 === m0))}')">${rowSum}</td>`;
       body += `<tr>${tds}</tr>`;
     });
     let trow = '<td style="font-weight:700;position:sticky;left:0;background:#fff">合计</td>';
-    periods.forEach(p => trow += `<td style="text-align:center;font-weight:700;color:#16a34a">${colTotals[p.key] || 0}</td>`);
-    trow += `<td style="text-align:center;font-weight:800;background:#FFF8EE;color:#dc2626">${grand}</td>`;
+    periods.forEach(p => { const pRecs = fRows.filter(r => { const pk = m0vMode === 'month' ? r.date.slice(0, 7) : m0vWeekKey(r.date).key; return pk === p.key; }); trow += `<td class="drill-td" style="text-align:center;font-weight:700;color:#16a34a" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(p.label+' 合计')}','${drillPut(pRecs)}')">${colTotals[p.key] || 0}</td>`; });
+    trow += `<td class="drill-td" style="text-align:center;font-weight:800;background:#FFF8EE;color:#dc2626" title="点击查看明细" onclick="openDrillDetail('陪访总计','${drillPut(fRows)}')">${grand}</td>`;
     body += `<tr>${trow}</tr>`;
     matrixHtml = `<div class="table-wrap"><table class="table sticky-cols"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   } else {
@@ -8907,7 +8907,7 @@ function renderM0VisitStats() {
     { l: '参与 M0 数', v: m0Count, c: 'var(--warning)' },
     { l: '人均陪访', v: avg, c: 'var(--danger)' }
   ];
-  const kpiHtml = kpis.map(k => `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:${k.c}">${k.v}</div><div style="font-size:12px;color:var(--gray-500)">${k.l}</div></div>`).join('');
+  const kpiHtml = kpis.map(k => `<div style="cursor:pointer;text-align:center;padding:14px;background:var(--gray-50);border-radius:8px" onclick="openDrillDetail('${escapeTitle(k.l)}','${drillPut(fRows)}')"><div style="font-size:24px;font-weight:700;color:${k.c}">${k.v}</div><div style="font-size:12px;color:var(--gray-500)">${k.l}</div></div>`).join('');
   c.innerHTML = `
     <div class="card" style="margin-bottom:16px"><div class="card-header">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -9561,18 +9561,23 @@ function renderGroupedVisitStats(records, s, e, mode) {
     </th>`;
   }).join('');
   const bodyRows1 = display1.map(emp => {
-    const cells = events.map(ev => `<td style="text-align:center;padding:6px 8px">${matrix[emp][ev] || ''}</td>`).join('');
+    const cells = events.map(ev => {
+      const v = matrix[emp][ev] || 0;
+      const empRecords = byEmp[emp].records;
+      const evFiltered = ev ? empRecords.filter(r => (r.signinEvent||'').trim() === ev) : empRecords;
+      return `<td class="drill-td" style="text-align:center;padding:6px 8px" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(emp+' '+ev)}','${drillPut(evFiltered)}')">${v || ''}</td>`;
+    }).join('');
     const label = emp;
     return `<tr>
       <td style="white-space:nowrap;font-weight:600;padding:8px 10px">${label}</td>
       ${cells}
-      <td style="text-align:center;font-weight:700;background:var(--gray-50);padding:6px 8px">${rowTotals[emp]}</td>
+      <td class="drill-td" style="text-align:center;font-weight:700;background:var(--gray-50);padding:6px 8px" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(emp+' 签到事件合计')}','${drillPut(byEmp[emp].records)}')">${rowTotals[emp]}</td>
     </tr>`;
   }).join('');
   const totalRow1 = `<tr style="font-weight:700;background:var(--gray-50)">
     <td style="padding:8px 10px">合计</td>
-    ${events.map(ev => `<td style="text-align:center;padding:6px 8px">${colTotals[ev]}</td>`).join('')}
-    <td style="text-align:center;padding:6px 8px">${grandTotal}</td>
+    ${events.map(ev => { const evRecords = records.filter(r => (r.signinEvent||'').trim() === ev); return `<td class="drill-td" style="text-align:center;padding:6px 8px" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(ev+' 合计')}','${drillPut(evRecords)}')">${colTotals[ev]}</td>`; }).join('')}
+    <td class="drill-td" style="text-align:center;padding:6px 8px" title="点击查看明细" onclick="openDrillDetail('签到事件总计','${drillPut(records)}')">${grandTotal}</td>
   </tr>`;
   const table1 = `<div class="card" style="margin-bottom:0;overflow:hidden">
     <div class="card-header" style="padding:12px 16px;background:var(--gray-50);display:flex;align-items:center;justify-content:space-between;gap:10px">
@@ -9608,18 +9613,20 @@ function renderGroupedVisitStats(records, s, e, mode) {
     const cells = catNames.map(c => {
       const v = catMatrix[emp][c] || 0;
       const color = catColorMap[c] || '#6366f1';
-      return `<td style="text-align:center;padding:6px 8px${v ? ';color:' + color + ';font-weight:600' : ''}">${v || ''}</td>`;
+      const empRecords = byEmp[emp].records;
+      const catFiltered = empRecords.filter(r => { const ev = (r.signinEvent||'').trim(); const rc = ev ? (eventToCat[ev] || '未归类') : '未归类'; return rc === c; });
+      return `<td class="drill-td" style="text-align:center;padding:6px 8px${v ? ';color:' + color + ';font-weight:600' : ''}" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(emp+' '+c)}','${drillPut(catFiltered)}')">${v || ''}</td>`;
     }).join('');
     return `<tr>
       <td style="white-space:nowrap;font-weight:600;padding:8px 10px">${emp}</td>
       ${cells}
-      <td style="text-align:center;font-weight:700;background:var(--gray-50);padding:6px 8px">${catRowTotals[emp]}</td>
+      <td class="drill-td" style="text-align:center;font-weight:700;background:var(--gray-50);padding:6px 8px" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(emp+' 归类合计')}','${drillPut(byEmp[emp].records)}')">${catRowTotals[emp]}</td>
     </tr>`;
   }).join('');
   const catTotalRow2 = `<tr style="font-weight:700;background:var(--gray-50)">
     <td style="padding:8px 10px">合计</td>
-    ${catNames.map(c => `<td style="text-align:center;padding:6px 8px">${catTotals[c]}</td>`).join('')}
-    <td style="text-align:center;padding:6px 8px">${catGrand}</td>
+    ${catNames.map(c => { const catRecs = records.filter(r => { const ev = (r.signinEvent||'').trim(); const rc = ev ? (eventToCat[ev] || '未归类') : '未归类'; return rc === c; }); return `<td class="drill-td" style="text-align:center;padding:6px 8px" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(c+' 合计')}','${drillPut(catRecs)}')">${catTotals[c]}</td>`; }).join('')}
+    <td class="drill-td" style="text-align:center;padding:6px 8px" title="点击查看明细" onclick="openDrillDetail('归类总计','${drillPut(records)}')">${catGrand}</td>
   </tr>`;
   const table2 = `<div class="card" style="margin-bottom:0;overflow:hidden">
     <div class="card-header" style="padding:12px 16px;background:var(--gray-50);display:flex;align-items:center;justify-content:space-between;gap:10px">
