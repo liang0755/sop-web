@@ -178,6 +178,15 @@ tr:hover > .perf-freeze{
 .modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}
 .modal{background:#fff;border-radius:12px;padding:28px;width:460px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg)}
 .modal.modal-wide{width:1000px;max-width:95vw}
+/* 数字钻取:可点击的数字单元格 */
+.drill-num{cursor:pointer;color:var(--primary);border-bottom:1px dotted var(--primary);transition:background .12s}
+.drill-num:hover{background:rgba(37,99,235,.1);border-radius:4px}
+.drill-td{cursor:pointer;transition:background .12s}
+.drill-td:hover{background:rgba(37,99,235,.1)}
+.drill-table{width:100%;border-collapse:collapse;font-size:13px;background:#fff}
+.drill-table th,.drill-table td{border:1px solid var(--gray-200);padding:6px 10px;text-align:left;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}
+.drill-table th{background:var(--gray-50);position:sticky;top:0;z-index:1;font-weight:600}
+.drill-table tbody tr:nth-child(even){background:var(--gray-50)}
 .modal h3{font-size:18px;margin-bottom:20px}
 .modal .modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
 /* Remark popup */
@@ -840,8 +849,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260814145015';
-const APP_VERSION = '1.42.70'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260817102643';
+const APP_VERSION = '1.42.71'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -3607,17 +3616,17 @@ function renderSummaryTab() {
   const c=document.getElementById('sumResults');
   const f=v=>v>0?v.toLocaleString():'0';
   const fm=v=>v>0?'¥'+v.toLocaleString():'¥0';
-  if(summaryTab==='totals'){const t=summaryData.totals;c.innerHTML=`<div class="stat-grid">
-    <div class="stat-card"><div class="stat-icon" style="background:#dbeafe;color:#2563eb">📊</div><div class="stat-value">${summaryData.count}</div><div class="stat-label">报告总数</div></div>
-    <div class="stat-card"><div class="stat-icon" style="background:#dcfce7;color:#16a34a">🎯</div><div class="stat-value">${f(t.newLeads)}</div><div class="stat-label">新增精准线索</div></div>
-    <div class="stat-card"><div class="stat-icon" style="background:#ede9fe;color:#7c3aed">🤝</div><div class="stat-value">${f(t.effectiveContacts)}</div><div class="stat-label">有效建联数</div></div>
-    <div class="stat-card"><div class="stat-icon" style="background:#fef3c7;color:#f59e0b">💡</div><div class="stat-value">${f(t.abIntent)}</div><div class="stat-label">AB意向数</div></div>
-    <div class="stat-card"><div class="stat-icon" style="background:#fee2e2;color:#dc2626">✅</div><div class="stat-value">${f(t.closedCustomers)}</div><div class="stat-label">成交客户数</div></div>
-    <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;color:#4f46e5">💰</div><div class="stat-value" style="font-size:22px">${fm(t.dealAmount)}</div><div class="stat-label">成交金额</div></div>
+  if(summaryTab==='totals'){const t=summaryData.totals;const _allReports=drillPut(summaryData.reports||[]);c.innerHTML=`<div class="stat-grid">
+    <div class="stat-card" style="cursor:pointer" onclick="openDrillDetail('报告总数','${_allReports}')"><div class="stat-icon" style="background:#dbeafe;color:#2563eb">📊</div><div class="stat-value">${summaryData.count}</div><div class="stat-label">报告总数</div></div>
+    <div class="stat-card" style="cursor:pointer" onclick="openDrillDetail('新增精准线索','${_allReports}')"><div class="stat-icon" style="background:#dcfce7;color:#16a34a">🎯</div><div class="stat-value">${f(t.newLeads)}</div><div class="stat-label">新增精准线索</div></div>
+    <div class="stat-card" style="cursor:pointer" onclick="openDrillDetail('有效建联数','${_allReports}')"><div class="stat-icon" style="background:#ede9fe;color:#7c3aed">🤝</div><div class="stat-value">${f(t.effectiveContacts)}</div><div class="stat-label">有效建联数</div></div>
+    <div class="stat-card" style="cursor:pointer" onclick="openDrillDetail('AB意向数','${_allReports}')"><div class="stat-icon" style="background:#fef3c7;color:#f59e0b">💡</div><div class="stat-value">${f(t.abIntent)}</div><div class="stat-label">AB意向数</div></div>
+    <div class="stat-card" style="cursor:pointer" onclick="openDrillDetail('成交客户数','${_allReports}')"><div class="stat-icon" style="background:#fee2e2;color:#dc2626">✅</div><div class="stat-value">${f(t.closedCustomers)}</div><div class="stat-label">成交客户数</div></div>
+    <div class="stat-card" style="cursor:pointer" onclick="openDrillDetail('成交金额','${_allReports}')"><div class="stat-icon" style="background:#e0e7ff;color:#4f46e5">💰</div><div class="stat-value" style="font-size:22px">${fm(t.dealAmount)}</div><div class="stat-label">成交金额</div></div>
   </div><div class="card" style="margin-top:16px"><div class="card-header"><h4>汇总指标</h4></div><div class="card-body"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px">
-    <div><label style="font-size:12px;color:var(--gray-500)">建联转AB率</label><div style="font-size:20px;font-weight:700;color:var(--primary)">${t.contactToAbRate}</div></div>
-    <div><label style="font-size:12px;color:var(--gray-500)">目标金额</label><div style="font-size:20px;font-weight:700">${fm(t.targetAmount)}</div></div>
-    <div><label style="font-size:12px;color:var(--gray-500)">完成率</label><div style="font-size:20px;font-weight:700;color:${t.completionRate!=='0%'?'var(--success)':'var(--gray-500)'}">${t.completionRate}</div></div>
+    <div><label style="font-size:12px;color:var(--gray-500)">建联转AB率</label><div style="cursor:pointer;font-size:20px;font-weight:700;color:var(--primary)" onclick="openDrillDetail('建联转AB率','${_allReports}')">${t.contactToAbRate}</div></div>
+    <div><label style="font-size:12px;color:var(--gray-500)">目标金额</label><div style="cursor:pointer;font-size:20px;font-weight:700" onclick="openDrillDetail('目标金额','${_allReports}')">${fm(t.targetAmount)}</div></div>
+    <div><label style="font-size:12px;color:var(--gray-500)">完成率</label><div style="cursor:pointer;font-size:20px;font-weight:700;color:${t.completionRate!=='0%'?'var(--success)':'var(--gray-500)'}" onclick="openDrillDetail('完成率','${_allReports}')">${t.completionRate}</div></div>
   </div></div></div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-top:16px">
     <div class="card"><div class="card-header"><h4>📊 渠道数据对比</h4></div><div class="card-body"><canvas id="sumChartChannel" style="max-height:300px"></canvas></div></div>
@@ -9216,16 +9225,16 @@ function loadVisitStats() {
   const totalResulted = records.filter(r => r.visitResult).length;
   const colors = ['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
   // ===== 全部汇总 =====
-  let summaryCards = `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:var(--primary)">${totalVisits}</div><div style="font-size:12px;color:var(--gray-500)">总拜访数</div></div>`;
-  summaryCards += `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:var(--success)">${totalResulted}</div><div style="font-size:12px;color:var(--gray-500)">已标记结果</div></div>`;
+  let summaryCards = `<div style="cursor:pointer;text-align:center;padding:14px;background:var(--gray-50);border-radius:8px" onclick="openDrillDetail('总拜访数','${drillPut(records)}')"><div style="font-size:24px;font-weight:700;color:var(--primary)">${totalVisits}</div><div style="font-size:12px;color:var(--gray-500)">总拜访数</div></div>`;
+  summaryCards += `<div style="cursor:pointer;text-align:center;padding:14px;background:var(--gray-50);border-radius:8px" onclick="openDrillDetail('已标记结果','${drillPut(records.filter(r=>r.visitResult))}')"><div style="font-size:24px;font-weight:700;color:var(--success)">${totalResulted}</div><div style="font-size:12px;color:var(--gray-500)">已标记结果</div></div>`;
   allResults.forEach((result, idx) => {
     const count = records.filter(r => r.visitResult === result).length;
     const pct = totalVisits > 0 ? (count / totalVisits * 100).toFixed(1) : '0';
     const color = colors[idx % colors.length];
-    summaryCards += `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:${color}">${count}</div><div style="font-size:12px;color:var(--gray-500)">${result} (${pct}%)</div></div>`;
+    summaryCards += `<div style="cursor:pointer;text-align:center;padding:14px;background:var(--gray-50);border-radius:8px" onclick="openDrillDetail('${escapeTitle(result+' 拜访数')}','${drillPut(records.filter(r=>r.visitResult===result))}')"><div style="font-size:24px;font-weight:700;color:${color}">${count}</div><div style="font-size:12px;color:var(--gray-500)">${result} (${pct}%)</div></div>`;
   });
   const unmarked = totalVisits - totalResulted;
-  summaryCards += `<div style="text-align:center;padding:14px;background:var(--gray-50);border-radius:8px"><div style="font-size:24px;font-weight:700;color:var(--gray-400)">${unmarked}</div><div style="font-size:12px;color:var(--gray-500)">未标记</div></div>`;
+  summaryCards += `<div style="cursor:pointer;text-align:center;padding:14px;background:var(--gray-50);border-radius:8px" onclick="openDrillDetail('未标记结果','${drillPut(records.filter(r=>!r.visitResult))}')"><div style="font-size:24px;font-weight:700;color:var(--gray-400)">${unmarked}</div><div style="font-size:12px;color:var(--gray-500)">未标记</div></div>`;
   let summaryHtml = `<div class="card" style="margin-bottom:16px"><div class="card-header"><h4>📋 全部汇总(${s || '全部'} 至 ${e || '全部'})</h4></div><div class="card-body"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px">${summaryCards}</div></div></div>`;
   // ===== 按部门→拜访结果分组(矩阵表:行=拜访结果,列=部门,最后一列=汇总) =====
   const deptGroups = {};
@@ -9656,6 +9665,77 @@ function renderGroupedVisitStats(records, s, e, mode) {
 // ============ Modal ============
 function showModal(title,content,wide){document.getElementById('modalContainer').innerHTML=`<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal${wide?' modal-wide':''}"><h3>${title}</h3>${content}</div></div>`}
 function closeModal(){document.getElementById('modalContainer').innerHTML=''}
+
+// ============ 数字钻取明细(点击看板里的数字 → 弹窗显示构成它的原始记录) ============
+window.__drillStore = window.__drillStore || {};
+let __drillSeq = 0;
+// 常见节点字段 → 中文表头(未列出的用原始字段名)
+const DRILL_LABELS = {
+  docMonth:'月份', salesperson:'销售', team:'团队', amount:'金额', customerSource:'客户来源', customerProfile:'客户画像',
+  customer:'客户', product:'产品', reportDate:'日期', weekStart:'周开始', weekEnd:'周结束', name:'姓名', department:'部门',
+  channel:'渠道', newLeads:'新增线索', effectiveContacts:'有效建联', abIntent:'AB意向', closedCustomers:'成交客户',
+  dealAmount:'成交金额', targetAmount:'目标金额', issues:'问题/提升动作', channels:'渠道明细', contactTime:'接触时间',
+  employee:'员工', visitResult:'拜访结果', signinEvent:'签到事件', customerName:'客户', address:'地址',
+  score:'评分', level:'职级', actual:'实际值', standard:'要求', item:'考核项', note:'备注', workingDays:'在职天数',
+  base:'基数', bonus:'奖金', id:'ID', userId:'用户ID', year:'年份', month:'月', total:'合计', count:'数量',
+  aiScore:'AI评分', mgrScore:'管理评分', finalScore:'总评'
+};
+// 渲染数字格时调用:把该格对应的原始记录数组存入 store,返回可在 onclick 里引用的 key
+function drillPut(records){ const k='d'+(++__drillSeq); window.__drillStore[k]=Array.isArray(records)?records:[]; return k; }
+function drillColumns(records){
+  const sample = (records||[]).find(r=>r&&typeof r==='object')||{};
+  return Object.keys(sample).filter(k=>!k.startsWith('_') && k!=='__key' && typeof sample[k]!=='function');
+}
+function escapeTitle(t){ return String(t||'').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+function openDrillDetail(title, key){
+  const records = window.__drillStore[key] || [];
+  if (!records.length) { toast('暂无明细数据'); return; }
+  const cols = drillColumns(records);
+  const labels = cols.map(c => DRILL_LABELS[c] || c);
+  const body = records.slice(0,500).map(r=>'<tr>'+cols.map(c=>{
+    let v=r[c]; if(v&&typeof v==='object') v=JSON.stringify(v);
+    v=(v===undefined||v===null||v==='')?'':v;
+    return '<td>'+(v===''?'':escapeHtml(String(v)))+'</td>';
+  }).join('')+'</tr>').join('');
+  const content = `<div style="margin-bottom:10px;color:var(--gray-600);font-size:13px">共 <b>${records.length}</b> 条记录${records.length>500?'（仅显示前 500 条）':''}</div>
+    <div style="max-height:60vh;overflow:auto;border:1px solid var(--gray-200);border-radius:10px">
+    <table class="drill-table"><thead><tr>${labels.map(l=>'<th>'+escapeHtml(l)+'</th>').join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+      <button class="btn btn-outline btn-sm" onclick="exportDrillXLSX('${key}','${escapeTitle(title)}')">📊 导出Excel</button>
+      <button class="btn btn-outline btn-sm" onclick="exportDrillWord('${key}','${escapeTitle(title)}')">📄 导出Word</button>
+    </div>`;
+  showModal((title||'明细')+' · 明细', content, true);
+}
+async function exportDrillXLSX(key, title){
+  const records = window.__drillStore[key] || [];
+  if (!records.length) return;
+  try { await ensureXLSX(); } catch(e){ toast('Excel 组件加载失败'); return; }
+  const cols = drillColumns(records);
+  const labels = cols.map(c=>DRILL_LABELS[c]||c);
+  const data = [labels].concat(records.map(r=>cols.map(c=>{ let v=r[c]; if(v&&typeof v==='object') v=JSON.stringify(v); return v===undefined||v===null?'':v; })));
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '明细');
+  XLSX.writeFile(wb, (title||'明细')+'_'+new Date().toISOString().split('T')[0]+'.xlsx');
+}
+function exportDrillWord(key, title){
+  const records = window.__drillStore[key] || [];
+  if (!records.length) return;
+  const cols = drillColumns(records);
+  const labels = cols.map(c=>DRILL_LABELS[c]||c);
+  let html = '<html><head><meta charset="utf-8"></head><body>';
+  html += '<h2>'+escapeHtml(title||'明细')+'（共 '+records.length+' 条）</h2>';
+  html += '<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-size:12px">';
+  html += '<tr>'+labels.map(l=>'<th>'+escapeHtml(l)+'</th>').join('')+'</tr>';
+  records.slice(0,500).forEach(r=>{
+    html += '<tr>'+cols.map(c=>{ let v=r[c]; if(v&&typeof v==='object') v=JSON.stringify(v); v=(v===undefined||v===null||v==='')?'':v; return '<td>'+(v===''?'':escapeHtml(String(v)))+'</td>'; }).join('')+'</tr>';
+  });
+  html += '</table></body></html>';
+  const blob = new Blob([html], {type:'application/msword'});
+  const url = URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=(title||'明细')+'.doc'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ try{document.body.removeChild(a);}catch(e){} URL.revokeObjectURL(url); },1500);
+}
 function showImportOverlay(title) {
   let el = document.getElementById('importOverlay');
   if (!el) {
@@ -12029,7 +12109,8 @@ function renderSalesBoardTable(tid, key) {
     months.forEach(m => {
       const v = map[row.k][m] || 0;
       colTot[m] = (colTot[m] || 0) + v;
-      let cell = `<td class="num">${fmtSalesMoney(v)}`;
+      const _drill = cloudData.salesRecords.filter(r => r[key]===row.k && r.docMonth===m);
+      let cell = `<td class="num drill-td" title="点击查看明细" onclick="openDrillDetail('${escapeTitle((key==='team'?'团队 ':'销售 ')+row.k+' '+m.slice(5)+'月业绩')}','${drillPut(_drill)}')">${fmtSalesMoney(v)}`;
       if (key === 'team') {
         const lyv = (sbLastYearTeamMap[row.k] && sbLastYearTeamMap[row.k][lyMonth(m)]) ? sbLastYearTeamMap[row.k][lyMonth(m)] : 0;
         if (sbShowYoy) {
@@ -12062,11 +12143,11 @@ function renderSalesBoardTable(tid, key) {
       } else {
         totCell += `<div class="yoy-none">目标未设</div>`;
       }
-      h += `<td class="num">${totCell}</td>`;
+      h += `<td class="num drill-td" title="点击查看明细" onclick="openDrillDetail('${escapeTitle('团队 '+row.k+' 全年业绩')}','${drillPut(cloudData.salesRecords.filter(r=>r[key]===row.k && months.includes(r.docMonth)))}')">${totCell}</td>`;
       h += dynYoyCellHTML(row);
       h += `</tr>`;
     } else {
-      h += `<td class="num">${fmtSalesMoney(row.t)}</td>`;
+      h += `<td class="num drill-td" title="点击查看明细" onclick="openDrillDetail('${escapeTitle((key==='team'?'团队 ':'销售 ')+row.k+' 全年业绩')}','${drillPut(cloudData.salesRecords.filter(r=>r[key]===row.k && months.includes(r.docMonth)))}')">${fmtSalesMoney(row.t)}</td>`;
       h += dynYoyCellHTML(row);
       h += `</tr>`;
     }
@@ -12540,7 +12621,8 @@ function renderSalesBoardTableEff(tid, key) {
       const hc = (headcount[row.k] && headcount[row.k][m.slice(5)]) || 0;
       const eff = hc > 0 ? (v / hc) : 0;
       colTot[m] = (colTot[m] || 0) + v; colHc[m] = (colHc[m] || 0) + hc;
-      let cell = `<td class="num" style="white-space:nowrap">${fmtSalesMoney(v)}`;
+      const _drill = cloudData.salesRecords.filter(r => r[key]===row.k && r.docMonth===m);
+      let cell = `<td class="num drill-td" style="white-space:nowrap" title="点击查看明细" onclick="openDrillDetail('${escapeTitle('团队 '+row.k+' '+m.slice(5)+'月业绩')}','${drillPut(_drill)}')">${fmtSalesMoney(v)}`;
       cell += `<div style="font-size:11px;margin-top:2px;color:var(--gray-500);white-space:nowrap">人数 ${hc || '-'}</div>`;
       cell += `<div style="font-size:11px;font-weight:600;white-space:nowrap">人效 ${hc > 0 ? fmtSalesMoney(eff) : '-'}</div>`;
       cell += `</td>`;
@@ -14555,7 +14637,8 @@ function refreshPerfMatrix() {
       const score = getFinalScore(rec, cfg, year, row.sp, m);
       const saved = isPerfSnapshotSaved('sales', year, row.sp, m);
       const colorVal = saved ? scoreColor(score) : 'var(--gray-400)';
-      h += `<td class="num" style="text-align:center"><div>${level || '-'}</div><div style="color:${colorVal};font-weight:700">${score.toFixed(2)}</div></td>`;
+      const _salesRecs = cloudData.salesRecords.filter(r => (r.salesperson||'').trim()===row.sp && r.docMonth.slice(0,4)===year && parseInt(r.docMonth.slice(5),10)<=m);
+      h += `<td class="num" style="text-align:center"><div class="drill-num" onclick="openDrillDetail('${escapeTitle(row.sp+' '+m+'月 职级(累计业绩)')}','${drillPut(_salesRecs)}')">${level || '-'}</div><div class="drill-num" style="color:${colorVal};font-weight:700" onclick="openDrillDetail('${escapeTitle(row.sp+' '+m+'月 绩效评分')}','${drillPut(rec?[rec]:[])}')">${score.toFixed(2)}</div></td>`;
     });
     h += '</tr>';
   });
@@ -15929,7 +16012,7 @@ function refreshMgrPerfMatrix() {
       const score = getFinalScore(rec, cfg, year, row.mgr, m);
       const saved = isPerfSnapshotSaved('mgr', year, row.mgr, m);
       const colorVal = saved ? scoreColor(score) : 'var(--gray-400)';
-      h += `<td class="num" style="text-align:center"><div style="color:${colorVal};font-weight:700">${score.toFixed(2)}</div></td>`;
+      h += `<td class="num drill-td" style="text-align:center" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(row.mgr+' '+m+'月 绩效评分')}','${drillPut(rec?[rec]:[])}')"><div style="color:${colorVal};font-weight:700">${score.toFixed(2)}</div></td>`;
     });
     h += '</tr>';
   });
