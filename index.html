@@ -849,8 +849,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260817102643';
-const APP_VERSION = '1.42.71'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260817104912';
+const APP_VERSION = '1.42.72'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -2081,7 +2081,8 @@ function renderLastMonthSalesChampion() {
   if (!champ || champ.total <= 0) {
     return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上个月销冠</div><div class="champion-card-body"><div class="champion-empty">' + lastY + '年' + (lastM + 1) + '月暂无销售数据</div></div></div>';
   }
-  return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上个月销冠</div><div class="champion-card-body"><div class="champion-trophy">🥇</div><div class="champion-name">' + esc(champ.name) + '</div><div class="champion-meta">' + esc(champ.team || '-') + '</div><div class="champion-value">' + fmtSalesMoney(champ.total) + '</div><div class="champion-meta">' + lastY + '年' + (lastM + 1) + '月业绩</div></div></div>';
+  const _champRecs = (cloudData.salesRecords || []).filter(r => r.docMonth && r.docMonth.startsWith(ym) && (r.salesperson || '').trim() === champ.name);
+  return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上个月销冠</div><div class="champion-card-body"><div class="champion-trophy">🥇</div><div class="champion-name">' + esc(champ.name) + '</div><div class="champion-meta">' + esc(champ.team || '-') + '</div><div class="champion-value" style="cursor:pointer" title="点击查看明细" onclick="openDrillDetail(\'' + escapeTitle(champ.name + ' ' + lastY + '年' + (lastM + 1) + '月业绩') + '\',\'' + drillPut(_champRecs) + '\')">' + fmtSalesMoney(champ.total) + '</div><div class="champion-meta">' + lastY + '年' + (lastM + 1) + '月业绩</div></div></div>';
 }
 
 // 归一化 honorRecords:把历史 push ID 结构(每条独立 key + 含 awardMonth 字段)按月份聚合成 {YYYY-MM: [...]} 数组结构,
@@ -2196,7 +2197,8 @@ function renderLastWeekVisitChampion() {
     return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上周拜访冠军</div><div class="champion-card-body"><div class="champion-empty">' + lastMonStr + ' ~ ' + lastSunStr + ' 暂无拜访数据</div></div></div>';
   }
   const dept = ((cloudData.users || []).find(u => u.name === champ) || {}).department || '';
-  return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上周拜访冠军</div><div class="champion-card-body"><div class="champion-trophy">🥇</div><div class="champion-name">' + esc(champ) + '</div><div class="champion-meta">' + esc(dept) + '</div><div class="champion-value">' + max + ' 次</div><div class="champion-meta">' + lastMonStr + ' ~ ' + lastSunStr + ' 拜访</div></div></div>';
+  const _vcRecs = (cloudData.visitRecords || []).filter(r => { const vds = normContactTime(r.contactTime || '').split(' ')[0]; return vds >= lastMonStr && vds <= lastSunStr && (r.employee || '').trim() === champ; });
+  return '<div class="dash-new-card"><div class="dash-new-card-title">🏆 上周拜访冠军</div><div class="champion-card-body"><div class="champion-trophy">🥇</div><div class="champion-name">' + esc(champ) + '</div><div class="champion-meta">' + esc(dept) + '</div><div class="champion-value" style="cursor:pointer" title="点击查看明细" onclick="openDrillDetail(\'' + escapeTitle(champ + ' ' + lastMonStr + '~' + lastSunStr + ' 拜访') + '\',\'' + drillPut(_vcRecs) + '\')">' + max + ' 次</div><div class="champion-meta">' + lastMonStr + ' ~ ' + lastSunStr + ' 拜访</div></div></div>';
 }
 
 // 当月漏交周报日历看板:与漏交日报同格式,某天所在周(周一~周日)若未提交周报则该周整周标红
@@ -2344,8 +2346,8 @@ function renderDashboard() {
     <div class="card" style="margin-bottom:20px">
       <div class="card-header"><h4>📌 日报提交情况</h4>
         <div style="display:flex;gap:8px;align-items:center">
-          <span class="badge badge-success">已交 ${dailySubmitters.size}</span>
-          <span class="badge badge-danger">未交 ${dailyMissing.length}</span>
+          <span class="badge badge-success drill-td" title="点击查看明细" onclick="openDrillDetail('日报已交(${dailyDate})','${drillPut(cloudData.dailyReports.filter(r => r.reportDate === dailyDate))}')">已交 ${dailySubmitters.size}</span>
+          <span class="badge badge-danger drill-td" title="点击查看明细" onclick="openDrillDetail('日报未交(${dailyDate})','${drillPut(dailyMissing)}')">未交 ${dailyMissing.length}</span>
           <button class="btn btn-outline btn-sm" onclick="refreshAndRender()">🔄 刷新</button>
         </div>
       </div>
@@ -2361,7 +2363,7 @@ function renderDashboard() {
         ` : '<div class="empty-state" style="padding:20px"><div class="icon" style="font-size:32px">✅</div>' + dailyDate + ' 全员已提交日报!</div>'}
         ${dailyDate === yesterday && dailyBackfill.length > 0 ? `
           <div style="margin-top:12px;padding:10px 14px;background:var(--warning-light);border:1px solid #fde68a;border-radius:8px;font-size:12px;color:var(--gray-700)">
-            <strong>📝 补交提醒:</strong>今日有 ${dailyBackfill.length} 人补交了前天(${dayBeforeYest})的日报:
+            <strong>📝 补交提醒:</strong>今日有 <span class="drill-td" style="cursor:pointer;font-weight:700" title="点击查看明细" onclick="openDrillDetail('前天日报补交(${dayBeforeYest})','${drillPut(dailyBackfill)}')">${dailyBackfill.length}</span> 人补交了前天(${dayBeforeYest})的日报:
             ${dailyBackfill.map(r => r.name).join(',')}
           </div>` : ''}
       </div>
@@ -2375,8 +2377,8 @@ function renderDashboard() {
     <div class="card" style="margin-bottom:20px">
       <div class="card-header"><h4>📋 周报提交情况</h4>
         <div style="display:flex;gap:8px;align-items:center">
-          <span class="badge badge-success">已交 ${weeklySubmitters.size}</span>
-          <span class="badge badge-danger">未交 ${weeklyMissing.length}</span>
+          <span class="badge badge-success drill-td" title="点击查看明细" onclick="openDrillDetail('周报已交(${weeklyDate} ~ ${weeklyDateEnd})','${drillPut(cloudData.weeklyReports.filter(r => r.weekStart === weeklyDate))}')">已交 ${weeklySubmitters.size}</span>
+          <span class="badge badge-danger drill-td" title="点击查看明细" onclick="openDrillDetail('周报未交(${weeklyDate} ~ ${weeklyDateEnd})','${drillPut(weeklyMissing)}')">未交 ${weeklyMissing.length}</span>
         </div>
       </div>
       <div class="card-body">
@@ -13418,6 +13420,7 @@ function refreshM0Grade() {
     months.forEach(m => {
       const v = row.amts[m];
       colTot[m] += v;
+      const _m0Recs = cloudData.salesRecords.filter(r => { const sp=(r.salesperson||'').trim(); const dm=r.docMonth||''; return dm===year+'-'+String(m).padStart(2,'0') && (sp===m0 || (row.g.members||[]).indexOf(sp)>=0); });
       const k = m0Key(year, m0, m);
       const rec = (cloudData.m0Records && cloudData.m0Records[k]) || {};
       const grade = m0EffectiveGrade(k, rec.grade || '');
@@ -13427,14 +13430,18 @@ function refreshM0Grade() {
       const chgBg = chgAuto === '升级' ? 'background-color:#fdecec' : (chgAuto === '降级' ? 'background-color:#e8f5ec' : '');
       const isPending = !!m0Pending[k];
       const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600">●暂存</span> ` : '';
-      h += `<td class="num" style="${chgBg}"><div style="font-weight:600">${fmtSalesMoney(v)}</div>`
+      h += `<td class="num" style="${chgBg}"><div class="drill-td" style="font-weight:600;cursor:pointer" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(m0+' '+m+'月 M0考核业绩')}','${drillPut(_m0Recs)}')">${fmtSalesMoney(v)}</div>`
          + `<div style="margin-top:4px">${badge}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 4px;height:auto" onchange="m0Stage('${k}', {grade:this.value})">${gradeOpts}</select></div></td>`;
     });
     totalAll += row.total;
-    h += `<td class="num" style="font-weight:700">${fmtSalesMoney(row.total)}</td></tr>`;
+    const _m0All = cloudData.salesRecords.filter(r => { const sp=(r.salesperson||'').trim(); const dm=(r.docMonth||'').slice(0,4); return dm===year && (sp===m0 || (row.g.members||[]).indexOf(sp)>=0); });
+    h += `<td class="num drill-td" style="font-weight:700;cursor:pointer" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(m0+' 全年 M0考核业绩')}','${drillPut(_m0All)}')">${fmtSalesMoney(row.total)}</td></tr>`;
   });
   h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
-  months.forEach(m => { h += `<td class="num">${fmtSalesMoney(colTot[m])}</td>`; });
+  months.forEach(m => {
+    const _m0Tot = cloudData.salesRecords.filter(r => { const sp=(r.salesperson||'').trim(); const dm=r.docMonth||''; if (dm !== year+'-'+String(m).padStart(2,'0')) return false; return groups.some(g => sp===(g.m0||'') || ((g.members||[]).indexOf(sp)>=0)); });
+    h += `<td class="num drill-td" style="cursor:pointer" title="点击查看明细" onclick="openDrillDetail('${escapeTitle('M0 合计 '+m+'月')}','${drillPut(_m0Tot)}')">${fmtSalesMoney(colTot[m])}</td>`;
+  });
   h += `<td class="num">${fmtSalesMoney(totalAll)}</td></tr></tfoot>`;
   const tbl = document.getElementById('sgTable');
   if (tbl) tbl.innerHTML = h;
@@ -13476,7 +13483,7 @@ function refreshM0GradeSingle() {
     const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600">●暂存</span> ` : '';
     h += `<tr><td>${esc(m0)}${userStatusBadge(m0, statusMap)}</td>`
        + `<td>${esc(team)}</td>`
-       + `<td class="num" style="font-weight:600">${fmtSalesMoney(row.v)}</td>`
+       + `<td class="num drill-td" style="font-weight:600;cursor:pointer" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(m0+' '+month+'月 M0考核业绩')}','${drillPut(cloudData.salesRecords.filter(r => { const sp=(r.salesperson||'').trim(); const dm=r.docMonth||''; return dm===year+'-'+String(month).padStart(2,'0') && (sp===m0 || (row.g.members||[]).indexOf(sp)>=0); }))}')">${fmtSalesMoney(row.v)}</td>`
        + `<td>${badge}<select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:auto" onchange="m0Stage('${k}', {grade:this.value})">${gradeOpts}</select></td>`
        + `<td style="text-align:center;font-weight:700;color:${chgColor}">${chgAuto || '-'}</td>`
        + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:13px;color:#dc2626;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="m0Stage('${k}', {note:this.value})">${esc(note)}</textarea></td>`
@@ -13613,7 +13620,9 @@ function refreshSalesGrade() {
       const restoreBtn = canRestore ? `<button type="button" title="恢复为自动评级" onclick="sgStage('${k}', {grade:GRADE_AUTO})" style="padding:0;width:22px;height:22px;font-size:13px;line-height:1;border:1px solid #d6deeb;border-radius:6px;background:#fff;cursor:pointer;color:var(--gray-500);flex-shrink:0">↺</button>` : '';
       const badge = isPending ? `<span style="font-size:9px;color:#2563eb;font-weight:600">●暂存</span>` : '';
       const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
-      h += `<td class="num" style="${chgBg}"><div style="font-weight:600;line-height:1.2">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400);line-height:1.2">单月 ${fmtSalesMoney(single)}</div>`
+      const _rollRecs = cloudData.salesRecords.filter(r => { const dm=r.docMonth||''; if ((r.salesperson||'').trim() !== row.sp) return false; const mm=parseInt(dm.slice(5,7),10); return dm.slice(0,4)===year && mm>=Math.max(1,m-2) && mm<=m; });
+      const _singleRecs = cloudData.salesRecords.filter(r => (r.salesperson||'').trim() === row.sp && r.docMonth === year+'-'+String(m).padStart(2,'0'));
+      h += `<td class="num" style="${chgBg}"><div class="drill-td" style="font-weight:600;line-height:1.2;cursor:pointer" title="点击查看明细(近3月)" onclick="openDrillDetail('${escapeTitle(row.sp+' '+m+'月 评级业绩(滚动3月)')}','${drillPut(_rollRecs)}')">${fmtSalesMoney(v)}</div><div class="drill-td" style="font-size:10px;color:var(--gray-400);line-height:1.2;cursor:pointer" title="点击查看明细(单月)" onclick="openDrillDetail('${escapeTitle(row.sp+' '+m+'月 单月业绩')}','${drillPut(_singleRecs)}')">单月 ${fmtSalesMoney(single)}</div>`
          + `<div style="margin-top:2px;display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:11px;padding:1px 3px;height:22px;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div>`
          + (badge ? `<div style="font-size:9px;line-height:1.2;text-align:center;margin-top:1px">${badge}</div>` : '')
          + `</td>`;
@@ -13623,8 +13632,12 @@ function refreshSalesGrade() {
   if (!rows.length) {
     h += `<tr><td colspan="${months.length + 2}" style="text-align:center;color:var(--gray-400);padding:24px">本年度暂无在职销售的业绩数据</td></tr>`;
   }
+  const _dispSp = new Set(rows.map(r => r.sp));
   h += '</tbody><tfoot><tr class="total-row"><td>合计</td><td>-</td>';
-  months.forEach(m => { h += `<td class="num">${fmtSalesMoney(colTot[m])}</td>`; });
+  months.forEach(m => {
+    const _sgTot = cloudData.salesRecords.filter(r => { const sp=(r.salesperson||'').trim(); if (!_dispSp.has(sp)) return false; const dm=r.docMonth||''; const mm=parseInt(dm.slice(5,7),10); return dm.slice(0,4)===year && mm>=Math.max(1,m-2) && mm<=m; });
+    h += `<td class="num drill-td" style="cursor:pointer" title="点击查看明细" onclick="openDrillDetail('${escapeTitle('销售合计 '+m+'月(滚动3月)')}','${drillPut(_sgTot)}')">${fmtSalesMoney(colTot[m])}</td>`;
+  });
   h += '</tr></tfoot>';
   const tbl = document.getElementById('sgTable');
   if (tbl) tbl.innerHTML = h;
@@ -13758,7 +13771,7 @@ function refreshSalesGradeSingle() {
     const opts = gradeOpts.map(o => `<option value="${o.replace(/"/g,'&quot;')}" ${o === grade ? 'selected' : ''}>${o}</option>`).join('');
     h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td>`
        + `<td>${esc(row.team) || '-'}</td>`
-       + `<td class="num"><div style="font-weight:600">${fmtSalesMoney(v)}</div><div style="font-size:10px;color:var(--gray-400)">单月 ${fmtSalesMoney(single)}</div></td>`
+       + `<td class="num"><div class="drill-td" style="font-weight:600;cursor:pointer" title="点击查看明细(近3月)" onclick="openDrillDetail('${escapeTitle(row.sp+' '+month+'月 评级业绩(滚动3月)')}','${drillPut(cloudData.salesRecords.filter(r => { const dm=r.docMonth||''; if ((r.salesperson||'').trim() !== row.sp) return false; const mm=parseInt(dm.slice(5,7),10); return dm.slice(0,4)===year && mm>=Math.max(1,month-2) && mm<=month; }))}')">${fmtSalesMoney(v)}</div><div class="drill-td" style="font-size:10px;color:var(--gray-400);cursor:pointer" title="点击查看明细(单月)" onclick="openDrillDetail('${escapeTitle(row.sp+' '+month+'月 单月业绩')}','${drillPut(cloudData.salesRecords.filter(r => (r.salesperson||'').trim() === row.sp && r.docMonth === year+'-'+String(month).padStart(2,'0')))}')">单月 ${fmtSalesMoney(single)}</div></td>`
        + `<td>${badge}<div style="display:flex;gap:4px;align-items:center">${restoreBtn}<select class="form-control form-control-sm" style="font-size:12px;padding:2px 6px;height:24px;flex:1;min-width:0" onchange="sgStage('${k}', {grade:this.value})">${opts}</select></div></td>`
        + `<td style="text-align:center">${upFlag}</td>`
        + `<td><textarea class="form-control form-control-sm" rows="2" style="font-size:13px;color:#dc2626;padding:2px 6px;height:auto;resize:vertical;min-height:34px" placeholder="备注" onchange="sgStage('${k}', {note:this.value})">${esc(note)}</textarea></td>`
@@ -15098,7 +15111,8 @@ function refreshM0PerfMatrix() {
       const score = getFinalScore(rec, cfg, year, row.m0, m);
       const saved = isPerfSnapshotSaved('m0', year, row.m0, m);
       const colorVal = saved ? scoreColor(score) : 'var(--gray-400)';
-      h += `<td class="num" style="text-align:center"><div>${level || '-'}</div><div style="color:${colorVal};font-weight:700">${score.toFixed(2)}</div></td>`;
+      const _m0pRec = getM0PerfRecord(year, row.m0, m);
+      h += `<td class="num" style="text-align:center"><div>${level || '-'}</div><div class="drill-num" style="color:${colorVal};font-weight:700;cursor:pointer" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(row.m0+' '+m+'月 绩效评分')}','${drillPut((_m0pRec && Object.keys(_m0pRec).length) ? [_m0pRec] : [])}')">${score.toFixed(2)}</div></td>`;
     });
     h += '</tr>';
   });
@@ -15209,7 +15223,7 @@ function refreshM0PerfSingle() {
       })();
       h += `<td style="background:#FFF8EE">${stdCell}</td>`;
       h += `<td style="background:#FFF8EE">${actCell}</td>`;
-      h += `<td style="text-align:center;font-weight:600">${Number(x.score).toFixed(2)}</td>`;
+      h += `<td class="drill-td" style="text-align:center;font-weight:600;cursor:pointer" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(row.m0+' '+month+'月 '+x.it.name+' 得分')}','${drillPut((rec0 && Object.keys(rec0).length) ? [rec0] : [])}')">${Number(x.score).toFixed(2)}</td>`;
     });
     d.bonus.forEach(x => {
       if (d.frozen) {
@@ -15231,7 +15245,7 @@ function refreshM0PerfSingle() {
       h += `<td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;min-height:40px;font-size:12px;width:100%" onchange="saveM0PerfByKey('${k}', {comment:this.value})" placeholder="评语">${esc(d.comment || '')}</textarea></td>`;
     }
     if (d.frozen) {
-      h += `<td style="text-align:center;color:${scoreColor(d.finalScore)};font-weight:700">${Number(d.finalScore).toFixed(2)}</td>`;
+      h += `<td class="drill-td" style="text-align:center;color:${scoreColor(d.finalScore)};font-weight:700;cursor:pointer" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(row.m0+' '+month+'月 绩效评分')}','${drillPut((rec0 && Object.keys(rec0).length) ? [rec0] : [])}')">${Number(d.finalScore).toFixed(2)}</td>`;
     } else {
       const resetBtn = isManualScore ? `<button class="btn btn-xs btn-outline" title="重置为公式自动值" onclick="saveM0PerfByKey('${k}', {finalScore:null})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
       h += `<td style="text-align:center">${resetBtn}<input type="number" class="form-control form-control-sm" value="${Number(d.finalScore).toFixed(2)}" onchange="saveM0PerfByKey('${k}', {finalScore:this.value===''||this.value===null?null:parseFloat(this.value)})" style="width:90px;margin-top:2px;color:${scoreColor(d.finalScore)};font-weight:700"></td>`;
