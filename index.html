@@ -359,6 +359,8 @@ tr:hover > .perf-freeze{
 .skill-card .skill-name{font-weight:600;font-size:14px;margin-bottom:4px;padding-right:22px;color:var(--gray-900)}
 .skill-card .skill-desc{font-size:12px;color:var(--gray-600);line-height:1.5}
 .skill-card-del{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--gray-400);background:var(--gray-100);cursor:pointer}
+.skill-card-del.edit{right:32px;color:var(--primary);background:var(--primary-light,#eef2ff)}
+.skill-card-del:hover{color:#fff;background:var(--danger)}
 .skill-card-del:hover{background:#fee2e2;color:#ef4444}
 .skill-empty{font-size:13px;color:var(--gray-500);text-align:center;padding:24px 8px;line-height:1.6}
 @media (max-width:900px){
@@ -849,8 +851,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260818143132';
-const APP_VERSION = '1.42.74'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260818145652';
+const APP_VERSION = '1.42.75'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -4969,11 +4971,11 @@ function renderSkillList() {
     const s = skills[id] || {};
     const name = escapeHtml(s.name || '未命名');
     const desc = escapeHtml(s.desc || '');
-    const delBtn = hasPermission('admin') ? `<span class="skill-card-del" title="删除" onclick="event.stopPropagation();deleteSkill('${id}')">✕</span>` : '';
+    const adminBtns = hasPermission('admin') ? `<span class="skill-card-del edit" title="修改" onclick="event.stopPropagation();openSkillEditModal('${id}')">✎</span><span class="skill-card-del" title="删除" onclick="event.stopPropagation();deleteSkill('${id}')">✕</span>` : '';
     return `<div class="skill-card" onclick="useSkill('${id}')">
       <div class="skill-name">${name}</div>
       ${desc ? `<div class="skill-desc">${desc}</div>` : ''}
-      ${delBtn}
+      ${adminBtns}
     </div>`;
   }).join('');
 }
@@ -5017,6 +5019,43 @@ function saveSkill() {
     renderSkillList();
     closeModal();
     showToast('Skill「' + name + '」已创建', 'success');
+  }).catch(err => {
+    if (alert) alert.innerHTML = '<div class="alert alert-danger">保存失败:' + escapeHtml(err.message) + '</div>';
+  });
+}
+
+// ---------- Skill 修改(仅管理员) ----------
+function openSkillEditModal(id) {
+  if (!hasPermission('admin')) return;
+  const s = (cloudData.skills || {})[id] || {};
+  const content = `<div id="skillFormAlert"></div>
+    <div class="form-group"><label>名称 <span style="color:#ef4444">*</span></label><input type="text" class="form-control" id="skillName" value="${escapeHtml(s.name || '')}" maxlength="40"></div>
+    <div class="form-group"><label>描述</label><input type="text" class="form-control" id="skillDesc" value="${escapeHtml(s.desc || '')}" maxlength="120"></div>
+    <div class="form-group"><label>提示词(Prompt) <span style="color:#ef4444">*</span></label><textarea class="form-control" id="skillPrompt" rows="6" placeholder="写给 AI 的完整指令,例如:你是一名销售数据分析师,请基于本月各部门日报...">${escapeHtml(s.prompt || '')}</textarea></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-outline" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveSkillEdit('${id}')">保存修改</button>
+    </div>`;
+  showModal('✎ 修改 Skill', content, true);
+  setTimeout(() => { const el = document.getElementById('skillName'); if (el) el.focus(); }, 30);
+}
+function saveSkillEdit(id) {
+  if (!hasPermission('admin')) return;
+  const name = (document.getElementById('skillName')?.value || '').trim();
+  const desc = (document.getElementById('skillDesc')?.value || '').trim();
+  const prompt = (document.getElementById('skillPrompt')?.value || '').trim();
+  const alert = document.getElementById('skillFormAlert');
+  if (!name || !prompt) {
+    if (alert) alert.innerHTML = '<div class="alert alert-danger">请填写名称和提示词</div>';
+    return;
+  }
+  const data = { id, name, desc, prompt };
+  apiUpdate('skills', id, data).then(() => {
+    cloudData.skills = cloudData.skills || {};
+    cloudData.skills[id] = data;
+    renderSkillList();
+    closeModal();
+    showToast('Skill「' + name + '」已更新', 'success');
   }).catch(err => {
     if (alert) alert.innerHTML = '<div class="alert alert-danger">保存失败:' + escapeHtml(err.message) + '</div>';
   });
@@ -5824,6 +5863,8 @@ function escapeAIHTML(text) {
 
 function renderAIMarkdown(text) {
   let html = escapeAIHTML(text);
+  // 归一化换行(兼容 \r\n / \r,避免换行显示失效)
+  html = html.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   // Code blocks
   html = html.replace(/```([\s\S]*?)```/g, (m, c) => '<pre style="background:var(--gray-100);padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;margin:8px 0"><code>' + c.trim() + '</code></pre>');
   // Tables
@@ -5903,6 +5944,7 @@ function downloadAITable(btn, format) {
 
 function renderMarkdownForWord(text) {
   let html = escapeAIHTML(text);
+  html = html.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   html = html.replace(/```([\s\S]*?)```/g, (m, c) => '<pre style="background:#f5f5f5;padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;margin:8px 0"><code>' + c.trim() + '</code></pre>');
   html = html.replace(/((?:^\|.+\|$\n?)+)/gm, (m, table) => {
     const lines = table.trim().split('\n');
@@ -6002,7 +6044,7 @@ function appendAIMessage(role, content, images, files) {
   if (role === 'assistant') {
     div.innerHTML = renderAIMarkdown(content);
   } else if (role === 'user') {
-    div.textContent = content;
+    div.innerHTML = escapeAIHTML(content).replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '<br>');
     if (images && images.length > 0) {
       const imgDiv = document.createElement('div');
       imgDiv.className = 'ai-msg-images';
