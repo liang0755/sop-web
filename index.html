@@ -853,8 +853,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260825185718';
-const APP_VERSION = '1.42.81'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260825190127';
+const APP_VERSION = '1.42.82'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -2491,7 +2491,8 @@ function checkExistingReport(type) {
 
 // 选择非当天(日报)/非当周(周报)时,底部提交按钮变红色"补交日报/周报"
 function updateSubmitButtonLabel(type) {
-  const btn = document.querySelector('.sticky-submit-bar .btn-primary');
+  // 用 id 定位:按钮变红时 btn-primary 类被移除,按类选择器会找不到导致切换不回
+  const btn = document.getElementById('submitReportBtn');
   if (!btn) return;
   const dateEl = document.getElementById('reportDate');
   if (!dateEl || !dateEl.value) return;
@@ -2561,7 +2562,7 @@ function renderReportForm(type) {
     <div style="height:70px"></div>
     <div class="sticky-submit-bar">
       <button class="btn btn-outline" onclick="navTo('dashboard')">取消</button>
-      <button class="btn btn-primary" onclick="submitReport('${type}')">✓ 提交${isDaily?'日报':'周报'}</button>
+      <button class="btn btn-primary" id="submitReportBtn" onclick="submitReport('${type}')">✓ 提交${isDaily?'日报':'周报'}</button>
     </div>
   </div>`;
   document.getElementById('channelForms').innerHTML = channels.map((ch,idx) => {
@@ -2977,7 +2978,8 @@ async function submitReport(type) {
     showToast('请至少填写一项内容后再提交', 'warning', 3000);
     return;
   }
-  const submitBtns = document.querySelectorAll('.sticky-submit-bar .btn-primary');
+  // 兼容补交红色状态:按钮可能为 btn-primary(正常) 或 btn-danger(补交)
+  const submitBtns = document.getElementById('submitReportBtn') ? [document.getElementById('submitReportBtn')] : document.querySelectorAll('.sticky-submit-bar .btn-primary, .sticky-submit-bar .btn-danger');
   submitBtns.forEach(b => { b.disabled = true; b.dataset.original = b.textContent; b.textContent = '⏳ 提交中...'; });
   const channelData = channels.map((ch, idx) => {
     const g = document.querySelector(`.channel-form-grid[data-idx="${idx}"]`);
