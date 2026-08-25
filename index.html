@@ -853,8 +853,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260825184932';
-const APP_VERSION = '1.42.80'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260825185718';
+const APP_VERSION = '1.42.81'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -2456,6 +2456,7 @@ function onDashWeeklyDateChange(val) {
 
 // Check if a report already exists for the selected date
 function checkExistingReport(type) {
+  updateSubmitButtonLabel(type); // 同步底部提交按钮(非当天/当周 → 红色"补交日报/周报")
   const dateVal = document.getElementById('reportDate').value;
   if (!dateVal) return;
   const isDaily = type === 'daily';
@@ -2486,6 +2487,26 @@ function checkExistingReport(type) {
       ? '<div class="alert alert-warning">⚠️ 该日期为超期补交,提交后将进入审批流,由管理员审批通过后才会写入数据</div>'
       : '';
   }
+}
+
+// 选择非当天(日报)/非当周(周报)时,底部提交按钮变红色"补交日报/周报"
+function updateSubmitButtonLabel(type) {
+  const btn = document.querySelector('.sticky-submit-bar .btn-primary');
+  if (!btn) return;
+  const dateEl = document.getElementById('reportDate');
+  if (!dateEl || !dateEl.value) return;
+  const isDaily = type === 'daily';
+  const isBackfill = isDaily ? (dateEl.value !== localYMD()) : (dateEl.value !== getWeekStart());
+  if (isBackfill) {
+    btn.classList.add('btn-danger');
+    btn.classList.remove('btn-primary');
+    btn.textContent = '📮 补交' + (isDaily ? '日报' : '周报');
+  } else {
+    btn.classList.remove('btn-danger');
+    btn.classList.add('btn-primary');
+    btn.textContent = '✓ 提交' + (isDaily ? '日报' : '周报');
+  }
+  btn.dataset.original = btn.textContent; // 同步原始文本,提交完成后按此恢复
 }
 
 // 选择填写人(代填)支持:仅拥有 editOthers 权限(主管/管理员)可切换,默认本人
@@ -2685,6 +2706,7 @@ function doRestoreDraft(type) {
   if (!draft) return;
   // Restore date and remark
   if (draft.date) { const d = document.getElementById('reportDate'); if (d) d.value = draft.date; }
+  updateSubmitButtonLabel(type); // 恢复草稿日期后同步补交按钮
   if (draft.remark) { const r = document.getElementById('reportRemark'); if (r) r.value = draft.remark; }
   // Restore channel data
   const channels = getChannels(type);
