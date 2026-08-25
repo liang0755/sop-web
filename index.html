@@ -35,6 +35,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft Y
 .sidebar-refresh-time{display:block;margin-top:6px;font-size:10px;color:var(--gray-500)}
 .nav-menu{flex:1;padding:12px 0;overflow-y:auto}
 .nav-item{display:flex;align-items:center;gap:10px;padding:11px 20px;color:var(--gray-300);cursor:pointer;font-size:14px;border-left:3px solid transparent;transition:all .2s}
+.nav-badge{margin-left:auto;background:var(--danger,#dc2626);color:#fff;font-size:11px;line-height:1;padding:3px 6px;border-radius:10px;min-width:18px;text-align:center;font-weight:600}
 .nav-item:hover{background:rgba(255,255,255,.05);color:#fff}
 .nav-item.active{background:rgba(37,99,235,.15);color:#fff;border-left-color:var(--primary)}
 .nav-item .icon{font-size:16px;width:20px;text-align:center}
@@ -733,6 +734,7 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
       <div class="nav-section-title">工作台</div>
       <div class="nav-item active" data-page="dashboard" onclick="navTo('dashboard')"><span class="icon">🏠</span> 首页</div>
       <div class="nav-item" data-page="aiWorkbench" onclick="navTo('aiWorkbench')" id="navAIWorkbench"><span class="icon">🤖</span> AI工作台</div>
+      <div class="nav-item" data-page="approvals" onclick="navTo('approvals')" id="navApprovals"><span class="icon">🕓</span> 审批中心<span class="nav-badge" id="approvalsNavBadge" style="display:none"></span></div>
 
       <div class="nav-section-title">日报周报</div>
       <div class="nav-item" data-page="dailyForm" onclick="navTo('dailyForm')"><span class="icon">📝</span> 日报填写</div>
@@ -781,7 +783,7 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}, honorRecords:{}, filterDefaults:{}, skills:{}};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}, honorRecords:{}, filterDefaults:{}, skills:{}, approvals:[]};
 let currentUser = null;
 let isCloudAvailable = false;
 let cloudConfirmedViaSibling = false; // 已通过兄弟标签页确认云端可达:loadUsersOnly 拉取失败时不再把 isCloudAvailable 下探为 false
@@ -851,8 +853,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260821110641';
-const APP_VERSION = '1.42.77'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260825171610';
+const APP_VERSION = '1.42.78'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -926,7 +928,7 @@ async function loadCoreData() {
 }
 async function loadCoreDataFresh() {
   try {
-    const [fRes, bRes, dRes, aRes, rRes, vRes, hRes, fdRes, sRes] = await Promise.all([
+    const [fRes, bRes, dRes, aRes, rRes, vRes, hRes, fdRes, sRes, apRes] = await Promise.all([
       fetch(FB_BASE + '/formConfig.json'),
       fetch(FB_BASE + '/brandConfig.json'),
       fetch(FB_BASE + '/departments.json'),
@@ -935,7 +937,8 @@ async function loadCoreDataFresh() {
       fetch(FB_BASE + '/visitConfig.json'),
       fetch(FB_BASE + '/honorRecords.json'),
       fetch(FB_BASE + '/filterDefaults.json'),
-      fetch(FB_BASE + '/skills.json')
+      fetch(FB_BASE + '/skills.json'),
+      fetch(FB_BASE + '/approvals.json')
     ]);
     const fcData = fRes.ok ? await fRes.json() : null;
     cloudData.formConfig = fcData || JSON.parse(JSON.stringify(DEFAULT_FORM_CONFIG));
@@ -1079,6 +1082,8 @@ async function loadCoreDataFresh() {
     if (!cloudData.filterDefaults || typeof cloudData.filterDefaults !== 'object') cloudData.filterDefaults = {};
     const skData = sRes.ok ? await sRes.json() : null;
     cloudData.skills = (skData && typeof skData === 'object') ? skData : {};
+    const apData = apRes.ok ? await apRes.json() : null;
+    cloudData.approvals = Array.isArray(apData) ? apData : (apData && typeof apData === 'object' ? Object.values(apData) : []);
     if (typeof renderSkillList === 'function') renderSkillList(); // 核心配置加载完成后,若 Ai工作台已挂载则刷新 Skill 列表
     filterDefaultsLoaded = true; // 标记云端默认值已就绪:此后 takeFilterDefault/takeSelectDefault 才会应用并锁守卫
     applyFilterDefaultsToRenderedDOM(); // 直接回填已渲染 DOM(绕过整页重绘时序/canAutoRerender 拦截)
@@ -1103,6 +1108,7 @@ async function loadCoreDataFresh() {
     cloudData.mgrPerformanceSnapshots = {};
     cloudData.honorRecords = {};
     cloudData.skills = {};
+    cloudData.approvals = [];
     if (!cloudData.formConfig.m0Config || !Array.isArray(cloudData.formConfig.m0Config.groups)) {
       cloudData.formConfig.m0Config = { groups: [] };
     }
@@ -1587,21 +1593,23 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',aiWorkbench:'AI工作台',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计',mgrPerf:'管理绩效统计'};
+  const titles = {dashboard:'首页',aiWorkbench:'AI工作台',approvals:'审批中心',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计',mgrPerf:'管理绩效统计'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
   // 浏览器标签页标题带上功能模块名,便于在多标签间区分(主标签与新标签均生效)
   document.title = (titles[page] ? titles[page] + ' · ' : '') + '团队SOP数据管理系统';
-  ({dashboard:renderDashboard,aiWorkbench:renderAiWorkbench,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
+  ({dashboard:renderDashboard,aiWorkbench:renderAiWorkbench,approvals:renderApprovals,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
   closeSidebar();
   // 进入任意页面后立即把云端保存的全局筛选默认值回填到已渲染的 select/多选面板(绕过整页重绘时序),确保"保存默认"必定生效
   applyFilterDefaultsToRenderedDOM();
   // Background refresh: silently fetch latest data (non-blocking, only for read-only pages)
   silentRefresh(page, true);
+  // 刷新审批中心侧边栏角标(待审批数)
+  updateApprovalsNavBadge();
 }
 
 // 通过 URL 参数确定新标签/直达应打开的模块(登录后默认首页)
 function getInitialPage() {
-  const valid = ['dashboard','aiWorkbench','dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','settings','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
+  const valid = ['dashboard','aiWorkbench','approvals','dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','settings','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
   const p = new URLSearchParams(location.search).get('page');
   return (p && valid.includes(p)) ? p : 'dashboard';
 }
@@ -1634,7 +1642,7 @@ async function silentRefresh(page, force = false) {
   if (bgRefreshInFlight) return;
   if (!force && Date.now() - lastRefreshTime < REFRESH_INTERVAL) return;
   // Only background-refresh read-only pages (not forms with user input)
-  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf','mgrReport'].includes(page)) return;
+  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf','mgrReport','approvals'].includes(page)) return;
   bgRefreshInFlight = true;
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
@@ -1659,6 +1667,7 @@ async function silentRefresh(page, force = false) {
     if (needMgrPerf) { iMgrSnap = fetches.length; fetches.push(fetch(FB_BASE + '/mgrPerformanceSnapshots.json')); }
     if (needMgr) { iMgrR = fetches.length; fetches.push(fetch(FB_BASE + '/mgrReports.json')); }
     const iHonor = fetches.length; fetches.push(fetch(FB_BASE + '/honorRecords.json'));
+    const iAp = fetches.length; fetches.push(fetch(FB_BASE + '/approvals.json'));
     const results = await Promise.all(fetches);
     const newDaily = results[0].ok ? Object.values(await results[0].json() || {}) : [];
     const newWeekly = results[1].ok ? Object.values(await results[1].json() || {}) : [];
@@ -1678,6 +1687,13 @@ async function silentRefresh(page, force = false) {
     if (newHonor && typeof newHonor === 'object') {
       cloudData.honorRecords = newHonor;
       normalizeHonorRecords();
+    }
+    // 审批单后台刷新
+    const newAp = (iAp >= 0 && results[iAp] && results[iAp].ok) ? Object.values(await results[iAp].json() || {}) : null;
+    if (newAp) {
+      cloudData.approvals = Array.isArray(newAp) ? newAp : [];
+      updateApprovalsNavBadge();
+      if (document.querySelector('.nav-item.active')?.dataset.page === 'approvals') renderApprovals();
     }
     // 任一数据有变更(新增/删除/编辑关键字段)即更新+重渲染, 而非仅比记录数量
     const mgrRChanged = newMgrR && (newMgrR.length !== cloudData.mgrReports.length || dataSig(newMgrR) !== dataSig(cloudData.mgrReports));
@@ -2456,7 +2472,19 @@ function checkExistingReport(type) {
       <button class="btn btn-sm btn-primary" onclick="navTo('${isDaily?'dailyData':'weeklyData'}')">前往修改 →</button>
     </div>`;
   } else {
-    alertEl.innerHTML = '';
+    // 超期补交提示:日报填报日期距今天>=2天 / 周报周起始距本周>=2周 → 提交时将走审批流
+    const todayStr = localYMD();
+    let overdue = false;
+    if (isDaily) {
+      const gap = Math.round((new Date(todayStr + 'T00:00:00') - new Date(dateVal + 'T00:00:00')) / 86400000);
+      overdue = gap >= 2;
+    } else {
+      const gap = Math.round((new Date(getWeekStart() + 'T00:00:00') - new Date(dateVal + 'T00:00:00')) / (7 * 86400000));
+      overdue = gap >= 2;
+    }
+    alertEl.innerHTML = overdue
+      ? '<div class="alert alert-warning">⚠️ 该日期为超期补交,提交后将进入审批流,由管理员审批通过后才会写入数据</div>'
+      : '';
   }
 }
 
@@ -2830,7 +2858,10 @@ async function submitReport(type) {
   // 云端实时查重(防多设备/缓存滞后漏拦):拉取云端全量节点按 userId+日期 过滤,命中则阻止并提示去数据模块修改
   if (!existingReport) {
     try {
-      const cloudRes = await fetch(FB_BASE + '/' + (isDaily ? 'dailyReports' : 'weeklyReports') + '.json');
+      const [cloudRes, apRes] = await Promise.all([
+        fetch(FB_BASE + '/' + (isDaily ? 'dailyReports' : 'weeklyReports') + '.json'),
+        fetch(FB_BASE + '/approvals.json')
+      ]);
       if (cloudRes.ok) {
         const cloudArr = (await cloudRes.json()) || [];
         const cloudExisting = cloudArr.find(r => r && r.userId === author.id && (isDaily ? r.reportDate : r.weekStart) === dateVal);
@@ -2848,6 +2879,24 @@ async function submitReport(type) {
         const key = isDaily ? 'dailyReports' : 'weeklyReports';
         const localIds = new Set((cloudData[key] || []).map(x => x && x.id));
         cloudArr.forEach(r => { if (r && r.id && !localIds.has(r.id)) cloudData[key].push(r); });
+      }
+      // 审批单冲突检查:同 userId+日期 已有 pending 补交申请 → 阻止,避免重复申请
+      if (apRes && apRes.ok) {
+        const apArr = Object.values(await apRes.json() || {});
+        const apDup = apArr.find(r => r && r.status === 'pending' && r.userId === author.id && (isDaily ? r.reportDate : r.weekStart) === dateVal);
+        if (apDup) {
+          showModal('审批中 ⏳', `<div class="alert alert-warning">⚠️"${esc(author.name)}"的${isDaily?'日报':'周报'}(${dateVal})已有一份补交申请正在审批中,</div>
+            <div style="font-size:14px;color:var(--gray-600);margin:12px 0">请等待管理员审批结果,或前往「审批中心 → 我的提交」查看进度(已拒绝的记录可删除后重新提交),</div>
+            <div style="text-align:center;margin-top:16px;display:flex;gap:10px;justify-content:center">
+              <button class="btn btn-outline" onclick="closeModal()">我知道了</button>
+              <button class="btn btn-primary" onclick="closeModal();navTo('approvals')">前往审批中心</button>
+            </div>`);
+          return;
+        }
+        // 合并审批单到本地缓存
+        const apLocalIds = new Set((cloudData.approvals || []).map(x => x && x.id));
+        apArr.forEach(r => { if (r && r.id && !apLocalIds.has(r.id)) cloudData.approvals.push(r); });
+        updateApprovalsNavBadge();
       }
     } catch(e) { /* 云端查重失败不阻塞提交(本地判重已兜底),后续 apiCreate 失败会单独提示 */ }
   }
@@ -2926,6 +2975,46 @@ async function submitReport(type) {
   };
   if (isDaily) { report.reportDate = dateVal; }
   else { report.weekStart = dateVal; report.weekEnd = document.getElementById('reportWeekEnd').value; }
+  // ===== 超期补交审批:日报填报日期距今天>=2天 / 周报周起始距本周>=2周 → 写入审批单(待管理员审批) =====
+  const todayStr = localYMD();
+  const dayMs = 86400000;
+  let isOverdue = false, gapLabel = '';
+  if (isDaily) {
+    const gap = Math.round((new Date(todayStr + 'T00:00:00') - new Date(dateVal + 'T00:00:00')) / dayMs);
+    if (gap >= 2) { isOverdue = true; gapLabel = gap === 2 ? '补交前天' : ('补交' + gap + '天前'); }
+  } else {
+    const gap = Math.round((new Date(getWeekStart() + 'T00:00:00') - new Date(dateVal + 'T00:00:00')) / (7 * dayMs));
+    if (gap >= 2) { isOverdue = true; gapLabel = gap === 2 ? '补交上上周' : ('补交' + gap + '周前'); }
+  }
+  if (isOverdue) {
+    const weekEndVal = document.getElementById('reportWeekEnd').value;
+    const ap = {
+      id: genId(), type: isDaily ? 'daily' : 'weekly', status: 'pending',
+      userId: author.id, username: author.username, name: author.name, department: author.department,
+      channels: channelData, remark: document.getElementById('reportRemark').value,
+      gapLabel: gapLabel, createdAt: new Date().toISOString()
+    };
+    if (isDaily) { ap.reportDate = dateVal; } else { ap.weekStart = dateVal; ap.weekEnd = weekEndVal; }
+    try {
+      await apiCreate('approvals', ap);
+      cloudData.approvals.push(ap);
+      updateApprovalsNavBadge();
+      clearDraft(type);
+      showToast('补交申请已提交审批!', 'success');
+      showModal('已提交审批 ⏳', `<div class="alert alert-warning">⚠️"${esc(author.name)}"的${isDaily?'日报':'周报'}(${isDaily ? dateVal : dateVal + ' ~ ' + weekEndVal})为超期补交(${gapLabel}),已提交管理员审批。</div>
+        <div style="font-size:14px;color:var(--gray-600);margin:12px 0">审批通过后数据将自动写入${isDaily?'日报':'周报'}数据,可在「审批中心 → 我的提交」查看进度;审批被拒绝后该申请会保留原因,可删除后重新提交。</div>
+        <div style="text-align:center;margin-top:16px;display:flex;gap:10px;justify-content:center">
+          <button class="btn btn-outline" onclick="closeModal()">知道了</button>
+          <button class="btn btn-primary" onclick="closeModal();navTo('approvals')">查看审批进度</button>
+        </div>`);
+    } catch(e) {
+      submitBtns.forEach(b => { b.disabled = false; b.textContent = b.dataset.original || '✓ 提交'; });
+      showToast('提交审批失败: ' + e.message, 'error', 4000);
+      showModal('提交失败 ❌', `<div class="alert alert-danger">❌ 提交审批申请失败: ${e.message}<br>请稍后重试或联系管理员</div>
+        <div style="text-align:center;margin-top:16px"><button class="btn btn-outline" onclick="closeModal()">关闭</button></div>`);
+    }
+    return;
+  }
   try {
     await apiCreate(isDaily ? 'dailyReports' : 'weeklyReports', report);
     if (isDaily) cloudData.dailyReports.push(report); else cloudData.weeklyReports.push(report);
@@ -4987,6 +5076,171 @@ function renderAiWorkbench() {
   aiPendingFiles = [];
   initAIChat();
   renderSkillList();
+}
+
+// ============ 审批中心(跨天/跨周补交审批流, v1.42.78) ============
+let approvalsTab = 'inbox'; // inbox=待我审批(admin) / mine=我的提交 / all=全部记录(admin)
+
+function switchApprovalsTab(tab, el) {
+  approvalsTab = tab;
+  document.querySelectorAll('#approvalsTabs .summary-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderApprovals();
+}
+
+function renderApprovals() {
+  const body = document.getElementById('contentBody');
+  const isAdmin = hasPermission('admin');
+  if (!isAdmin && (approvalsTab === 'inbox' || approvalsTab === 'all')) approvalsTab = 'mine';
+  const list = (cloudData.approvals || []).slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const pending = list.filter(a => a.status === 'pending');
+  const mine = list.filter(a => a.userId === currentUser.id);
+  const tabs = [];
+  if (isAdmin) tabs.push(`<div class="summary-tab ${approvalsTab === 'inbox' ? 'active' : ''}" onclick="switchApprovalsTab('inbox',this)">📥 待我审批${pending.length ? ' (' + pending.length + ')' : ''}</div>`);
+  tabs.push(`<div class="summary-tab ${approvalsTab === 'mine' ? 'active' : ''}" onclick="switchApprovalsTab('mine',this)">📤 我的提交${mine.length ? ' (' + mine.length + ')' : ''}</div>`);
+  if (isAdmin) tabs.push(`<div class="summary-tab ${approvalsTab === 'all' ? 'active' : ''}" onclick="switchApprovalsTab('all',this)">🗂️ 全部记录</div>`);
+  const show = isAdmin ? (approvalsTab === 'inbox' ? pending : (approvalsTab === 'all' ? list : mine)) : mine;
+  const intro = isAdmin
+    ? '<div style="font-size:13px;color:var(--gray-500);margin-bottom:12px">跨天补交日报(填报日期距今天≥2天,即前天及更早)与跨周补交周报(周起始距本周≥2周,即上上周及更早)会进入此审批流,审批通过后自动写入正式数据,</div>'
+    : '<div style="font-size:13px;color:var(--gray-500);margin-bottom:12px">超期补交(前天及更早的日报 / 上上周及更早的周报)需管理员审批,通过后自动写入数据;被拒绝的记录保留原因,可删除后重新提交,</div>';
+  let cards = '';
+  if (!show.length) {
+    cards = '<div class="empty-state"><div class="icon">📭</div>暂无审批记录</div>';
+  } else {
+    cards = show.map(a => approvalCardHtml(a, isAdmin)).join('');
+  }
+  body.innerHTML = `<div class="summary-tabs" id="approvalsTabs" style="margin-bottom:12px">${tabs.join('')}</div>
+    ${intro}
+    <div style="display:flex;flex-direction:column;gap:12px">${cards}</div>`;
+  updateApprovalsNavBadge();
+}
+
+function approvalCardHtml(a, isAdmin) {
+  const isDaily = a.type === 'daily';
+  const dateLabel = isDaily ? (a.reportDate || '') : ((a.weekStart || '') + ' ~ ' + (a.weekEnd || ''));
+  const statusHtml = a.status === 'pending'
+    ? '<span class="badge" style="background:#fff7ed;color:#f59e0b">⏳ 待审批</span>'
+    : a.status === 'approved'
+      ? '<span class="badge" style="background:#f0fdf4;color:#16a34a">✅ 已通过</span>'
+      : '<span class="badge" style="background:#fef2f2;color:#dc2626">❌ 已拒绝</span>';
+  const rows = (a.channels || []).map(ch => {
+    const ec = parseFloat(ch.effectiveContacts) || 0, ab = parseFloat(ch.abIntent) || 0, da = parseFloat(ch.dealAmount) || 0, ta = parseFloat(ch.targetAmount) || 0;
+    const ctr = ch.effectiveContacts === '' || ch.effectiveContacts === '/' ? '/' : (ec > 0 ? (ab / ec * 100).toFixed(1) + '%' : '0%');
+    const cpr = ch.targetAmount === '' || ch.targetAmount === '/' ? '/' : (ta > 0 ? (da / ta * 100).toFixed(1) + '%' : '0%');
+    return `<tr><td><strong>${escapeHtml(ch.channel || '')}</strong></td><td>${escapeHtml(ch.newLeads || '-')}</td><td>${escapeHtml(ch.effectiveContacts || '-')}</td><td>${escapeHtml(ch.abIntent || '-')}</td><td>${escapeHtml(ch.closedCustomers || '-')}</td><td style="font-weight:600;color:var(--success)">${da > 0 ? '¥' + da.toLocaleString() : (escapeHtml(ch.dealAmount) || '-')}</td><td>${ctr}</td><td>${ta > 0 ? '¥' + ta.toLocaleString() : (escapeHtml(ch.targetAmount) || '-')}</td><td>${cpr}</td><td style="max-width:200px;font-size:12px">${escapeHtml(ch.issues || '-')}</td></tr>`;
+  }).join('');
+  const remark = a.remark ? `<div style="padding:8px 12px;background:var(--gray-50);font-size:12px;color:var(--gray-600);border-radius:6px;margin-top:8px">备注: ${escapeHtml(a.remark)}</div>` : '';
+  let reviewHtml = '';
+  if (a.status === 'approved') reviewHtml = `<div style="font-size:12px;color:var(--success);margin-top:8px">✅ 已由 ${escapeHtml(a.reviewedName || '管理员')} 于 ${a.reviewedAt ? new Date(a.reviewedAt).toLocaleString('zh-CN') : ''} 审批通过,数据已写入正式记录</div>`;
+  else if (a.status === 'rejected') reviewHtml = `<div style="font-size:12px;color:var(--danger);margin-top:8px">❌ 已由 ${escapeHtml(a.reviewedName || '管理员')} 拒绝${a.reviewNote ? '，原因: ' + escapeHtml(a.reviewNote) : ''}${a.reviewedAt ? ' (' + new Date(a.reviewedAt).toLocaleString('zh-CN') + ')' : ''}</div>`;
+  let actions = '';
+  if (a.status === 'pending' && isAdmin) {
+    actions = `<div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn btn-sm btn-primary" onclick="approveApproval('${a.id}')">✅ 通过</button>
+      <button class="btn btn-sm btn-danger" onclick="rejectApproval('${a.id}')">❌ 拒绝</button>
+    </div>`;
+  } else if (a.status === 'rejected' && (isAdmin || a.userId === currentUser.id)) {
+    actions = `<div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn btn-sm btn-outline" onclick="deleteApproval('${a.id}')">🗑 删除该记录</button>
+    </div>`;
+  }
+  return `<div class="card" style="margin-bottom:0">
+    <div class="card-header">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="badge ${isDaily ? 'badge-success' : 'badge-warning'}">${isDaily ? '📅 日报' : '📅 周报'}</span>
+        ${statusHtml}
+        ${a.gapLabel ? `<span class="badge badge-gray">${escapeHtml(a.gapLabel)}</span>` : ''}
+        <span style="font-weight:600">${escapeHtml(a.name || '')}</span>
+        <span class="badge badge-gray">${escapeHtml(a.department || '')}</span>
+        <span style="font-size:12px;color:var(--gray-500)">${dateLabel}</span>
+        <span style="font-size:12px;color:var(--gray-400);margin-left:auto">提交于 ${a.createdAt ? new Date(a.createdAt).toLocaleString('zh-CN') : ''}</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="table-wrap"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50)"><th style="text-align:left;padding:6px 8px">渠道</th><th style="padding:6px 8px">新增线索</th><th style="padding:6px 8px">有效建联</th><th style="padding:6px 8px">AB意向</th><th style="padding:6px 8px">成交客户</th><th style="padding:6px 8px">成交金额</th><th style="padding:6px 8px">建联转AB率</th><th style="padding:6px 8px">目标金额</th><th style="padding:6px 8px">完成率</th><th style="padding:6px 8px">问题/提升动作</th></tr></thead><tbody>${rows}</tbody></table></div>
+      ${remark}
+      ${reviewHtml}
+      ${actions}
+    </div>
+  </div>`;
+}
+
+// 审批通过:写入正式日报/周报数据(先查重防重复),并标记审批单 approved
+async function approveApproval(id) {
+  if (!hasPermission('admin')) return;
+  const ap = (cloudData.approvals || []).find(a => a.id === id);
+  if (!ap || ap.status !== 'pending') return;
+  if (!confirm(`确认通过「${ap.name || ''}」的${ap.type === 'daily' ? '日报' : '周报'}(${ap.type === 'daily' ? (ap.reportDate || '') : ((ap.weekStart || '') + ' ~ ' + (ap.weekEnd || ''))})补交审批?通过后将写入正式数据`)) return;
+  const isDaily = ap.type === 'daily';
+  const key = isDaily ? 'dailyReports' : 'weeklyReports';
+  try {
+    // 云端查重:同人同日是否已有正式记录(防重复)
+    const cRes = await fetch(FB_BASE + '/' + key + '.json');
+    if (cRes.ok) {
+      const cArr = Object.values(await cRes.json() || {});
+      const dup = cArr.find(r => r && r.userId === ap.userId && (isDaily ? r.reportDate : r.weekStart) === (isDaily ? ap.reportDate : ap.weekStart));
+      if (dup) { showToast('该' + (isDaily ? '日期' : '周次') + '已有正式记录,无法重复通过,请先核对', 'error', 4000); return; }
+    }
+    const report = {
+      id: genId(), userId: ap.userId, username: ap.username,
+      name: ap.name, department: ap.department,
+      channels: ap.channels || [], remark: ap.remark || '',
+      createdAt: ap.createdAt || new Date().toISOString()
+    };
+    if (isDaily) report.reportDate = ap.reportDate;
+    else { report.weekStart = ap.weekStart; report.weekEnd = ap.weekEnd; }
+    await apiCreate(key, report);
+    cloudData[key].push(report);
+    await apiUpdate('approvals', id, { status: 'approved', reviewedBy: currentUser.id, reviewedName: currentUser.name, reviewedAt: new Date().toISOString() });
+    ap.status = 'approved'; ap.reviewedBy = currentUser.id; ap.reviewedName = currentUser.name; ap.reviewedAt = new Date().toISOString();
+    updateApprovalsNavBadge();
+    renderApprovals();
+    showToast('已通过审批,数据已写入' + (isDaily ? '日报' : '周报'), 'success');
+  } catch(e) { showToast('操作失败: ' + e.message, 'error', 4000); }
+}
+
+// 审批拒绝:标记 rejected + 原因,提交人可见并可删除后重新提交
+function rejectApproval(id) {
+  if (!hasPermission('admin')) return;
+  const ap = (cloudData.approvals || []).find(a => a.id === id);
+  if (!ap || ap.status !== 'pending') return;
+  const note = prompt('请输入拒绝原因(提交人可见,可留空):');
+  if (note === null) return;
+  apiUpdate('approvals', id, { status: 'rejected', reviewNote: (note || '').trim(), reviewedBy: currentUser.id, reviewedName: currentUser.name, reviewedAt: new Date().toISOString() })
+    .then(() => {
+      ap.status = 'rejected'; ap.reviewNote = (note || '').trim(); ap.reviewedBy = currentUser.id; ap.reviewedName = currentUser.name; ap.reviewedAt = new Date().toISOString();
+      updateApprovalsNavBadge();
+      renderApprovals();
+      showToast('已拒绝该补交申请', 'warning');
+    })
+    .catch(e => showToast('操作失败: ' + e.message, 'error', 4000));
+}
+
+// 删除审批记录(仅 rejected 状态;本人或 admin)
+function deleteApproval(id) {
+  const ap = (cloudData.approvals || []).find(a => a.id === id);
+  if (!ap) return;
+  if (!(hasPermission('admin') || ap.userId === currentUser.id)) return;
+  if (ap.status !== 'rejected') { showToast('仅已拒绝的审批记录可删除', 'warning'); return; }
+  if (!confirm('确定删除这条已拒绝的审批记录?删除后可重新提交')) return;
+  apiDelete('approvals', id).then(() => {
+    cloudData.approvals = cloudData.approvals.filter(a => a.id !== id);
+    updateApprovalsNavBadge();
+    renderApprovals();
+    showToast('已删除', 'success');
+  }).catch(e => showToast('删除失败: ' + e.message, 'error', 4000));
+}
+
+// 侧边栏「审批中心」角标:admin 显示待审批总数,普通用户显示自己待审批数
+function updateApprovalsNavBadge() {
+  const badge = document.getElementById('approvalsNavBadge');
+  if (!badge) return;
+  const list = cloudData.approvals || [];
+  const n = hasPermission('admin')
+    ? list.filter(a => a.status === 'pending').length
+    : list.filter(a => a.userId === currentUser.id && a.status === 'pending').length;
+  if (n > 0) { badge.textContent = n > 99 ? '99+' : n; badge.style.display = 'inline-block'; }
+  else badge.style.display = 'none';
 }
 
 // 重新渲染 Skill 列表(新建 / 上传 / 删除后调用,不影响聊天区)
