@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260829182126';
-const APP_VERSION = '1.42.88'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260829182602';
+const APP_VERSION = '1.42.89'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -5433,7 +5433,8 @@ function renderCallData() {
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="callStart" value="${mAgo}"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="callEnd" value="${today}"></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="renderCallData()">🔍 查询</button></div>
-        <div class="form-group"><label>&nbsp;</label><button class="btn btn-success" onclick="exportCallData()">📥 导出</button></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-success" onclick="exportCallData()">📥 CSV</button></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-outline" onclick="exportCallDataExcel()">📊 Excel</button></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-outline" onclick="document.getElementById('callFileInput').click()">📤 上传CSV</button>
           <input type="file" id="callFileInput" accept=".csv" multiple style="display:none" onchange="handleCallUpload(event)">
         </div>
@@ -5603,6 +5604,23 @@ function exportCallData() {
   showToast('已导出 ' + rows.length + ' 条外呼记录', 'success');
 }
 
+// 外呼数据 → Excel
+function exportCallDataExcel() {
+  ensureXLSX().then(() => {
+    const s = document.getElementById('callStart')?.value || '';
+    const e = document.getElementById('callEnd')?.value || '';
+    const rows = filterCallRecords(s, e, callDataDeptFilter, callDataPersonFilter).sort((a, b) => String(a.contactTime || '').localeCompare(String(b.contactTime || '')));
+    const headers = ['联系时间', '客户', '工作单位/联系人', '电话号码', '通话时长', '通话方式', '员工', '部门'];
+    const aoa = [headers];
+    rows.forEach(r => aoa.push([r.contactTime || '', r.customer || '', r.contactPerson || '', r.phone || '', r.durationStr || fmtCallDur(r.durationSec), r.callType || '', r.employee || '', r.department || '']));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '外呼数据');
+    XLSX.writeFile(wb, '外呼数据_' + (s || '起') + '_' + (e || '止') + '.xlsx');
+    showToast('已导出 ' + rows.length + ' 条外呼记录(Excel)', 'success');
+  }).catch(() => showToast('Excel 组件加载失败,请刷新后重试', 'error'));
+}
+
 // ============ 外呼统计页 ============
 function switchCallStatsTab(tab, el) {
   callStatsTab = tab;
@@ -5633,7 +5651,8 @@ function renderCallStats() {
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="callStatsStart" value="${mAgo}"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="callStatsEnd" value="${today}"></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="renderCallStats()">🔍 统计</button></div>
-        <div class="form-group"><label>&nbsp;</label><button class="btn btn-success" onclick="exportCallStats()">📥 导出</button></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-success" onclick="exportCallStats()">📥 CSV</button></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-outline" onclick="exportCallStatsExcel()">📊 Excel</button></div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px" id="callStatsDateBtns">
         <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('today',this)">今天</button>
@@ -5662,15 +5681,28 @@ function renderCallStatsResult() {
   const groups = {};
   rows.forEach(r => {
     const k = isTeam ? (r.department || '未分组') : (r.employee || '未知');
-    if (!groups[k]) groups[k] = { cnt: 0, sec: 0, conn: 0, recs: [] };
+    if (!groups[k]) groups[k] = { cnt: 0, sec: 0, conn: 0, emps: new Set(), recs: [] };
     groups[k].cnt++; groups[k].sec += (r.durationSec || 0);
     if ((r.durationSec || 0) > 0) groups[k].conn++;
+    if (r.employee) groups[k].emps.add(r.employee);
     groups[k].recs.push(r);
   });
   const keys = sortCallStatsKeys(groups);
   const gCnt = rows.length, gSec = rows.reduce((a, r) => a + (r.durationSec || 0), 0), gConn = rows.filter(r => (r.durationSec || 0) > 0).length;
+  const gEmpN = new Set(rows.map(r => r.employee).filter(Boolean)).size;
   const head = isTeam ? '团队' : '员工';
   const thCell = (key, label) => `<th class="sort-th" style="cursor:pointer" onclick="toggleCallStatsSort('${key}')">${label}${callStatsSort.key === key ? (callStatsSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`;
+  const totalAllKey = drillPut(rows);
+  const totalConnKey = drillPut(rows.filter(r => (r.durationSec || 0) > 0));
+  // KPI 汇总卡(点击可下钻明细)
+  const kpis = [
+    { l: '通话次数', v: gCnt, k: totalAllKey },
+    { l: '总通话时长', v: fmtCallDur(gSec), k: totalAllKey },
+    { l: '平均通话时长', v: fmtCallAvg(gCnt ? gSec / gCnt : 0), k: totalAllKey },
+    { l: '接通次数', v: gConn, k: totalConnKey },
+    { l: '接通率', v: gCnt ? (gConn / gCnt * 100).toFixed(1) + '%' : '-', k: totalConnKey }
+  ];
+  const kpiHtml = kpis.map(x => `<div style="cursor:pointer;text-align:center;padding:14px;background:var(--gray-50);border-radius:8px" onclick="openDrillDetail('${escapeTitle(x.l)}','${x.k}')"><div style="font-size:22px;font-weight:700;color:var(--primary)">${x.v}</div><div style="font-size:12px;color:var(--gray-500)">${x.l}</div></div>`).join('');
   const trs = keys.map(k => {
     const g = groups[k];
     const avg = g.cnt ? g.sec / g.cnt : 0;
@@ -5686,9 +5718,32 @@ function renderCallStatsResult() {
       <td style="text-align:center;font-weight:600;color:${g.cnt && g.conn / g.cnt >= 0.3 ? 'var(--success)' : 'var(--gray-600)'}">${rate}</td>
     </tr>`;
   }).join('');
-  const totalAllKey = drillPut(rows);
-  const totalConnKey = drillPut(rows.filter(r => (r.durationSec || 0) > 0));
-  c.innerHTML = `<div class="card"><div class="card-header"><h4>${isTeam ? '👥 按团队统计' : '👤 按个人统计'}(${s || '全部'} 至 ${e || '全部'})</h4></div><div class="card-body">
+  // 按团队人均统计表(仅按团队 tab;团队人数=该团队筛选范围内去重员工数,人均=指标÷人数)
+  let avgHtml = '';
+  if (isTeam) {
+    const avgTrs = keys.map(k => {
+      const g = groups[k];
+      const n = g.emps.size || 1;
+      const avgKey = drillPut(g.recs);
+      return `<tr>
+        <td style="font-weight:600;white-space:nowrap">${escapeHtml(k)}</td>
+        <td class="drill-td" style="text-align:center" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(k + ' 团队明细')}','${avgKey}')">${g.emps.size}</td>
+        <td class="drill-td" style="text-align:center" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(k + ' 人均通话次数')}','${avgKey}')">${(g.cnt / n).toFixed(1)}</td>
+        <td class="drill-td" style="text-align:center" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(k + ' 人均通话时长')}','${avgKey}')">${fmtCallAvg(g.sec / n)}</td>
+        <td class="drill-td" style="text-align:center" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(k + ' 人均接通次数')}','${avgKey}')">${(g.conn / n).toFixed(1)}</td>
+        <td style="text-align:center;font-weight:600">${g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-'}</td>
+      </tr>`;
+    }).join('');
+    const gN = gEmpN || 1;
+    avgHtml = `<div class="card" style="margin-top:16px"><div class="card-header"><h4>👥 按团队人均统计(${s || '全部'} 至 ${e || '全部'})</h4></div><div class="card-body">
+      <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">团队人数 = 该团队在所选范围内出现的外呼员工去重数;人均 = 指标 ÷ 团队人数。点击数字查看明细</div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>团队</th><th>团队人数</th><th>人均通话次数</th><th>人均通话时长</th><th>人均接通次数</th><th>接通率</th></tr></thead><tbody>${avgTrs}
+        <tr style="font-weight:700;background:var(--gray-50)"><td>合计</td><td>${gEmpN}</td><td>${(gCnt / gN).toFixed(1)}</td><td>${fmtCallAvg(gSec / gN)}</td><td>${(gConn / gN).toFixed(1)}</td><td>${gCnt ? (gConn / gCnt * 100).toFixed(1) + '%' : '-'}</td></tr>
+      </tbody></table></div>
+    </div></div>`;
+  }
+  c.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:16px">${kpiHtml}</div>
+    <div class="card"><div class="card-header"><h4>${isTeam ? '👥 按团队统计' : '👤 按个人统计'}(${s || '全部'} 至 ${e || '全部'})</h4></div><div class="card-body">
     <div class="table-wrap"><table class="table"><thead><tr>
       ${thCell('name', head)}${thCell('cnt', '通话次数')}${thCell('sec', '总通话时长')}${thCell('avg', '平均通话时长')}${thCell('conn', '接通次数')}${thCell('rate', '接通率')}
     </tr></thead><tbody>${trs}
@@ -5701,7 +5756,7 @@ function renderCallStatsResult() {
         <td style="text-align:center">${gCnt ? (gConn / gCnt * 100).toFixed(1) + '%' : '-'}</td>
       </tr>
     </tbody></table></div>
-  </div></div>`;
+  </div></div>${avgHtml}`;
 }
 
 function exportCallStats() {
@@ -5715,6 +5770,38 @@ function exportCallStats() {
   const data = Object.keys(groups).sort().map(k => { const g = groups[k]; return [k, g.cnt, g.sec, g.cnt ? Math.round(g.sec / g.cnt) : 0, g.conn, g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-']; });
   downloadCsv('外呼统计_' + (isTeam ? '按团队' : '按个人') + '_' + (s || '起') + '_' + (e || '止') + '.csv', headers, data);
   showToast('已导出', 'success');
+}
+
+// 外呼统计 → Excel(按团队时附带人均统计 sheet)
+function exportCallStatsExcel() {
+  ensureXLSX().then(() => {
+    const s = document.getElementById('callStatsStart')?.value || '';
+    const e = document.getElementById('callStatsEnd')?.value || '';
+    const rows = filterCallRecords(s, e, callStatsDeptFilter, callStatsPersonFilter);
+    const isTeam = callStatsTab === 'team';
+    const groups = {};
+    rows.forEach(r => {
+      const k = isTeam ? (r.department || '未分组') : (r.employee || '未知');
+      if (!groups[k]) groups[k] = { cnt: 0, sec: 0, conn: 0, emps: new Set() };
+      groups[k].cnt++; groups[k].sec += (r.durationSec || 0);
+      if ((r.durationSec || 0) > 0) groups[k].conn++;
+      if (r.employee) groups[k].emps.add(r.employee);
+    });
+    const wb = XLSX.utils.book_new();
+    // sheet1:汇总
+    const h1 = [isTeam ? '团队' : '员工', '通话次数', '总通话时长(秒)', '平均通话时长(秒)', '接通次数', '接通率'];
+    const aoa1 = [h1];
+    Object.keys(groups).sort().forEach(k => { const g = groups[k]; aoa1.push([k, g.cnt, g.sec, g.cnt ? Math.round(g.sec / g.cnt) : 0, g.conn, g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-']); });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa1), '外呼统计');
+    // sheet2:按团队人均(仅团队视图)
+    if (isTeam) {
+      const aoa2 = [['团队', '团队人数', '人均通话次数', '人均通话时长(秒)', '人均接通次数', '接通率']];
+      Object.keys(groups).sort().forEach(k => { const g = groups[k]; const n = g.emps.size || 1; aoa2.push([k, g.emps.size, +(g.cnt / n).toFixed(1), Math.round(g.sec / n), +(g.conn / n).toFixed(1), g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-']); });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa2), '按团队人均');
+    }
+    XLSX.writeFile(wb, '外呼统计_' + (isTeam ? '按团队' : '按个人') + '_' + (s || '起') + '_' + (e || '止') + '.xlsx');
+    showToast('已导出 Excel', 'success');
+  }).catch(() => showToast('Excel 组件加载失败,请刷新后重试', 'error'));
 }
 
 // 重新渲染 Skill 列表(新建 / 上传 / 删除后调用,不影响聊天区)
