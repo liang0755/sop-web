@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260829180903';
-const APP_VERSION = '1.42.86'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260829181701';
+const APP_VERSION = '1.42.87'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -5338,6 +5338,39 @@ function filterCallRecords(s, e, deptF, personF) {
     return true;
   });
 }
+// 快捷日期范围计算(今天/昨天/本周/上周/本月/上月/今年/去年) —— 外呼数据/统计共用
+function calcQuickRange(type) {
+  const now = new Date();
+  const todayStr = localYMD(now);
+  const fmt = (d) => localYMD(d);
+  if (type === 'today') return { start: todayStr, end: todayStr };
+  if (type === 'yesterday') { const y = new Date(now); y.setDate(y.getDate() - 1); const s = fmt(y); return { start: s, end: s }; }
+  if (type === 'thisWeek') { const day = now.getDay() || 7; const m = new Date(now); m.setDate(m.getDate() - day + 1); return { start: fmt(m), end: todayStr }; }
+  if (type === 'lastWeek') { const day = now.getDay() || 7; const m = new Date(now); m.setDate(m.getDate() - day + 1 - 7); const su = new Date(m); su.setDate(su.getDate() + 6); return { start: fmt(m), end: fmt(su) }; }
+  if (type === 'thisMonth') { return { start: fmt(new Date(now.getFullYear(), now.getMonth(), 1)), end: todayStr }; }
+  if (type === 'lastMonth') { const y = now.getFullYear(), m = now.getMonth(); return { start: fmt(new Date(y, m - 1, 1)), end: fmt(new Date(y, m, 0)) }; }
+  if (type === 'thisYear') { return { start: fmt(new Date(now.getFullYear(), 0, 1)), end: todayStr }; }
+  if (type === 'lastYear') { const y = now.getFullYear(); return { start: fmt(new Date(y - 1, 0, 1)), end: fmt(new Date(y - 1, 11, 31)) }; }
+  return null;
+}
+// 外呼数据页:设置快捷日期范围
+function callQuickRange(type, btn) {
+  const r = calcQuickRange(type); if (!r) return;
+  document.getElementById('callStart').value = r.start;
+  document.getElementById('callEnd').value = r.end;
+  document.querySelectorAll('#callDateBtns button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderCallData();
+}
+// 外呼统计页:设置快捷日期范围
+function callStatsQuickRange(type, btn) {
+  const r = calcQuickRange(type); if (!r) return;
+  document.getElementById('callStatsStart').value = r.start;
+  document.getElementById('callStatsEnd').value = r.end;
+  document.querySelectorAll('#callStatsDateBtns button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderCallStats();
+}
 
 // ============ 外呼数据页 ============
 function renderCallData() {
@@ -5361,6 +5394,16 @@ function renderCallData() {
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-outline" onclick="document.getElementById('callFileInput').click()">📤 上传CSV</button>
           <input type="file" id="callFileInput" accept=".csv" multiple style="display:none" onchange="handleCallUpload(event)">
         </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px" id="callDateBtns">
+        <button class="btn btn-xs btn-outline" onclick="callQuickRange('today',this)">今天</button>
+        <button class="btn btn-xs btn-outline" onclick="callQuickRange('yesterday',this)">昨天</button>
+        <button class="btn btn-xs btn-outline" onclick="callQuickRange('thisWeek',this)">本周</button>
+        <button class="btn btn-xs btn-outline" onclick="callQuickRange('lastWeek',this)">上周</button>
+        <button class="btn btn-xs btn-outline" onclick="callQuickRange('thisMonth',this)">本月</button>
+        <button class="btn btn-xs btn-outline" onclick="callQuickRange('lastMonth',this)">上月</button>
+        <button class="btn btn-xs btn-outline" onclick="callQuickRange('thisYear',this)">今年</button>
+        <button class="btn btn-xs btn-outline" onclick="callQuickRange('lastYear',this)">去年</button>
       </div>
       <div style="font-size:12px;color:var(--gray-500);margin-top:8px">支持上传外呼系统导出的 CSV(表头:联系时间,客户,工作单位/联系人,电话号码,通话时长,通话方式,员工,部门),按「联系时间+电话号码」自动去重追加,不会重复入库</div>
     </div></div>
@@ -5547,6 +5590,16 @@ function renderCallStats() {
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="callStatsEnd" value="${today}"></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="renderCallStats()">🔍 统计</button></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-success" onclick="exportCallStats()">📥 导出</button></div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px" id="callStatsDateBtns">
+        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('today',this)">今天</button>
+        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('yesterday',this)">昨天</button>
+        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('thisWeek',this)">本周</button>
+        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('lastWeek',this)">上周</button>
+        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('thisMonth',this)">本月</button>
+        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('lastMonth',this)">上月</button>
+        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('thisYear',this)">今年</button>
+        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('lastYear',this)">去年</button>
       </div>
       <div style="font-size:12px;color:var(--gray-500);margin-top:8px">接通判定:通话时长 &gt; 0 记为接通;接通率 = 接通次数 ÷ 通话次数。点击次数/时长/接通数字可查看对应明细</div>
     </div></div>
