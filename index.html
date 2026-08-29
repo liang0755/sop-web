@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260829183710';
-const APP_VERSION = '1.42.90'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260829191506';
+const APP_VERSION = '1.42.91'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1182,7 +1182,8 @@ async function loadRoleScopedData() {
     }
   } catch(e) {
     console.warn('Role-scoped data fetch failed:', e.message);
-    ['gradeRecords','m0Records','performanceRecords','performanceSnapshots','m0PerformanceRecords','m0PerformanceSnapshots','mgrPerformanceRecords','mgrPerformanceSnapshots','callRecords'].forEach(k => { cloudData[k] = {}; });
+    ['gradeRecords','m0Records','performanceRecords','performanceSnapshots','m0PerformanceRecords','m0PerformanceSnapshots','mgrPerformanceRecords','mgrPerformanceSnapshots'].forEach(k => { cloudData[k] = {}; });
+    cloudData.callRecords = []; // 数组型节点,切勿重置为 {} 否则后续 .filter/.map 会抛错
   }
 }
 
@@ -5086,6 +5087,7 @@ function aiChatInnerHTML() {
         <div class="ai-suggestion-chip" onclick="fillAIInput('分析各渠道的成交转化率,哪个渠道表现最好>')">📈 渠道转化分析</div>
         <div class="ai-suggestion-chip" onclick="fillAIInput('列出昨天未提交日报的人员名单')">📝 昨日未交日报</div>
         <div class="ai-suggestion-chip" onclick="fillAIInput('对比最近两周的周报数据,总结趋势变化')">📊 周报趋势对比</div>
+        <div class="ai-suggestion-chip" onclick="fillAIInput('按部门和员工统计外呼通话次数、总通话时长与接通率,找出通话量最高和接通率最低的人')">📞 外呼接通率</div>
       </div>
       <div class="ai-chat-input-bar">
         <div id="aiInputImages" class="ai-input-images" style="display:none"></div>
@@ -6084,7 +6086,7 @@ function renderSettings() {
     </div>
     <div class="card-body collapsible-body${aiConfigCollapsed?' collapsed':''}">
       <div id="aiConfigAlert"></div>
-      <div style="margin-bottom:16px;font-size:12px;color:var(--gray-500)">配置大模型API后,可在左侧导航栏"🤖 AI助手"页面与AI对话,AI将读取系统全部数据(用户,日报,周报,拜访数据,业绩数据,管理周报,客户汇总,团队目标/人数,团队业绩统计,销售绩效,销售评级,M0绩效与评级,管理绩效统计等)进行分析,也支持直接上传图片,文档或表格(CSV / TXT / JSON / Excel 等)让 AI 解读,支持OpenAI兼容的API格式,</div>
+      <div style="margin-bottom:16px;font-size:12px;color:var(--gray-500)">配置大模型API后,可在左侧导航栏"🤖 AI助手"页面与AI对话,AI将读取系统全部数据(用户,日报,周报,拜访数据,业绩数据,管理周报,客户汇总,团队目标/人数,团队业绩统计,销售绩效,销售评级,M0绩效与评级,管理绩效统计,荣誉激励,外呼数据等)进行分析,也支持直接上传图片,文档或表格(CSV / TXT / JSON / Excel 等)让 AI 解读,支持OpenAI兼容的API格式,</div>
       <div class="ai-config-grid">
         <div class="form-group">
           <label>API提供商</label>
@@ -6286,7 +6288,7 @@ function getAIWeekNumber(d) {
 // 原始明细记录条数上限:汇总统计(salesSummary/visitSummary/teamPerformanceSummary 等)已覆盖全量数据,
 // 仅原始明细用于"逐条查看"。DeepSeek V4 上下文为 1M token(远超旧 128K),故上限大幅抬高至接近全量,
 // 配合 buildAIContext 末尾的兜底截断(数据过大时自动丢弃最老明细),既保证"读全"又防止超出上下文导致 400。
-const AI_RAW_CAP = { visit: 3000, sales: 6000, daily: 2000, weekly: 1500, mgr: 500 };
+const AI_RAW_CAP = { visit: 3000, sales: 6000, daily: 2000, weekly: 1500, mgr: 500, call: 2000 };
 
 function buildAIContext() {
   const userMap = {};
@@ -6514,6 +6516,64 @@ function buildAIContext() {
     }));
   });
 
+  // ===== 外呼数据(电话通话记录:次数/时长/平均时长/接通率,接通=时长>0) =====
+  const callDataAi = (cloudData.callRecords || []).map(r => ({
+    contactTime: r.contactTime || '',
+    employee: r.employee || '',
+    department: r.department || '',
+    customer: r.customer || '',
+    contactPerson: r.contactPerson || '',
+    phone: r.phone || '',
+    durationStr: r.durationStr || '',
+    durationSec: Number(r.durationSec) || 0,
+    callType: r.callType || '',
+    date: r.date || ''
+  })).sort((a, b) => (a.contactTime || '').localeCompare(b.contactTime || ''));
+
+  const cByDept = {}, cByEmp = {}, cByMonth = {}, cByDay = {}, cByType = {};
+  let cCnt = 0, cSec = 0, cConn = 0;
+  const cPut = (m, k, sec) => {
+    if (!m[k]) m[k] = { cnt: 0, sec: 0, conn: 0 };
+    m[k].cnt++; m[k].sec += sec; if (sec > 0) m[k].conn++;
+  };
+  callDataAi.forEach(c => {
+    cCnt++; cSec += c.durationSec; if (c.durationSec > 0) cConn++;
+    cPut(cByDept, c.department || '未知', c.durationSec);
+    cPut(cByEmp, c.employee || '未知', c.durationSec);
+    cPut(cByMonth, (c.contactTime || '').slice(0, 7) || '未知', c.durationSec);
+    cPut(cByDay, (c.contactTime || '').slice(0, 10) || '未知', c.durationSec);
+    if (c.callType) cPut(cByType, c.callType, c.durationSec);
+  });
+  const cShape = (m) => {
+    const o = {};
+    Object.keys(m).sort().forEach(k => {
+      const v = m[k];
+      o[k] = {
+        count: v.cnt,
+        totalSec: v.sec,
+        avgSec: v.cnt ? Math.round(v.sec / v.cnt * 10) / 10 : 0,
+        connected: v.conn,
+        connectRate: v.cnt ? Math.round(v.conn / v.cnt * 1000) / 10 : 0
+      };
+    });
+    return o;
+  };
+  const callSummary = {
+    total: cCnt,
+    connected: cConn,
+    connectRate: cCnt ? Math.round(cConn / cCnt * 1000) / 10 : 0,
+    totalSec: cSec,
+    avgSec: cCnt ? Math.round(cSec / cCnt * 10) / 10 : 0,
+    note: '接通判定:通话时长>0 记为接通;接通率=接通次数÷通话次数;count=通话次数, connected=接通次数, totalSec=总通话秒数, avgSec=平均通话秒数'
+      + ';本 summary 各维度聚合为全量口径,而 callRecords 数组仅含最近 ' + AI_RAW_CAP.call + ' 条明细(更早的只有聚合值),回答涉及较早日期的逐条明细时须说明该限制'
+      + (cCnt === 0 ? ';当前为 0 条,可能是该账号无「外呼数据」查看权限或所选范围无数据' : ''),
+    byDepartment: cShape(cByDept),
+    byEmployee: cShape(cByEmp),
+    byMonth: cShape(cByMonth),
+    byDay: cShape(cByDay),
+    byCallType: cShape(cByType)
+  };
+
   const activeUsers = cloudData.users.filter(u => u.active);
   const _now = new Date();
   const _y = _now.getFullYear(), _m = _now.getMonth() + 1;
@@ -6552,7 +6612,9 @@ function buildAIContext() {
       m0PerformanceRecordCount: Object.keys(m0PerfRecords).length,
       mgrPerformanceRecordCount: Object.keys(mgrPerfRecords).length,
       honorRecordCount: Object.values(honorRecords).reduce((s, arr) => s + (Array.isArray(arr) ? arr.length : 0), 0),
-      honorMonthCount: Object.keys(honorRecords).length
+      honorMonthCount: Object.keys(honorRecords).length,
+      callRecordCount: callDataAi.length,
+      callDateRange: callDataAi.length > 0 ? {earliest: callDataAi[0].contactTime, latest: callDataAi[callDataAi.length-1].contactTime} : null
     },
     users: activeUsers.map(u => ({name: u.name, department: u.department, role: u.role})),
     dailyChannels: (fc.daily || []).map(c => ({name: c.name, reference: c.reference})),
@@ -6583,6 +6645,8 @@ function buildAIContext() {
     mgrPerformanceRecords: mgrPerfRecords,
     mgrPerformanceBase: mgrPerfBase,
     honorRecords: honorRecords,
+    callRecords: callDataAi.slice(-AI_RAW_CAP.call),
+    callSummary: callSummary,
     customerTags: {
       customerSource: (fc.customerTags && fc.customerTags.customerSource) || [],
       category: (fc.customerTags && fc.customerTags.category) || [],
@@ -6595,7 +6659,7 @@ function buildAIContext() {
   const AI_CTX_MAX_CHARS = 2400000;
   let json = JSON.stringify(context, null, 2);
   if (json.length > AI_CTX_MAX_CHARS) {
-    const rawKeys = ['visitRecords', 'salesRecords', 'dailyReports', 'weeklyReports', 'mgrReports'];
+    const rawKeys = ['visitRecords', 'salesRecords', 'dailyReports', 'weeklyReports', 'mgrReports', 'callRecords'];
     while (json.length > AI_CTX_MAX_CHARS) {
       let trimmed = false;
       for (const k of rawKeys) {
@@ -6613,7 +6677,7 @@ function buildAIContext() {
 
 function buildAISystemMessage() {
   const dataContext = buildAIContext();
-  return '你是团队SOP数据管理系统的AI数据分析助手,你可以读取系统的全部数据,包括用户信息,日报数据,周报数据,拜访数据,业绩数据,管理周报(含拜访汇总快照),客户汇总数据(客户来源/客户画像/品类),渠道配置;以及团队月目标与团队人数,团队业绩统计(目标/完成率/人效),销售绩效统计(考核项得分/绩效评分),销售评级看板(升降级/评级),M0绩效与M0评级看板,管理绩效统计(管理者绩效得分),荣誉激励(按月奖项与获奖人/奖金),\n\n'
+  return '你是团队SOP数据管理系统的AI数据分析助手,你可以读取系统的全部数据,包括用户信息,日报数据,周报数据,拜访数据,业绩数据,管理周报(含拜访汇总快照),客户汇总数据(客户来源/客户画像/品类),渠道配置;以及团队月目标与团队人数,团队业绩统计(目标/完成率/人效),销售绩效统计(考核项得分/绩效评分),销售评级看板(升降级/评级),M0绩效与M0评级看板,管理绩效统计(管理者绩效得分),荣誉激励(按月奖项与获奖人/奖金),外呼数据(电话通话记录:通话次数/通话时长/平均通话时长/接通次数/接通率,已按部门/员工/月/日/通话方式聚合为 callSummary),\n\n'
     + '你的职责:\n'
     + '1. 根据用户的问题,对系统数据进行分析,汇总和对比\n'
     + '2. 提供数据洞察,趋势分析和改进建议\n'
@@ -6634,7 +6698,10 @@ function buildAISystemMessage() {
     + '- 日报/周报数据(dailyReports/weeklyReports)只用于业绩指标分析(新增线索,建联,AB意向,成交,金额,完成率等),不要把它当作拜访数据,\n'
     + '- visitSummary 已按拜访结果,签到事件,员工,部门,月份做了汇总统计,做整体分析时优先引用 visitSummary,需要逐条明细时再查 visitRecords,\n'
     + '- 当用户的问题涉及"业绩 / 销售 / 销售额 / 折后金额 / 完成业绩 / 团队业绩(完成金额)/ 销售员业绩 / 毛利润 / 各月销售趋势 / KA 各团队业绩对比"等业绩类话题时,必须使用 salesRecords 与 salesSummary 分析"完成业绩(实际成交金额)",绝不要用日报/周报数据(那是建联/线索口径,不是销售成交口径)来回答;若还需对比"目标",必须再结合 teamPerformanceSummary 的 target 字段,切勿把 salesSummary 的 amount 当作目标,\n'
-    + '- salesSummary 已按销售员,团队,月份,单据类别做了汇总统计(含金额合计与笔数),做整体分析时优先引用 salesSummary,需要逐条明细时再查 salesRecords;金额单位为元,退货单通常为负值,净额业绩 = 销售单金额 − 退货单金额,\n\n'
+    + '- salesSummary 已按销售员,团队,月份,单据类别做了汇总统计(含金额合计与笔数),做整体分析时优先引用 salesSummary,需要逐条明细时再查 salesRecords;金额单位为元,退货单通常为负值,净额业绩 = 销售单金额 − 退货单金额,\n'
+    + '- 当用户的问题涉及"外呼 / 打电话 / 电话量 / 通话 / 通话时长 / 通话次数 / 接通 / 接通率 / 谁打得多 / 外呼团队对比 / 呼出呼入"等电话类话题时,必须使用 callRecords 与 callSummary 进行分析,绝不要用拜访(visitRecords)或日报/周报数据来回答外呼类问题,\n'
+    + '- callSummary 已按部门(byDepartment),员工(byEmployee),月份(byMonth),日期(byDay),通话方式(byCallType)做了汇总(含通话次数 count,总秒数 totalSec,平均秒数 avgSec,接通次数 connected,接通率 connectRate),做整体分析时优先引用 callSummary,需要逐条明细时再查 callRecords,\n'
+    + '- 接通判定统一为:通话时长 > 0 记为接通;接通率 = 接通次数 ÷ 通话次数,回答时须标注该口径,\n\n'
     + '数据字段说明:\n'
     + '- newLeads(新增精准线索数): 数量\n'
     + '- effectiveContacts(有效建联数): 数量\n'
@@ -6663,6 +6730,14 @@ function buildAISystemMessage() {
     + '  - amount(折后金额): 销售成交金额,单位元;退货单通常为负数\n'
     + '  - grossProfit(毛利润): 毛利金额,单位元\n'
     + '  - productName(商品名称)/docNo(单据编号)/docType(单据类别, 如 销售单/销售退货单)/status(状态)/customer(客户): 单据明细信息\n\n'
+    + '- callRecords(外呼数据)字段:\n'
+    + '  - contactTime(联系时间): 日期时间,格式 YYYY-MM-DD HH:MM:SS\n'
+    + '  - employee(员工)/department(部门): 外呼人及其所属部门\n'
+    + '  - customer(客户)/contactPerson(联系人)/phone(电话号码): 被叫方信息\n'
+    + '  - durationStr(通话时长文本): 如 00:01:23\n'
+    + '  - durationSec(通话时长秒数): 整数秒,0 表示未接通\n'
+    + '  - callType(通话方式): 如 呼出/呼入\n'
+    + '  - date(日期): 格式 YYYY-MM-DD,便于按天汇总\n\n'
     + '- 管理周报(mgrReports)字段:\n'
     + '  - weekLabel/weekStart/weekEnd: 周次标签与起止日期\n'
     + '  - department: 部门\n'
