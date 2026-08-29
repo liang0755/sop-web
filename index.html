@@ -746,6 +746,10 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
       <div class="nav-section-title">管理周报</div>
       <div class="nav-item" data-page="mgrReport" onclick="navTo('mgrReport')" id="navMgrReport"><span class="icon">📎</span> 管理周报</div>
 
+      <div class="nav-section-title">外呼管理</div>
+      <div class="nav-item" data-page="callData" onclick="navTo('callData')" id="navCallData"><span class="icon">📞</span> 外呼数据</div>
+      <div class="nav-item" data-page="callStats" onclick="navTo('callStats')" id="navCallStats"><span class="icon">📊</span> 外呼统计</div>
+
       <div class="nav-section-title">拜访管理</div>
       <div class="nav-item" data-page="visitData" onclick="navTo('visitData')" id="navVisitData"><span class="icon">📍</span> 拜访数据</div>
       <div class="nav-item" data-page="visitStats" onclick="navTo('visitStats')" id="navVisitStats"><span class="icon">📊</span> 拜访统计</div>
@@ -785,7 +789,7 @@ th.dyoy-th,td.dyoy-cell{text-align:center;vertical-align:middle}
 // ============ Cloud Data Layer (Firebase Realtime Database) ============
 const FB_BASE = 'https://sopka-8270e-default-rtdb.firebaseio.com/sop';
 const SESSION_KEY = 'sop_session';
-let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}, honorRecords:{}, filterDefaults:{}, skills:{}, approvals:[]};
+let cloudData = {users:[], dailyReports:[], weeklyReports:[], formConfig:null, brandConfig:null, departments:[], aiConfig:null, roleConfig:null, visitRecords:[], visitConfig:null, mgrReports:[], salesRecords:[], performanceRecords:{}, performanceSnapshots:{}, m0PerformanceRecords:{}, m0PerformanceSnapshots:{}, mgrPerformanceRecords:{}, mgrPerformanceSnapshots:{}, honorRecords:{}, filterDefaults:{}, skills:{}, approvals:[], callRecords:[]};
 let currentUser = null;
 let isCloudAvailable = false;
 let cloudConfirmedViaSibling = false; // 已通过兄弟标签页确认云端可达:loadUsersOnly 拉取失败时不再把 isCloudAvailable 下探为 false
@@ -855,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260829174840';
-const APP_VERSION = '1.42.83'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260829175622';
+const APP_VERSION = '1.42.84'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1042,6 +1046,13 @@ async function loadCoreDataFresh() {
           role.permissions.mgrPerf = role.permissions.salesPerf === true;
           roleChanged = true;
         }
+        // Ensure callData/callStats exist (外呼管理) - default admin/manager
+        if (role.permissions && role.permissions.callData === undefined) {
+          const allowCall = (role.key === 'admin' || role.key === 'manager');
+          role.permissions.callData = allowCall;
+          role.permissions.callStats = allowCall;
+          roleChanged = true;
+        }
       });
       // Ensure super admin (key='admin') ALWAYS has every permission, regardless of stored data
       const superAdmin = cloudData.roleConfig.roles.find(r => r.key === 'admin');
@@ -1157,6 +1168,7 @@ async function loadRoleScopedData() {
   reg('salesPerf', '/m0PerformanceSnapshots.json', 'm0PerformanceSnapshots');
   reg('mgrPerf', '/mgrPerformanceRecords.json', 'mgrPerformanceRecords');
   reg('mgrPerf', '/mgrPerformanceSnapshots.json', 'mgrPerformanceSnapshots');
+  reg('callData', '/callRecords.json', 'callRecords');
   if (specs.length === 0) return; // 员工无管理权限 → 直接跳过,零开销
   try {
     const res = await Promise.all(specs.map(([url]) => fetch(FB_BASE + url)));
@@ -1165,11 +1177,12 @@ async function loadRoleScopedData() {
       const r = res[i];
       let d = null;
       if (r && r.ok) { try { d = await r.json(); } catch(e) { d = null; } }
-      cloudData[key] = (d && typeof d === 'object') ? d : {};
+      if (key === 'callRecords') cloudData.callRecords = (d && typeof d === 'object') ? Object.values(d) : [];
+      else cloudData[key] = (d && typeof d === 'object') ? d : {};
     }
   } catch(e) {
     console.warn('Role-scoped data fetch failed:', e.message);
-    ['gradeRecords','m0Records','performanceRecords','performanceSnapshots','m0PerformanceRecords','m0PerformanceSnapshots','mgrPerformanceRecords','mgrPerformanceSnapshots'].forEach(k => { cloudData[k] = {}; });
+    ['gradeRecords','m0Records','performanceRecords','performanceSnapshots','m0PerformanceRecords','m0PerformanceSnapshots','mgrPerformanceRecords','mgrPerformanceSnapshots','callRecords'].forEach(k => { cloudData[k] = {}; });
   }
 }
 
@@ -1587,7 +1600,7 @@ function navTo(page) {
   const cb = document.getElementById('contentBody');
   cb.className = 'content-body';
   // Check page permission (dashboard and settings are always allowed)
-  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
+  const restrictedPages = ['dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf','callData','callStats'];
   if (restrictedPages.includes(page) && !hasPermission(page)) {
     document.getElementById('contentBody').innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面,请联系管理员,</div>';
     closeSidebar();
@@ -1595,11 +1608,11 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  const titles = {dashboard:'首页',aiWorkbench:'AI工作台',approvals:'审批中心',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计',mgrPerf:'管理绩效统计'};
+  const titles = {dashboard:'首页',aiWorkbench:'AI工作台',approvals:'审批中心',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',callData:'外呼数据',callStats:'外呼统计',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计',mgrPerf:'管理绩效统计'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
   // 浏览器标签页标题带上功能模块名,便于在多标签间区分(主标签与新标签均生效)
   document.title = (titles[page] ? titles[page] + ' · ' : '') + '团队SOP数据管理系统';
-  ({dashboard:renderDashboard,aiWorkbench:renderAiWorkbench,approvals:renderApprovals,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
+  ({dashboard:renderDashboard,aiWorkbench:renderAiWorkbench,approvals:renderApprovals,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,callData:renderCallData,callStats:renderCallStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
   closeSidebar();
   // 进入任意页面后立即把云端保存的全局筛选默认值回填到已渲染的 select/多选面板(绕过整页重绘时序),确保"保存默认"必定生效
   applyFilterDefaultsToRenderedDOM();
@@ -1611,7 +1624,7 @@ function navTo(page) {
 
 // 通过 URL 参数确定新标签/直达应打开的模块(登录后默认首页)
 function getInitialPage() {
-  const valid = ['dashboard','aiWorkbench','approvals','dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','settings','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
+  const valid = ['dashboard','aiWorkbench','approvals','dailyForm','weeklyForm','dailyData','weeklyData','summary','userManagement','roleConfig','formConfig','settings','visitData','visitStats','mgrReport','callData','callStats','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'];
   const p = new URLSearchParams(location.search).get('page');
   return (p && valid.includes(p)) ? p : 'dashboard';
 }
@@ -1644,7 +1657,7 @@ async function silentRefresh(page, force = false) {
   if (bgRefreshInFlight) return;
   if (!force && Date.now() - lastRefreshTime < REFRESH_INTERVAL) return;
   // Only background-refresh read-only pages (not forms with user input)
-  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf','mgrReport','approvals'].includes(page)) return;
+  if (!['dashboard','dailyData','weeklyData','summary','visitData','visitStats','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf','mgrReport','approvals','callData','callStats'].includes(page)) return;
   bgRefreshInFlight = true;
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
@@ -1661,6 +1674,9 @@ async function silentRefresh(page, force = false) {
     let iVisit = -1, iSales = -1, iPerfSnap = -1, iM0Snap = -1, iMgrSnap = -1, iMgrR = -1;
     if (needVisit) { iVisit = fetches.length; fetches.push(fetch(FB_BASE + '/visitRecords.json')); }
     if (needSales) { iSales = fetches.length; fetches.push(fetch(FB_BASE + '/salesRecords.json')); }
+    const needCall = hasPermission('callData') || hasPermission('callStats');
+    let iCall = -1;
+    if (needCall) { iCall = fetches.length; fetches.push(fetch(FB_BASE + '/callRecords.json')); }
     // 仅具权限者才在后台刷新管理绩效快照,避免普通员工无谓拉取
     if (needPerf) {
       iPerfSnap = fetches.length; fetches.push(fetch(FB_BASE + '/performanceSnapshots.json'));
@@ -1696,6 +1712,14 @@ async function silentRefresh(page, force = false) {
       cloudData.approvals = Array.isArray(newAp) ? newAp : [];
       updateApprovalsNavBadge();
       if (document.querySelector('.nav-item.active')?.dataset.page === 'approvals') renderApprovals();
+    }
+    // 外呼数据后台刷新
+    const newCall = (iCall >= 0 && results[iCall] && results[iCall].ok) ? Object.values(await results[iCall].json() || {}) : null;
+    if (newCall) {
+      cloudData.callRecords = Array.isArray(newCall) ? newCall : [];
+      const cp = document.querySelector('.nav-item.active')?.dataset.page;
+      if (cp === 'callData') renderCallData();
+      else if (cp === 'callStats') renderCallStats();
     }
     // 任一数据有变更(新增/删除/编辑关键字段)即更新+重渲染, 而非仅比记录数量
     const mgrRChanged = newMgrR && (newMgrR.length !== cloudData.mgrReports.length || dataSig(newMgrR) !== dataSig(cloudData.mgrReports));
@@ -1791,6 +1815,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: true, deleteOthers: true, exportData: true,
         brandConfig: true, aiConfig: true,
         visitData: true, visitStats: true, mgrReport: true,
+        callData: true, callStats: true,
         salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true, mgrPerf: true      }
     },
     {
@@ -1803,6 +1828,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: true, deleteOthers: false, exportData: true,
         brandConfig: false, aiConfig: false,
         visitData: true, visitStats: true, mgrReport: true,
+        callData: true, callStats: true,
         salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true, mgrPerf: true      }
     },
     {
@@ -1815,6 +1841,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
         visitData: false, visitStats: false, mgrReport: false,
+        callData: false, callStats: false,
         salesDetail: true, salesBoard: true, salesGrade: true, salesPerf: true, mgrPerf: true      }
     },
     {
@@ -1827,6 +1854,7 @@ const DEFAULT_ROLE_CONFIG = {
         editOthers: false, deleteOthers: false, exportData: false,
         brandConfig: false, aiConfig: false,
         visitData: false, visitStats: false, mgrReport: false,
+        callData: false, callStats: false,
         salesDetail: false, salesBoard: true, salesGrade: true, salesPerf: true      }
     }
   ]
@@ -1840,11 +1868,12 @@ const PERMISSION_LABELS = {
   roleConfig: '角色权限配置', settings: '设置',
   editOthers: '编辑他人数据', deleteOthers: '删除他人数据', exportData: '导出数据',
   brandConfig: '品牌配置', aiConfig: 'AI模型配置',
-  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报', salesDetail: '业绩明细', salesBoard: '业绩看板', salesGrade: '销售评级看板', salesPerf: '销售绩效统计', mgrPerf: '管理绩效统计'
+  visitData: '拜访数据', visitStats: '拜访统计', mgrReport: '管理周报', salesDetail: '业绩明细', salesBoard: '业绩看板', salesGrade: '销售评级看板', salesPerf: '销售绩效统计', mgrPerf: '管理绩效统计',
+  callData: '外呼数据', callStats: '外呼统计'
 };
 
 const PERMISSION_GROUPS = [
-  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats','mgrReport','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'] },
+  { title: '页面访问', keys: ['dashboard','dailyForm','weeklyForm','dailyData','weeklyData','summary','visitData','visitStats','mgrReport','callData','callStats','salesDetail','salesBoard','salesGrade','salesPerf','mgrPerf'] },
   { title: '管理功能', keys: ['userManagement','formConfig','roleConfig','settings','brandConfig','aiConfig'] },
   { title: '数据操作', keys: ['editOthers','deleteOthers','exportData'] }
 ];
@@ -5269,6 +5298,317 @@ function updateApprovalsNavBadge() {
     : list.filter(a => a.userId === currentUser.id && a.status === 'pending').length;
   if (n > 0) { badge.textContent = n > 99 ? '99+' : n; badge.style.display = 'inline-block'; }
   else badge.style.display = 'none';
+}
+
+// ============ 外呼管理模块(v1.42.84): 外呼数据 + 外呼统计 ============
+let callDataDeptFilter = [];
+let callDataPersonFilter = [];
+let callDataPage = 1;
+const CALL_PAGE_SIZE = 50;
+let callStatsTab = 'team'; // team=按团队 / person=按个人
+let callStatsDeptFilter = [];
+let callStatsPersonFilter = [];
+
+// 时长工具: "HH:MM:SS" → 秒; 秒 → 展示
+function callDurToSec(s) {
+  if (s === undefined || s === null || s === '') return 0;
+  if (typeof s === 'number') return s;
+  const m = String(s).trim().split(':').map(Number);
+  if (m.length === 3 && !m.some(isNaN)) return m[0] * 3600 + m[1] * 60 + m[2];
+  return 0;
+}
+function fmtCallDur(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return (h ? String(h).padStart(2, '0') + ':' : '') + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+function fmtCallAvg(sec) {
+  sec = Math.round(sec || 0);
+  if (sec >= 60) return Math.floor(sec / 60) + '分' + (sec % 60) + '秒';
+  return sec + '秒';
+}
+// 筛选后的外呼记录(起止日期+部门+员工)
+function filterCallRecords(s, e, deptF, personF) {
+  return (cloudData.callRecords || []).filter(r => {
+    const d = (r.date || '').slice(0, 10);
+    if (s && d < s) return false;
+    if (e && d > e) return false;
+    if (deptF && deptF.length && deptF.indexOf(r.department) < 0) return false;
+    if (personF && personF.length && personF.indexOf(r.employee) < 0) return false;
+    return true;
+  });
+}
+
+// ============ 外呼数据页 ============
+function renderCallData() {
+  const body = document.getElementById('contentBody');
+  if (!hasPermission('callData')) { body.innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面,请联系管理员</div>'; return; }
+  callDataDeptFilter = takeFilterDefault('callData.dept', callDataDeptFilter);
+  callDataPersonFilter = takeFilterDefault('callData.person', callDataPersonFilter);
+  const today = localYMD();
+  const mAgo = localYMD(new Date(Date.now() - 30 * 86400000));
+  const depts = [...new Set((cloudData.callRecords || []).map(r => r.department).filter(Boolean))].sort();
+  const persons = [...new Set((cloudData.callRecords || []).map(r => r.employee).filter(Boolean))].sort();
+  body.innerHTML = `
+    <div class="card filter-card" style="margin-bottom:20px"><div class="card-body">
+      <div class="filter-bar">
+        ${multiSelectPanelHtml('cdDept', {label:'部门', options:depts, selected:callDataDeptFilter, placeholder:'全部部门', defaultKey:'callData.dept', onChange:function(arr){ callDataDeptFilter = arr; renderCallData(); }})}
+        ${multiSelectPanelHtml('cdPerson', {label:'员工', options:persons, selected:callDataPersonFilter, placeholder:'全部员工', defaultKey:'callData.person', onChange:function(arr){ callDataPersonFilter = arr; renderCallData(); }})}
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="callStart" value="${mAgo}"></div>
+        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="callEnd" value="${today}"></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="renderCallData()">🔍 查询</button></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-success" onclick="exportCallData()">📥 导出</button></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-outline" onclick="document.getElementById('callFileInput').click()">📤 上传CSV</button>
+          <input type="file" id="callFileInput" accept=".csv" multiple style="display:none" onchange="handleCallUpload(event)">
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--gray-500);margin-top:8px">支持上传外呼系统导出的 CSV(表头:联系时间,客户,工作单位/联系人,电话号码,通话时长,通话方式,员工,部门),按「联系时间+电话号码」自动去重追加,不会重复入库</div>
+    </div></div>
+    <div id="callDataList"></div>`;
+  renderCallDataList();
+}
+
+function renderCallDataList() {
+  const c = document.getElementById('callDataList');
+  if (!c) return;
+  const s = document.getElementById('callStart')?.value || '';
+  const e = document.getElementById('callEnd')?.value || '';
+  const rows = filterCallRecords(s, e, callDataDeptFilter, callDataPersonFilter).sort((a, b) => String(b.contactTime || '').localeCompare(String(a.contactTime || '')));
+  const totalPages = Math.max(1, Math.ceil(rows.length / CALL_PAGE_SIZE));
+  if (callDataPage > totalPages) callDataPage = totalPages;
+  const pageRows = rows.slice((callDataPage - 1) * CALL_PAGE_SIZE, callDataPage * CALL_PAGE_SIZE);
+  const rowsHtml = pageRows.map(r => `<tr>
+    <td style="white-space:nowrap">${escapeHtml(r.contactTime || '')}</td>
+    <td>${escapeHtml(r.customer || '')}</td>
+    <td>${escapeHtml(r.contactPerson || '')}</td>
+    <td style="white-space:nowrap">${escapeHtml(r.phone || '')}</td>
+    <td style="text-align:center">${fmtCallDur(r.durationSec)}</td>
+    <td>${escapeHtml(r.callType || '')}</td>
+    <td>${escapeHtml(r.employee || '')}</td>
+    <td>${escapeHtml(r.department || '')}</td>
+    <td style="text-align:center"><button class="btn btn-danger btn-xs" onclick="deleteCallRecord('${r.id}')" title="删除">🗑</button></td>
+  </tr>`).join('');
+  c.innerHTML = `<div class="card"><div class="card-header"><h4>📞 外呼记录(${rows.length} 条)</h4>
+      <span style="font-size:12px;color:var(--gray-400)">${s || '全部'} 至 ${e || '全部'}${callDataDeptFilter.length ? ' · 部门 ' + callDataDeptFilter.join('/') : ''}${callDataPersonFilter.length ? ' · 员工 ' + callDataPersonFilter.join('/') : ''}</span>
+    </div><div class="card-body">
+    <div class="table-wrap"><table class="table"><thead><tr><th>联系时间</th><th>客户</th><th>联系人</th><th>电话</th><th>通话时长</th><th>通话方式</th><th>员工</th><th>部门</th><th></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+    <div style="display:flex;justify-content:center;gap:10px;margin-top:14px;align-items:center">
+      <button class="btn btn-outline btn-sm" ${callDataPage <= 1 ? 'disabled' : ''} onclick="callDataPage--;renderCallDataList()">◀ 上一页</button>
+      <span style="font-size:13px;color:var(--gray-500)">第 ${callDataPage} / ${totalPages} 页</span>
+      <button class="btn btn-outline btn-sm" ${callDataPage >= totalPages ? 'disabled' : ''} onclick="callDataPage++;renderCallDataList()">下一页 ▶</button>
+    </div>
+  </div></div>`;
+}
+
+function deleteCallRecord(id) {
+  if (!confirm('确定删除这条外呼记录?')) return;
+  apiDelete('callRecords', id).then(() => {
+    cloudData.callRecords = (cloudData.callRecords || []).filter(r => r.id !== id);
+    renderCallDataList();
+    showToast('已删除', 'success');
+  }).catch(e => showToast('删除失败:' + (e.message || ''), 'error', 4000));
+}
+
+// ---- CSV 上传:按列名解析 + 按「联系时间+电话号码」去重追加 ----
+function handleCallUpload(event) {
+  const files = event.target.files;
+  if (!files || !files.length) return;
+  const input = event.target;
+  let pending = files.length;
+  let okCount = 0, skipCount = 0, failCount = 0;
+  function finish() {
+    if (pending > 0) return;
+    input.value = '';
+    showToast('上传完成:新增 ' + okCount + ' 条,跳过重复 ' + skipCount + ' 条' + (failCount ? ',失败 ' + failCount + ' 条' : ''), failCount ? 'warning' : 'success');
+    renderCallData();
+  }
+  Array.from(files).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        // 兼容 GBK/GB18030(中文Excel导出默认)与 UTF-8:先按 UTF-8(fatal)解码,失败回退 GBK
+        let text;
+        try {
+          text = new TextDecoder('utf-8', { fatal: true }).decode(reader.result);
+        } catch (e) {
+          text = new TextDecoder('gbk').decode(reader.result);
+        }
+        const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
+        if (lines.length < 2) throw new Error('空文件');
+        const header = parseCsvLine(lines[0]);
+        const idx = {};
+        header.forEach((h, i) => { idx[String(h).trim()] = i; });
+        const need = ['联系时间', '客户', '工作单位/联系人', '电话号码', '通话时长', '通话方式', '员工', '部门'];
+        const miss = need.filter(n => idx[n] === undefined);
+        if (miss.length) throw new Error('缺少列: ' + miss.join(','));
+        const existKeys = new Set((cloudData.callRecords || []).map(r => (r.contactTime || '') + '|' + (r.phone || '')));
+        const fileKeys = new Set();
+        const newRecs = [];
+        for (let i = 1; i < lines.length; i++) {
+          const cells = parseCsvLine(lines[i]);
+          const get = (n) => (cells[idx[n]] || '').trim();
+          const contactTime = get('联系时间');
+          const phone = get('电话号码');
+          const key = contactTime + '|' + phone;
+          if (fileKeys.has(key)) continue;
+          fileKeys.add(key);
+          if (existKeys.has(key)) { skipCount++; continue; }
+          newRecs.push({
+            id: genId(), contactTime: contactTime, customer: get('客户'),
+            contactPerson: get('工作单位/联系人'), phone: phone,
+            durationStr: get('通话时长'), durationSec: callDurToSec(get('通话时长')),
+            callType: get('通话方式'), employee: get('员工'), department: get('部门'),
+            date: contactTime.slice(0, 10), createdAt: new Date().toISOString()
+          });
+        }
+        for (let i = 0; i < newRecs.length; i += 500) {
+          await apiBatchPut('callRecords', newRecs.slice(i, i + 500));
+        }
+        cloudData.callRecords = (cloudData.callRecords || []).concat(newRecs);
+        okCount += newRecs.length;
+      } catch (err) { failCount++; }
+      if (--pending === 0) finish();
+    };
+    reader.onerror = () => { failCount++; if (--pending === 0) finish(); };
+    reader.readAsArrayBuffer(file);
+  });
+}
+function parseCsvLine(line) {
+  const out = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+      else cur += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+// 批量 PATCH 写入(一次请求写多条,key=id),大幅降低上传耗时
+async function apiBatchPut(collection, records) {
+  const body = {};
+  records.forEach(r => { body[r.id] = r; });
+  const res = await fetch(FB_BASE + '/' + collection + '.json', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error('batch write failed: ' + res.status);
+}
+
+function exportCallData() {
+  const s = document.getElementById('callStart')?.value || '';
+  const e = document.getElementById('callEnd')?.value || '';
+  const rows = filterCallRecords(s, e, callDataDeptFilter, callDataPersonFilter).sort((a, b) => String(a.contactTime || '').localeCompare(String(b.contactTime || '')));
+  const headers = ['联系时间', '客户', '工作单位/联系人', '电话号码', '通话时长', '通话方式', '员工', '部门'];
+  const data = rows.map(r => [r.contactTime || '', r.customer || '', r.contactPerson || '', r.phone || '', r.durationStr || fmtCallDur(r.durationSec), r.callType || '', r.employee || '', r.department || '']);
+  downloadCsv('外呼数据_' + (s || '起') + '_' + (e || '止') + '.csv', headers, data);
+  showToast('已导出 ' + rows.length + ' 条外呼记录', 'success');
+}
+
+// ============ 外呼统计页 ============
+function switchCallStatsTab(tab, el) {
+  callStatsTab = tab;
+  document.querySelectorAll('#callStatsTabs .summary-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderCallStats();
+}
+
+function renderCallStats() {
+  const body = document.getElementById('contentBody');
+  if (!hasPermission('callStats')) { body.innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面,请联系管理员</div>'; return; }
+  callStatsDeptFilter = takeFilterDefault('callStats.dept', callStatsDeptFilter);
+  callStatsPersonFilter = takeFilterDefault('callStats.person', callStatsPersonFilter);
+  const today = localYMD();
+  const mAgo = localYMD(new Date(Date.now() - 30 * 86400000));
+  const all = cloudData.callRecords || [];
+  const depts = [...new Set(all.map(r => r.department).filter(Boolean))].sort();
+  const persons = [...new Set(all.map(r => r.employee).filter(Boolean))].sort();
+  body.innerHTML = `
+    <div class="summary-tabs" id="callStatsTabs" style="margin-bottom:12px">
+      <div class="summary-tab ${callStatsTab === 'team' ? 'active' : ''}" onclick="switchCallStatsTab('team',this)">👥 按团队</div>
+      <div class="summary-tab ${callStatsTab === 'person' ? 'active' : ''}" onclick="switchCallStatsTab('person',this)">👤 按个人</div>
+    </div>
+    <div class="card filter-card" style="margin-bottom:20px"><div class="card-body">
+      <div class="filter-bar">
+        ${multiSelectPanelHtml('csDept', {label:'部门', options:depts, selected:callStatsDeptFilter, placeholder:'全部部门', defaultKey:'callStats.dept', onChange:function(arr){ callStatsDeptFilter = arr; renderCallStats(); }})}
+        ${multiSelectPanelHtml('csPerson', {label:'员工', options:persons, selected:callStatsPersonFilter, placeholder:'全部员工', defaultKey:'callStats.person', onChange:function(arr){ callStatsPersonFilter = arr; renderCallStats(); }})}
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="callStatsStart" value="${mAgo}"></div>
+        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="callStatsEnd" value="${today}"></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="renderCallStats()">🔍 统计</button></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn btn-success" onclick="exportCallStats()">📥 导出</button></div>
+      </div>
+      <div style="font-size:12px;color:var(--gray-500);margin-top:8px">接通判定:通话时长 &gt; 0 记为接通;接通率 = 接通次数 ÷ 通话次数。点击次数/时长/接通数字可查看对应明细</div>
+    </div></div>
+    <div id="callStatsResult"></div>`;
+  renderCallStatsResult();
+}
+
+function renderCallStatsResult() {
+  const c = document.getElementById('callStatsResult');
+  if (!c) return;
+  const s = document.getElementById('callStatsStart')?.value || '';
+  const e = document.getElementById('callStatsEnd')?.value || '';
+  const rows = filterCallRecords(s, e, callStatsDeptFilter, callStatsPersonFilter);
+  if (!rows.length) { c.innerHTML = '<div class="empty-state"><div class="icon">📭</div>所选范围内暂无外呼数据</div>'; return; }
+  const isTeam = callStatsTab === 'team';
+  const groups = {};
+  rows.forEach(r => {
+    const k = isTeam ? (r.department || '未分组') : (r.employee || '未知');
+    if (!groups[k]) groups[k] = { cnt: 0, sec: 0, conn: 0, recs: [] };
+    groups[k].cnt++; groups[k].sec += (r.durationSec || 0);
+    if ((r.durationSec || 0) > 0) groups[k].conn++;
+    groups[k].recs.push(r);
+  });
+  const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'zh'));
+  const gCnt = rows.length, gSec = rows.reduce((a, r) => a + (r.durationSec || 0), 0), gConn = rows.filter(r => (r.durationSec || 0) > 0).length;
+  const head = isTeam ? '团队' : '员工';
+  const trs = keys.map(k => {
+    const g = groups[k];
+    const avg = g.cnt ? g.sec / g.cnt : 0;
+    const rate = g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-';
+    const allKey = drillPut(g.recs);
+    const connKey = drillPut(g.recs.filter(r => (r.durationSec || 0) > 0));
+    return `<tr>
+      <td style="font-weight:600;white-space:nowrap">${escapeHtml(k)}</td>
+      <td class="drill-td" style="text-align:center" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(k + ' 通话次数')}','${allKey}')">${g.cnt}</td>
+      <td class="drill-td" style="text-align:center" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(k + ' 通话时长')}','${allKey}')">${fmtCallDur(g.sec)}</td>
+      <td style="text-align:center">${fmtCallAvg(avg)}</td>
+      <td class="drill-td" style="text-align:center" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(k + ' 接通次数')}','${connKey}')">${g.conn}</td>
+      <td style="text-align:center;font-weight:600;color:${g.cnt && g.conn / g.cnt >= 0.3 ? 'var(--success)' : 'var(--gray-600)'}">${rate}</td>
+    </tr>`;
+  }).join('');
+  const totalAllKey = drillPut(rows);
+  const totalConnKey = drillPut(rows.filter(r => (r.durationSec || 0) > 0));
+  c.innerHTML = `<div class="card"><div class="card-header"><h4>${isTeam ? '👥 按团队统计' : '👤 按个人统计'}(${s || '全部'} 至 ${e || '全部'})</h4></div><div class="card-body">
+    <div class="table-wrap"><table class="table"><thead><tr>
+      <th>${head}</th><th>通话次数</th><th>总通话时长</th><th>平均通话时长</th><th>接通次数</th><th>接通率</th>
+    </tr></thead><tbody>${trs}
+      <tr style="font-weight:700;background:var(--gray-50)">
+        <td>合计</td>
+        <td class="drill-td" style="text-align:center" onclick="openDrillDetail('全部通话次数','${totalAllKey}')">${gCnt}</td>
+        <td class="drill-td" style="text-align:center" onclick="openDrillDetail('全部通话时长','${totalAllKey}')">${fmtCallDur(gSec)}</td>
+        <td style="text-align:center">${fmtCallAvg(gCnt ? gSec / gCnt : 0)}</td>
+        <td class="drill-td" style="text-align:center" onclick="openDrillDetail('全部接通次数','${totalConnKey}')">${gConn}</td>
+        <td style="text-align:center">${gCnt ? (gConn / gCnt * 100).toFixed(1) + '%' : '-'}</td>
+      </tr>
+    </tbody></table></div>
+  </div></div>`;
+}
+
+function exportCallStats() {
+  const s = document.getElementById('callStatsStart')?.value || '';
+  const e = document.getElementById('callStatsEnd')?.value || '';
+  const rows = filterCallRecords(s, e, callStatsDeptFilter, callStatsPersonFilter);
+  const isTeam = callStatsTab === 'team';
+  const groups = {};
+  rows.forEach(r => { const k = isTeam ? (r.department || '未分组') : (r.employee || '未知'); if (!groups[k]) groups[k] = { cnt: 0, sec: 0, conn: 0 }; groups[k].cnt++; groups[k].sec += (r.durationSec || 0); if ((r.durationSec || 0) > 0) groups[k].conn++; });
+  const headers = [isTeam ? '团队' : '员工', '通话次数', '总通话时长(秒)', '平均通话时长(秒)', '接通次数', '接通率'];
+  const data = Object.keys(groups).sort().map(k => { const g = groups[k]; return [k, g.cnt, g.sec, g.cnt ? Math.round(g.sec / g.cnt) : 0, g.conn, g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-']; });
+  downloadCsv('外呼统计_' + (isTeam ? '按团队' : '按个人') + '_' + (s || '起') + '_' + (e || '止') + '.csv', headers, data);
+  showToast('已导出', 'success');
 }
 
 // 重新渲染 Skill 列表(新建 / 上传 / 删除后调用,不影响聊天区)
@@ -10043,7 +10383,8 @@ const DRILL_LABELS = {
   employee:'员工', visitResult:'拜访结果', signinEvent:'签到事件', customerName:'客户', address:'地址',
   score:'评分', level:'职级', actual:'实际值', standard:'要求', item:'考核项', note:'备注', workingDays:'在职天数',
   base:'基数', bonus:'奖金', id:'ID', userId:'用户ID', year:'年份', month:'月', total:'合计', count:'数量',
-  aiScore:'AI评分', mgrScore:'管理评分', finalScore:'总评'
+  aiScore:'AI评分', mgrScore:'管理评分', finalScore:'总评',
+  phone:'电话号码', durationSec:'通话时长(秒)', durationStr:'通话时长', callType:'通话方式', contactPerson:'联系人', date:'日期'
 };
 // 渲染数字格时调用:把该格对应的原始记录数组存入 store,返回可在 onclick 里引用的 key
 function drillPut(records){ const k='d'+(++__drillSeq); window.__drillStore[k]=Array.isArray(records)?records:[]; return k; }
