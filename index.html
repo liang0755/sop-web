@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260829191506';
-const APP_VERSION = '1.42.91'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260829192824';
+const APP_VERSION = '1.42.92'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -5531,11 +5531,13 @@ function handleCallUpload(event) {
   if (!files || !files.length) return;
   const input = event.target;
   let pending = files.length;
-  let okCount = 0, skipCount = 0, failCount = 0;
+  let okCount = 0, skipCount = 0, failCount = 0, badCount = 0;
   function finish() {
     if (pending > 0) return;
     input.value = '';
-    showToast('上传完成:新增 ' + okCount + ' 条,跳过重复 ' + skipCount + ' 条' + (failCount ? ',失败 ' + failCount + ' 条' : ''), failCount ? 'warning' : 'success');
+    showToast('上传完成:新增 ' + okCount + ' 条,跳过重复 ' + skipCount + ' 条'
+      + (badCount ? ',跳过格式异常 ' + badCount + ' 行' : '')
+      + (failCount ? ',失败 ' + failCount + ' 条' : ''), failCount ? 'warning' : 'success', 6000);
     renderCallData();
   }
   Array.from(files).forEach(file => {
@@ -5552,10 +5554,11 @@ function handleCallUpload(event) {
         // 去掉 UTF-8 BOM(避免首列名带 \uFEFF 字符导致列名匹配失败)
         if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
         if (!text.trim()) throw new Error('文件为空(0字节或仅空白)');
-        const lines = text.replace(/\r/g, '').split('\n');
-        if (lines.length < 1) throw new Error('文件无内容');
-        if (lines.length < 2) throw new Error('CSV 仅有表头无数据行(请上传包含数据的原始文件)');
-        const header = parseCsvLine(lines[0]);
+        // RFC4180 整文解析:引号包裹的字段内允许逗号与换行(旧实现先按 \n 切行,遇到字段内换行会截断成半行脏数据)
+        const allRows = parseCsvText(text);
+        if (allRows.length < 1) throw new Error('文件无内容');
+        if (allRows.length < 2) throw new Error('CSV 仅有表头无数据行(请上传包含数据的原始文件)');
+        const header = allRows[0];
         const idx = {};
         header.forEach((h, i) => { idx[String(h).trim()] = i; });
         const need = ['联系时间', '客户', '工作单位/联系人', '电话号码', '通话时长', '通话方式', '员工', '部门'];
@@ -5564,10 +5567,15 @@ function handleCallUpload(event) {
         const existKeys = new Set((cloudData.callRecords || []).map(r => (r.contactTime || '') + '|' + (r.phone || '')));
         const fileKeys = new Set();
         const newRecs = [];
-        for (let i = 1; i < lines.length; i++) {
-          const cells = parseCsvLine(lines[i]);
+        for (let i = 1; i < allRows.length; i++) {
+          const cells = allRows[i];
+          // 空行跳过
+          if (!cells.length || (cells.length === 1 && !String(cells[0]).trim())) continue;
+          // 列数不足表头 = 解析错位/残行(如字段内含未转义分隔符),跳过而非写入脏数据
+          if (cells.length < header.length) { badCount++; continue; }
           const get = (n) => (cells[idx[n]] || '').trim();
           const contactTime = get('联系时间');
+          if (!contactTime) { badCount++; continue; }
           const phone = get('电话号码');
           const key = contactTime + '|' + phone;
           if (fileKeys.has(key)) continue;
@@ -5611,6 +5619,38 @@ function parseCsvLine(line) {
   }
   out.push(cur);
   return out;
+}
+// RFC4180 整文 CSV 解析:返回二维数组。与 parseCsvLine 的区别是**不预先按 \n 切行**,
+// 因此引号包裹的字段内部若含逗号或换行(公司名/地址常见)不会被截断成半行脏数据。
+// 支持 "" 转义、CRLF/LF/CR 三种行尾、结尾无换行。
+function parseCsvText(text) {
+  const rows = [];
+  let row = [], cur = '', inQ = false, i = 0, started = false;
+  const n = text.length;
+  const endCell = () => { row.push(cur); cur = ''; started = false; };
+  const endRow = () => { endCell(); rows.push(row); row = []; };
+  while (i < n) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i += 2; continue; }
+        inQ = false; i++; continue;
+      }
+      cur += ch; i++; continue;
+    }
+    if (ch === '"') {
+      // 仅字段起始位置的双引号才算包裹符;字段中间的引号按字面量保留(与 Excel / Python csv 行为一致)
+      if (!started && cur === '') { inQ = true; started = true; i++; continue; }
+      cur += ch; started = true; i++; continue;
+    }
+    if (ch === ',') { endCell(); i++; continue; }
+    if (ch === '\r') { if (text[i + 1] === '\n') i++; endRow(); i++; continue; }
+    if (ch === '\n') { endRow(); i++; continue; }
+    cur += ch; started = true; i++;
+  }
+  // 收尾:文件末尾没有换行时补最后一行(全空则不补)
+  if (row.length || cur !== '' || started) endRow();
+  return rows;
 }
 // 批量 PATCH 写入(一次请求写多条,key=id),大幅降低上传耗时
 async function apiBatchPut(collection, records) {
