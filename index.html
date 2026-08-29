@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260829182602';
-const APP_VERSION = '1.42.89'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260829183710';
+const APP_VERSION = '1.42.90'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -5414,6 +5414,32 @@ function sortCallStatsKeys(groups) {
     return String(va).localeCompare(String(vb), 'zh') * dir;
   });
 }
+// ---- 按团队人均统计表表头排序(独立状态,持久化 localStorage) ----
+let callAvgSort = { key: 'name', dir: 'asc' };
+try { const _s = JSON.parse(localStorage.getItem('sop_callAvgSort') || ''); if (_s && _s.key) callAvgSort = _s; } catch (e) {}
+function toggleCallAvgSort(key) {
+  if (callAvgSort.key === key) callAvgSort.dir = callAvgSort.dir === 'asc' ? 'desc' : 'asc';
+  else callAvgSort = { key: key, dir: (key === 'name' ? 'asc' : 'desc') };
+  try { localStorage.setItem('sop_callAvgSort', JSON.stringify(callAvgSort)); } catch (e) {}
+  renderCallStatsResult();
+}
+function sortCallAvgKeys(groups) {
+  const s = callAvgSort, dir = s.dir === 'asc' ? 1 : -1;
+  const val = (k) => {
+    const g = groups[k], n = g.emps.size || 1;
+    if (s.key === 'emps') return g.emps.size;
+    if (s.key === 'avgCnt') return g.cnt / n;
+    if (s.key === 'avgSec') return g.sec / n;
+    if (s.key === 'avgConn') return g.conn / n;
+    if (s.key === 'rate') return g.cnt ? g.conn / g.cnt : 0;
+    return k;
+  };
+  return Object.keys(groups).sort((a, b) => {
+    const va = val(a), vb = val(b);
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+    return String(va).localeCompare(String(vb), 'zh') * dir;
+  });
+}
 
 // ============ 外呼数据页 ============
 function renderCallData() {
@@ -5721,7 +5747,9 @@ function renderCallStatsResult() {
   // 按团队人均统计表(仅按团队 tab;团队人数=该团队筛选范围内去重员工数,人均=指标÷人数)
   let avgHtml = '';
   if (isTeam) {
-    const avgTrs = keys.map(k => {
+    const avgKeys = sortCallAvgKeys(groups);
+    const thCellAvg = (key, label) => `<th class="sort-th" style="cursor:pointer" onclick="toggleCallAvgSort('${key}')">${label}${callAvgSort.key === key ? (callAvgSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`;
+    const avgTrs = avgKeys.map(k => {
       const g = groups[k];
       const n = g.emps.size || 1;
       const avgKey = drillPut(g.recs);
@@ -5737,7 +5765,7 @@ function renderCallStatsResult() {
     const gN = gEmpN || 1;
     avgHtml = `<div class="card" style="margin-top:16px"><div class="card-header"><h4>👥 按团队人均统计(${s || '全部'} 至 ${e || '全部'})</h4></div><div class="card-body">
       <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">团队人数 = 该团队在所选范围内出现的外呼员工去重数;人均 = 指标 ÷ 团队人数。点击数字查看明细</div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>团队</th><th>团队人数</th><th>人均通话次数</th><th>人均通话时长</th><th>人均接通次数</th><th>接通率</th></tr></thead><tbody>${avgTrs}
+      <div class="table-wrap"><table class="table"><thead><tr>${thCellAvg('name', '团队')}${thCellAvg('emps', '团队人数')}${thCellAvg('avgCnt', '人均通话次数')}${thCellAvg('avgSec', '人均通话时长')}${thCellAvg('avgConn', '人均接通次数')}${thCellAvg('rate', '接通率')}</tr></thead><tbody>${avgTrs}
         <tr style="font-weight:700;background:var(--gray-50)"><td>合计</td><td>${gEmpN}</td><td>${(gCnt / gN).toFixed(1)}</td><td>${fmtCallAvg(gSec / gN)}</td><td>${(gConn / gN).toFixed(1)}</td><td>${gCnt ? (gConn / gCnt * 100).toFixed(1) + '%' : '-'}</td></tr>
       </tbody></table></div>
     </div></div>`;
@@ -5767,7 +5795,7 @@ function exportCallStats() {
   const groups = {};
   rows.forEach(r => { const k = isTeam ? (r.department || '未分组') : (r.employee || '未知'); if (!groups[k]) groups[k] = { cnt: 0, sec: 0, conn: 0 }; groups[k].cnt++; groups[k].sec += (r.durationSec || 0); if ((r.durationSec || 0) > 0) groups[k].conn++; });
   const headers = [isTeam ? '团队' : '员工', '通话次数', '总通话时长(秒)', '平均通话时长(秒)', '接通次数', '接通率'];
-  const data = Object.keys(groups).sort().map(k => { const g = groups[k]; return [k, g.cnt, g.sec, g.cnt ? Math.round(g.sec / g.cnt) : 0, g.conn, g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-']; });
+  const data = sortCallStatsKeys(groups).map(k => { const g = groups[k]; return [k, g.cnt, g.sec, g.cnt ? Math.round(g.sec / g.cnt) : 0, g.conn, g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-']; });
   downloadCsv('外呼统计_' + (isTeam ? '按团队' : '按个人') + '_' + (s || '起') + '_' + (e || '止') + '.csv', headers, data);
   showToast('已导出', 'success');
 }
@@ -5791,12 +5819,12 @@ function exportCallStatsExcel() {
     // sheet1:汇总
     const h1 = [isTeam ? '团队' : '员工', '通话次数', '总通话时长(秒)', '平均通话时长(秒)', '接通次数', '接通率'];
     const aoa1 = [h1];
-    Object.keys(groups).sort().forEach(k => { const g = groups[k]; aoa1.push([k, g.cnt, g.sec, g.cnt ? Math.round(g.sec / g.cnt) : 0, g.conn, g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-']); });
+    Object.keys(groups).length && sortCallStatsKeys(groups).forEach(k => { const g = groups[k]; aoa1.push([k, g.cnt, g.sec, g.cnt ? Math.round(g.sec / g.cnt) : 0, g.conn, g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-']); });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa1), '外呼统计');
     // sheet2:按团队人均(仅团队视图)
     if (isTeam) {
       const aoa2 = [['团队', '团队人数', '人均通话次数', '人均通话时长(秒)', '人均接通次数', '接通率']];
-      Object.keys(groups).sort().forEach(k => { const g = groups[k]; const n = g.emps.size || 1; aoa2.push([k, g.emps.size, +(g.cnt / n).toFixed(1), Math.round(g.sec / n), +(g.conn / n).toFixed(1), g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-']); });
+      sortCallAvgKeys(groups).forEach(k => { const g = groups[k]; const n = g.emps.size || 1; aoa2.push([k, g.emps.size, +(g.cnt / n).toFixed(1), Math.round(g.sec / n), +(g.conn / n).toFixed(1), g.cnt ? (g.conn / g.cnt * 100).toFixed(1) + '%' : '-']); });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa2), '按团队人均');
     }
     XLSX.writeFile(wb, '外呼统计_' + (isTeam ? '按团队' : '按个人') + '_' + (s || '起') + '_' + (e || '止') + '.xlsx');
