@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260829181701';
-const APP_VERSION = '1.42.87'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260829182126';
+const APP_VERSION = '1.42.88'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -5371,6 +5371,49 @@ function callStatsQuickRange(type, btn) {
   if (btn) btn.classList.add('active');
   renderCallStats();
 }
+// ---- 外呼数据表头排序(点击表头切换,持久化 localStorage) ----
+let callDataSort = { key: 'contactTime', dir: 'desc' };
+try { const _s = JSON.parse(localStorage.getItem('sop_callDataSort') || ''); if (_s && _s.key) callDataSort = _s; } catch (e) {}
+function toggleCallDataSort(key) {
+  if (callDataSort.key === key) callDataSort.dir = callDataSort.dir === 'asc' ? 'desc' : 'asc';
+  else callDataSort = { key: key, dir: (key === 'durationSec' ? 'desc' : 'asc') };
+  try { localStorage.setItem('sop_callDataSort', JSON.stringify(callDataSort)); } catch (e) {}
+  renderCallDataList();
+}
+function sortCallDataRows(rows) {
+  const s = callDataSort, dir = s.dir === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    if (s.key === 'durationSec') return ((a.durationSec || 0) - (b.durationSec || 0)) * dir;
+    const va = String(a[s.key] || ''), vb = String(b[s.key] || '');
+    return va.localeCompare(vb, 'zh') * dir;
+  });
+}
+// ---- 外呼统计表头排序(点击表头切换,持久化 localStorage) ----
+let callStatsSort = { key: 'cnt', dir: 'desc' };
+try { const _s = JSON.parse(localStorage.getItem('sop_callStatsSort') || ''); if (_s && _s.key) callStatsSort = _s; } catch (e) {}
+function toggleCallStatsSort(key) {
+  if (callStatsSort.key === key) callStatsSort.dir = callStatsSort.dir === 'asc' ? 'desc' : 'asc';
+  else callStatsSort = { key: key, dir: (key === 'name' ? 'asc' : 'desc') };
+  try { localStorage.setItem('sop_callStatsSort', JSON.stringify(callStatsSort)); } catch (e) {}
+  renderCallStatsResult();
+}
+function sortCallStatsKeys(groups) {
+  const s = callStatsSort, dir = s.dir === 'asc' ? 1 : -1;
+  const val = (k) => {
+    const g = groups[k];
+    if (s.key === 'cnt') return g.cnt;
+    if (s.key === 'sec') return g.sec;
+    if (s.key === 'avg') return g.cnt ? g.sec / g.cnt : 0;
+    if (s.key === 'conn') return g.conn;
+    if (s.key === 'rate') return g.cnt ? g.conn / g.cnt : 0;
+    return k;
+  };
+  return Object.keys(groups).sort((a, b) => {
+    const va = val(a), vb = val(b);
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+    return String(va).localeCompare(String(vb), 'zh') * dir;
+  });
+}
 
 // ============ 外呼数据页 ============
 function renderCallData() {
@@ -5416,7 +5459,7 @@ function renderCallDataList() {
   if (!c) return;
   const s = document.getElementById('callStart')?.value || '';
   const e = document.getElementById('callEnd')?.value || '';
-  const rows = filterCallRecords(s, e, callDataDeptFilter, callDataPersonFilter).sort((a, b) => String(b.contactTime || '').localeCompare(String(a.contactTime || '')));
+  const rows = sortCallDataRows(filterCallRecords(s, e, callDataDeptFilter, callDataPersonFilter));
   const totalPages = Math.max(1, Math.ceil(rows.length / CALL_PAGE_SIZE));
   if (callDataPage > totalPages) callDataPage = totalPages;
   const pageRows = rows.slice((callDataPage - 1) * CALL_PAGE_SIZE, callDataPage * CALL_PAGE_SIZE);
@@ -5431,10 +5474,11 @@ function renderCallDataList() {
     <td>${escapeHtml(r.department || '')}</td>
     <td style="text-align:center"><button class="btn btn-danger btn-xs" onclick="deleteCallRecord('${r.id}')" title="删除">🗑</button></td>
   </tr>`).join('');
+  const thCell = (key, label) => `<th class="sort-th" style="cursor:pointer" onclick="toggleCallDataSort('${key}')">${label}${callDataSort.key === key ? (callDataSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`;
   c.innerHTML = `<div class="card"><div class="card-header"><h4>📞 外呼记录(${rows.length} 条)</h4>
       <span style="font-size:12px;color:var(--gray-400)">${s || '全部'} 至 ${e || '全部'}${callDataDeptFilter.length ? ' · 部门 ' + callDataDeptFilter.join('/') : ''}${callDataPersonFilter.length ? ' · 员工 ' + callDataPersonFilter.join('/') : ''}</span>
     </div><div class="card-body">
-    <div class="table-wrap"><table class="table"><thead><tr><th>联系时间</th><th>客户</th><th>联系人</th><th>电话</th><th>通话时长</th><th>通话方式</th><th>员工</th><th>部门</th><th></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
+    <div class="table-wrap"><table class="table"><thead><tr>${thCell('contactTime', '联系时间')}${thCell('customer', '客户')}${thCell('contactPerson', '联系人')}${thCell('phone', '电话')}${thCell('durationSec', '通话时长')}${thCell('callType', '通话方式')}${thCell('employee', '员工')}${thCell('department', '部门')}<th></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>
     <div style="display:flex;justify-content:center;gap:10px;margin-top:14px;align-items:center">
       <button class="btn btn-outline btn-sm" ${callDataPage <= 1 ? 'disabled' : ''} onclick="callDataPage--;renderCallDataList()">◀ 上一页</button>
       <span style="font-size:13px;color:var(--gray-500)">第 ${callDataPage} / ${totalPages} 页</span>
@@ -5623,9 +5667,10 @@ function renderCallStatsResult() {
     if ((r.durationSec || 0) > 0) groups[k].conn++;
     groups[k].recs.push(r);
   });
-  const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'zh'));
+  const keys = sortCallStatsKeys(groups);
   const gCnt = rows.length, gSec = rows.reduce((a, r) => a + (r.durationSec || 0), 0), gConn = rows.filter(r => (r.durationSec || 0) > 0).length;
   const head = isTeam ? '团队' : '员工';
+  const thCell = (key, label) => `<th class="sort-th" style="cursor:pointer" onclick="toggleCallStatsSort('${key}')">${label}${callStatsSort.key === key ? (callStatsSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`;
   const trs = keys.map(k => {
     const g = groups[k];
     const avg = g.cnt ? g.sec / g.cnt : 0;
@@ -5645,7 +5690,7 @@ function renderCallStatsResult() {
   const totalConnKey = drillPut(rows.filter(r => (r.durationSec || 0) > 0));
   c.innerHTML = `<div class="card"><div class="card-header"><h4>${isTeam ? '👥 按团队统计' : '👤 按个人统计'}(${s || '全部'} 至 ${e || '全部'})</h4></div><div class="card-body">
     <div class="table-wrap"><table class="table"><thead><tr>
-      <th>${head}</th><th>通话次数</th><th>总通话时长</th><th>平均通话时长</th><th>接通次数</th><th>接通率</th>
+      ${thCell('name', head)}${thCell('cnt', '通话次数')}${thCell('sec', '总通话时长')}${thCell('avg', '平均通话时长')}${thCell('conn', '接通次数')}${thCell('rate', '接通率')}
     </tr></thead><tbody>${trs}
       <tr style="font-weight:700;background:var(--gray-50)">
         <td>合计</td>
