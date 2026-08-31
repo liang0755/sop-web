@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260831101653';
-const APP_VERSION = '1.42.94'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260831104604';
+const APP_VERSION = '1.42.95'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -5423,12 +5423,15 @@ function fmtCallAvg(sec) {
   if (sec >= 60) return Math.floor(sec / 60) + '分' + (sec % 60) + '秒';
   return sec + '秒';
 }
-// 无效外呼记录判定(全空记录 / 解析错位脏数据)—— 列表、统计、导出、AI 上下文统一剔除
-// 无效 = ①联系时间不是合法的 "YYYY-MM-DD HH:MM" 开头(脏数据) ②客户/联系人/电话/员工/部门全空且通话时长为 0(全空记录)
+// 无效外呼记录判定 —— 列表、统计、导出、AI 上下文统一剔除
+// 无效 = ①联系时间不是合法的 "YYYY-MM-DD HH:MM" 开头(解析错位的脏数据)
+//      ②无部门 或 无员工(归属缺失,无法归入任何团队/个人统计,只会落成「未知」分组)
+//      ③客户/联系人/电话/员工/部门全空且通话时长为 0(全空记录)
 const CALL_CONTENT_KEYS = ['customer', 'contactPerson', 'phone', 'employee', 'department'];
 function isInvalidCallRecord(r) {
   if (!r || typeof r !== 'object') return true;
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(r.contactTime || '').trim())) return true;
+  if (!String(r.department || '').trim() || !String(r.employee || '').trim()) return true;
   const hasContent = CALL_CONTENT_KEYS.some(k => String(r[k] || '').trim())
     || (Number(r.durationSec) || 0) > 0;
   return !hasContent;
@@ -5585,7 +5588,7 @@ function renderCallData() {
         <button class="btn btn-xs btn-outline" onclick="callQuickRange('thisYear',this)">今年</button>
         <button class="btn btn-xs btn-outline" onclick="callQuickRange('lastYear',this)">去年</button>
       </div>
-      <div style="font-size:12px;color:var(--gray-500);margin-top:8px">支持上传外呼系统导出的 CSV(表头:联系时间,客户,工作单位/联系人,电话号码,通话时长,通话方式,员工,部门),按「联系时间+电话号码」自动去重追加,不会重复入库;<b>全空记录(除联系时间外无任何内容且时长为 0)与格式异常行会自动跳过,不入库</b></div>
+      <div style="font-size:12px;color:var(--gray-500);margin-top:8px">支持上传外呼系统导出的 CSV(表头:联系时间,客户,工作单位/联系人,电话号码,通话时长,通话方式,员工,部门),按「联系时间+电话号码」自动去重追加,不会重复入库;<b>全空记录、格式异常行、以及无部门或无员工的归属缺失记录会自动跳过,不入库</b></div>
       ${renderInvalidCallBar()}
     </div></div>
     <div id="callDataList"></div>`;
@@ -5597,14 +5600,14 @@ function renderInvalidCallBar() {
   const n = countInvalidCallRecords();
   if (!n) return '';
   return `<div style="margin-top:10px;padding:8px 12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:#9a3412">
-    <span>⚠️ 云端存在 <b>${n}</b> 条无效记录(内容全空或格式异常),已在列表/统计/导出/AI 读取中自动过滤</span>
+    <span>⚠️ 云端存在 <b>${n}</b> 条无效记录(内容全空 / 格式异常 / 无部门或无员工),已在列表/统计/导出/AI 读取中自动过滤</span>
     <button class="btn btn-outline btn-sm" onclick="cleanupInvalidCallRecords()">🧹 从库中彻底删除</button>
   </div>`;
 }
 async function cleanupInvalidCallRecords() {
   const bad = (cloudData.callRecords || []).filter(r => isInvalidCallRecord(r) && r.id);
   if (!bad.length) { showToast('没有可清理的无效记录', 'success'); return; }
-  if (!confirm('确定删除 ' + bad.length + ' 条无效外呼记录吗?这些记录除联系时间外无任何内容(或格式异常),删除后不可恢复。')) return;
+  if (!confirm('确定删除 ' + bad.length + ' 条无效外呼记录吗?这些记录内容为空、格式异常、或缺少部门/员工归属,删除后不可恢复。')) return;
   let ok = 0, fail = 0;
   for (let i = 0; i < bad.length; i++) {
     try { await apiDelete('callRecords', bad[i].id); ok++; } catch (e) { fail++; }
@@ -6464,7 +6467,11 @@ function getAIWeekNumber(d) {
 // 原始明细记录条数上限:汇总统计(salesSummary/visitSummary/teamPerformanceSummary 等)已覆盖全量数据,
 // 仅原始明细用于"逐条查看"。DeepSeek V4 上下文为 1M token(远超旧 128K),故上限大幅抬高至接近全量,
 // 配合 buildAIContext 末尾的兜底截断(数据过大时自动丢弃最老明细),既保证"读全"又防止超出上下文导致 400。
-const AI_RAW_CAP = { visit: 3000, sales: 6000, daily: 2000, weekly: 1500, mgr: 500, call: 2000 };
+// 明细条数上限:控制 prompt 体积,避免超出模型上下文。
+// 注意:超限不会报错,模型会返回 finish_reason=length + 空内容(表现为"AI 回答空白"),故必须严格卡住。
+// 明细被裁剪不影响汇总类问题:daily/weekly/visit/sales/call 均另有全量聚合 summary。
+// 实测(本库真实数据):下列 cap + 无缩进输出 ≈ 67 万字符 ≈ 占 DeepSeek 1M 上下文的 67%。
+const AI_RAW_CAP = { visit: 500, sales: 1000, daily: 300, weekly: 100, mgr: 50, call: 400 };
 
 function buildAIContext() {
   const userMap = {};
@@ -6509,6 +6516,38 @@ function buildAIContext() {
     });
     return { user: u.name || r.name || '未知', department: u.department || r.department || '', weekStart: r.weekStart, weekEnd: r.weekEnd, channels };
   }).sort((a, b) => (a.weekStart || '').localeCompare(b.weekStart || ''));
+
+  // 日报/周报聚合 summary(明细受 AI_RAW_CAP 限制只给最近若干条,聚合始终全量,
+  // 保证"本月各部门新增线索""各渠道成交金额"这类汇总问题不会因为明细被裁剪而算错)
+  const RP_NUM_FIELDS = ['newLeads', 'effectiveContacts', 'abIntent', 'closedCustomers', 'dealAmount', 'targetAmount'];
+  function aggReports(list, dateKey) {
+    const empty = () => ({ count: 0, newLeads: 0, effectiveContacts: 0, abIntent: 0, closedCustomers: 0, dealAmount: 0, targetAmount: 0 });
+    const total = empty(), byDept = {}, byPerson = {}, byChannel = {}, byMonth = {};
+    const ensure = (m, k) => { if (!m[k]) m[k] = empty(); return m[k]; };
+    list.forEach(r => {
+      const dept = r.department || '未知', person = r.user || '未知', mo = (r[dateKey] || '').slice(0, 7) || '未知';
+      total.count++; ensure(byDept, dept).count++; ensure(byPerson, person).count++; ensure(byMonth, mo).count++;
+      const chs = r.channels || {};
+      Object.keys(chs).forEach(cn => {
+        const ch = chs[cn] || {};
+        // 明细里的字段 key 已换成中文 label,故用 fieldLabels 反查
+        RP_NUM_FIELDS.forEach(f => {
+          const v = toNum(ch[fieldLabels[f] || f]);
+          total[f] += v;
+          ensure(byDept, dept)[f] += v;
+          ensure(byPerson, person)[f] += v;
+          ensure(byMonth, mo)[f] += v;
+          ensure(byChannel, cn)[f] += v;
+        });
+        ensure(byChannel, cn).count++;
+      });
+    });
+    const round = (o) => { RP_NUM_FIELDS.forEach(f => { o[f] = Math.round(o[f] * 100) / 100; }); return o; };
+    const shape = (m) => { const o = {}; Object.keys(m).sort().forEach(k => { o[k] = round(m[k]); }); return o; };
+    return { total: round(total), byDepartment: shape(byDept), byPerson: shape(byPerson), byChannel: shape(byChannel), byMonth: shape(byMonth) };
+  }
+  const dailySummary = aggReports(dailyData, 'date');
+  const weeklySummary = aggReports(weeklyData, 'weekStart');
 
   // Compile visit records (拜访数据)
   const visitData = (cloudData.visitRecords || []).map(r => ({
@@ -6797,7 +6836,9 @@ function buildAIContext() {
     dailyChannels: (fc.daily || []).map(c => ({name: c.name, reference: c.reference})),
     weeklyChannels: (fc.weekly || []).map(c => ({name: c.name, reference: c.reference})),
     dailyReports: dailyData.slice(-AI_RAW_CAP.daily),
+    dailySummary: dailySummary,
     weeklyReports: weeklyData.slice(-AI_RAW_CAP.weekly),
+    weeklySummary: weeklySummary,
     visitRecords: visitData.slice(-AI_RAW_CAP.visit),
     visitSummary: visitSummary,
     visitResultOptions: (cloudData.visitConfig && cloudData.visitConfig.visitResults) || [],
@@ -6831,23 +6872,33 @@ function buildAIContext() {
       customerSourceGroups: (fc.customerTags && fc.customerTags.customerSourceGroups) || {}
     }
   };
-  // 兜底截断:若数据总量逼近模型上下文上限(DeepSeek V4 为 1M token,取 ~800K token 安全线 ≈ 2.4MB 字符),
-  // 渐进丢弃最老的原始明细记录,避免超出上下文导致 API 400 / "读不全"。汇总/评级/绩效等仍保留全量。
-  const AI_CTX_MAX_CHARS = 2400000;
-  let json = JSON.stringify(context, null, 2);
+  // 兜底截断:压缩后若仍超出安全线,渐进丢弃最老明细。
+  // 安全线 80 万字符 ≈ 50 万 token(中文约 1 字符 0.6~0.75 token),加上 system prompt、
+  // 最多 20 条对话历史与 16384 输出后,仍在 DeepSeek 1M 上下文内。
+  const AI_CTX_MAX_CHARS = 800000;
+  // 不带缩进输出:省 30~40% 体积,且模型读取不受影响
+  let json = JSON.stringify(context);
   if (json.length > AI_CTX_MAX_CHARS) {
-    const rawKeys = ['visitRecords', 'salesRecords', 'dailyReports', 'weeklyReports', 'mgrReports', 'callRecords'];
+    const rawKeys = ['dailyReports', 'salesRecords', 'visitRecords', 'weeklyReports', 'callRecords', 'mgrReports'];
     while (json.length > AI_CTX_MAX_CHARS) {
       let trimmed = false;
       for (const k of rawKeys) {
-        if (Array.isArray(context[k]) && context[k].length > 50) {
-          context[k] = context[k].slice(Math.ceil(context[k].length * 0.1)); // 每次丢弃最老 10%
+        if (Array.isArray(context[k]) && context[k].length > 30) {
+          context[k] = context[k].slice(Math.ceil(context[k].length * 0.15)); // 每次丢弃最老 15%
           trimmed = true; break;
         }
       }
       if (!trimmed) break;
-      json = JSON.stringify(context, null, 2);
+      json = JSON.stringify(context);
     }
+    // 记录裁剪情况,让 AI 知道明细不全,避免它按残缺明细下结论
+    context._truncated = {
+      note: '上下文超出安全线已自动裁剪:下列明细仅保留最近若干条,更早的只有聚合值。回答涉及较早日期的逐条明细时须说明该限制。',
+      kept: { dailyReports: (context.dailyReports || []).length, weeklyReports: (context.weeklyReports || []).length,
+              visitRecords: (context.visitRecords || []).length, salesRecords: (context.salesRecords || []).length,
+              callRecords: (context.callRecords || []).length, mgrReports: (context.mgrReports || []).length }
+    };
+    json = JSON.stringify(context);
   }
   return json;
 }
@@ -6873,6 +6924,8 @@ function buildAISystemMessage() {
     + '[数据来源路由规则 - 务必严格遵守]\n'
     + '- 当用户的问题涉及"拜访 / 客户拜访 / 签到 / 卡点 / 拜访结果 / 客户跟进 / 谁去了哪些客户 / 各签到事件分布 / 拜访转化"等拜访类话题时,必须使用 visitRecords 与 visitSummary 进行分析,绝不要用日报/周报数据来回答拜访类问题,\n'
     + '- 日报/周报数据(dailyReports/weeklyReports)只用于业绩指标分析(新增线索,建联,AB意向,成交,金额,完成率等),不要把它当作拜访数据,\n'
+    + '- 重要:日报/周报的明细数组(dailyReports/weeklyReports)为控制长度**只保留最近若干条**;回答"本月/上月各部门或各渠道的汇总""某人共提交多少"这类问题时,**必须使用 dailySummary / weeklySummary**(按部门,人员,渠道,月份的全量聚合,含 count 与各指标合计),不要用明细去逐条累加,否则会算少,\n'
+    + '- 只有需要逐条查看某一天某个人填了什么、或查看 issues(问题/提升动作)原文时,才查 dailyReports / weeklyReports 明细,\n'
     + '- visitSummary 已按拜访结果,签到事件,员工,部门,月份做了汇总统计,做整体分析时优先引用 visitSummary,需要逐条明细时再查 visitRecords,\n'
     + '- 当用户的问题涉及"业绩 / 销售 / 销售额 / 折后金额 / 完成业绩 / 团队业绩(完成金额)/ 销售员业绩 / 毛利润 / 各月销售趋势 / KA 各团队业绩对比"等业绩类话题时,必须使用 salesRecords 与 salesSummary 分析"完成业绩(实际成交金额)",绝不要用日报/周报数据(那是建联/线索口径,不是销售成交口径)来回答;若还需对比"目标",必须再结合 teamPerformanceSummary 的 target 字段,切勿把 salesSummary 的 amount 当作目标,\n'
     + '- salesSummary 已按销售员,团队,月份,单据类别做了汇总统计(含金额合计与笔数),做整体分析时优先引用 salesSummary,需要逐条明细时再查 salesRecords;金额单位为元,退货单通常为负值,净额业绩 = 销售单金额 − 退货单金额,\n'
@@ -6978,7 +7031,17 @@ async function callAI(messages) {
   }
   const data = await res.json();
   if (!data.choices || !data.choices[0]) throw new Error('AI返回数据格式异常');
-  return data.choices[0].message.content;
+  const choice = data.choices[0];
+  const content = (choice.message && choice.message.content) || '';
+  // 上下文超限时模型不会报错,而是返回 finish_reason=length 且 content 为空(表现为"回答空白")
+  if (!String(content).trim()) {
+    const reason = choice.finish_reason || 'unknown';
+    if (reason === 'length') {
+      throw new Error('AI返回空内容(finish_reason=length):发送给模型的数据过长,已超出该模型上下文上限。请前往「设置 → AI模型配置」换用更大上下文的模型(如 DeepSeek),或清理对话历史后重试。');
+    }
+    throw new Error('AI返回空内容(finish_reason=' + reason + ')。请重试;若持续为空,检查模型名称与API地址是否匹配。');
+  }
+  return content;
   } finally {
     clearTimeout(timer);
   }
