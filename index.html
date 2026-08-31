@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260831104604';
-const APP_VERSION = '1.42.95'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260831112939';
+const APP_VERSION = '1.42.96'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -15141,6 +15141,24 @@ let perfSpFilter = [];          // 绩效看板:选中的销售名单(空数组=
 let perfSpFilterLoaded = false; // 是否已从 localStorage 载入默认
 let perfTeamFilter = [];        // 绩效看板:按团队筛选(空=全部)
 let perfSortBy = 'name';        // 绩效看板排序:'name' 按姓名 / 'team' 按团队+姓名 / 'score' 按绩效评分降序
+                                // 表头点击扩展:wdays 在职天数 / level 职级 / comment 总评 / base 基数 / money 奖金
+                                // 动态列:i:<itemKey>:std|act|score(考核项要求/完成/得分) / b:<bonusKey>(加分项)
+let perfSortDir = 'asc';        // 排序方向(表头点击切换,持久化)
+try { const _pd = localStorage.getItem('sop_perfSortDir'); if (_pd === 'asc' || _pd === 'desc') perfSortDir = _pd; } catch (e) {}
+// 表头点击排序(与筛选栏下拉框共用 perfSortBy,下拉改的 3 个值同样生效)
+function perfSortToggle(key) {
+  if (perfSortBy === key) perfSortDir = perfSortDir === 'asc' ? 'desc' : 'asc';
+  else {
+    perfSortBy = key;
+    // 文本列默认升序,数值列默认降序
+    perfSortDir = (key === 'name' || key === 'team' || key === 'level' || key === 'comment') ? 'asc' : 'desc';
+  }
+  try { localStorage.setItem('sop_perfSortDir', perfSortDir); } catch (e) {}
+  perfRefresh();
+}
+function perfSortInd(key) {
+  return perfSortBy === key ? (perfSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+}
 
 // ===== M0 绩效看板状态 =====
 let m0PerfTab = 'matrix';
@@ -15151,7 +15169,22 @@ let m0PerfSingleMonth = (new Date().getMonth() + 1);
 let m0PerfSpFilter = [];          // M0 绩效看板:选中的 M0 人员(空=全部)
 let m0PerfSpFilterLoaded = false;
 let m0PerfTeamFilter = [];
-let m0PerfSortBy = 'name';
+let m0PerfSortBy = 'name';       // 表头点击扩展:wdays / level / comment / score / base / money
+                                 // 动态列:i:<itemKey>:std|act|score / b:<bonusKey>
+let m0PerfSortDir = 'asc';
+try { const _d = localStorage.getItem('sop_m0PerfSortDir'); if (_d === 'asc' || _d === 'desc') m0PerfSortDir = _d; } catch (e) {}
+function m0PerfSortToggle(key) {
+  if (m0PerfSortBy === key) m0PerfSortDir = m0PerfSortDir === 'asc' ? 'desc' : 'asc';
+  else {
+    m0PerfSortBy = key;
+    m0PerfSortDir = (key === 'name' || key === 'team' || key === 'level' || key === 'comment') ? 'asc' : 'desc';
+  }
+  try { localStorage.setItem('sop_m0PerfSortDir', m0PerfSortDir); } catch (e) {}
+  m0PerfRefresh();
+}
+function m0PerfSortInd(key) {
+  return m0PerfSortBy === key ? (m0PerfSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+}
 
 // ===== 管理绩效看板状态(针对管理者角色用户)=====
 let mgrPerfTab = 'matrix';
@@ -15162,7 +15195,22 @@ let mgrPerfSingleMonth = prevMonth().month;
 let mgrPerfSpFilter = [];          // 管理绩效看板:选中的管理者(空=全部)
 let mgrPerfSpFilterLoaded = false;
 let mgrPerfTeamFilter = [];
-let mgrPerfSortBy = 'name';
+let mgrPerfSortBy = 'name';      // 表头点击扩展:wdays / level / comment / score / base / money
+                                 // 动态列:i:<itemKey>:std|act|score / b:<bonusKey>
+let mgrPerfSortDir = 'asc';
+try { const _d = localStorage.getItem('sop_mgrPerfSortDir'); if (_d === 'asc' || _d === 'desc') mgrPerfSortDir = _d; } catch (e) {}
+function mgrPerfSortToggle(key) {
+  if (mgrPerfSortBy === key) mgrPerfSortDir = mgrPerfSortDir === 'asc' ? 'desc' : 'asc';
+  else {
+    mgrPerfSortBy = key;
+    mgrPerfSortDir = (key === 'name' || key === 'team' || key === 'level' || key === 'comment') ? 'asc' : 'desc';
+  }
+  try { localStorage.setItem('sop_mgrPerfSortDir', mgrPerfSortDir); } catch (e) {}
+  mgrPerfRefresh();
+}
+function mgrPerfSortInd(key) {
+  return mgrPerfSortBy === key ? (mgrPerfSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+}
 let mgrPerfViewSnapshot = false;   // 是否查看管理"最终保存"冻结快照
 
 function perfKey(year, sp, m) { return year + '_' + String(sp).replace(/[.#$\[\]/]/g, '_') + '_' + m; }
@@ -15897,6 +15945,34 @@ function perfRefresh() {
   else refreshPerfMatrix();
 }
 
+// 销售绩效月度矩阵排序:name 姓名 / team 团队 / score 末月评分 / m:<月> 指定月份评分
+function sortPerfMatrixRows(rows, months) {
+  const k = perfSortBy, dir = perfSortDir === 'asc' ? 1 : -1;
+  const lastM = months.length ? months[months.length - 1] : null;
+  const val = (r) => {
+    if (k === 'name') return r.sp || '';
+    if (k === 'team') return r.team || '';
+    if (k === 'score') return (r.scores && r.scores[lastM]) || 0;
+    if (k.indexOf('m:') === 0) return (r.scores && r.scores[parseInt(k.slice(2), 10)]) || 0;
+    return '';
+  };
+  return rows.slice().sort((a, b) => {
+    if (k === 'team') {
+      const t = teamOrderRank(a.team || '') - teamOrderRank(b.team || '');
+      if (t) return t * dir;
+    } else {
+      const va = val(a), vb = val(b);
+      if (typeof va === 'number' && typeof vb === 'number') {
+        if (va !== vb) return (va - vb) * dir;
+      } else {
+        const c = String(va).localeCompare(String(vb), 'zh');
+        if (c) return c * dir;
+      }
+    }
+    return (a.sp || '').localeCompare(b.sp || '', 'zh');
+  });
+}
+
 function refreshPerfMatrix() {
   const year = document.getElementById('perfYear') ? document.getElementById('perfYear').value : perfYear;
   perfYear = year;
@@ -15917,23 +15993,25 @@ function refreshPerfMatrix() {
   const cfg = getPerfConfig();
   const baseMap = buildSalesBaseForYear(year);
   const lastM = months.length ? months[months.length - 1] : perfMonthTo;
-  const rows = [...spSet].filter(perfFilterSp).map(sp => {
-    const rec = getPerfRecord(year, sp, lastM);
-    return { sp, team: getSalesTeam(sp) || '', lastScore: getFinalScore(rec, cfg, year, sp, lastM) };
+  // 预计算每个月的绩效评分,排序与渲染共用
+  let rows = [...spSet].filter(perfFilterSp).map(sp => {
+    const scores = {};
+    months.forEach(m => { scores[m] = getFinalScore(getPerfRecord(year, sp, m), cfg, year, sp, m); });
+    return { sp, team: getSalesTeam(sp) || '', scores, lastScore: scores[lastM] || 0 };
   });
-  if (perfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
-  else if (perfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.sp.localeCompare(b.sp, 'zh'));
-  else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
+  rows = sortPerfMatrixRows(rows, months);
 
-  let h = '<thead><tr><th>销售</th><th>团队</th>';
-  months.forEach(m => { h += `<th class="num">${m}月</th>`; });
+  let h = '<thead><tr>';
+  h += `<th class="sort-th" style="cursor:pointer" onclick="perfSortToggle('name')">销售${perfSortInd('name')}</th>`;
+  h += `<th class="sort-th" style="cursor:pointer" onclick="perfSortToggle('team')">团队${perfSortInd('team')}</th>`;
+  months.forEach(m => { h += `<th class="num sort-th" style="cursor:pointer" onclick="perfSortToggle('m:${m}')">${m}月${perfSortInd('m:' + m)}</th>`; });
   h += '</tr></thead><tbody>';
   rows.forEach(row => {
     h += `<tr><td>${esc(row.sp)}${userStatusBadge(row.sp, statusMap)}</td><td>${esc(row.team) || '-'}</td>`;
     months.forEach(m => {
       const level = getSalesLevel(year, row.sp, m, baseMap);
       const rec = getPerfRecord(year, row.sp, m);
-      const score = getFinalScore(rec, cfg, year, row.sp, m);
+      const score = (row.scores && row.scores[m] !== undefined) ? row.scores[m] : getFinalScore(rec, cfg, year, row.sp, m);
       const saved = isPerfSnapshotSaved('sales', year, row.sp, m);
       const colorVal = saved ? scoreColor(score) : 'var(--gray-400)';
       const _salesRecs = cloudData.salesRecords.filter(r => (r.salesperson||'').trim()===row.sp && r.docMonth.slice(0,4)===year && parseInt(r.docMonth.slice(5),10)<=m);
@@ -15994,6 +16072,49 @@ function exportPerfMatrixXlsx() {
   showToast('已导出绩效看板矩阵(' + rows.length + ' 人)', 'success');
 }
 
+// 销售绩效单月看板排序:支持所有固定列 + 考核项(要求/完成/得分)与加分项等动态列
+function sortPerfSingleRows(rows) {
+  const k = perfSortBy, dir = perfSortDir === 'asc' ? 1 : -1;
+  const num = (v) => (parseFloat(v) || 0);
+  const val = (r) => {
+    const d = r.d || {};
+    if (k === 'name') return r.sp || '';
+    if (k === 'team') return r.team || '';
+    if (k === 'wdays') return num(d.workingDays);
+    if (k === 'level') return d.level || '';
+    if (k === 'comment') return d.comment || '';
+    if (k === 'score') return num(d.finalScore);
+    if (k === 'base') return num(d.base);
+    if (k === 'money') return num(d.base) * num(d.finalScore) / 100;
+    if (k.indexOf('i:') === 0) {
+      const p = k.split(':');                      // i:<itemKey>:std | act | score
+      const x = (d.items || []).find(y => y.it && y.it.key === p[1]);
+      if (!x) return 0;
+      return p[2] === 'std' ? num(x.standard) : (p[2] === 'act' ? num(x.actual) : num(x.score));
+    }
+    if (k.indexOf('b:') === 0) {
+      const x = (d.bonus || []).find(y => y.b && y.b.key === k.slice(2));
+      return x ? num(x.cnt) : 0;
+    }
+    return '';
+  };
+  return rows.slice().sort((a, b) => {
+    if (k === 'team') {
+      const t = teamOrderRank(a.team || '') - teamOrderRank(b.team || '');
+      if (t) return t * dir;
+    } else {
+      const va = val(a), vb = val(b);
+      if (typeof va === 'number' && typeof vb === 'number') {
+        if (va !== vb) return (va - vb) * dir;
+      } else {
+        const c = String(va).localeCompare(String(vb), 'zh');
+        if (c) return c * dir;
+      }
+    }
+    return (a.sp || '').localeCompare(b.sp || '', 'zh');   // 同值时按姓名稳定排序
+  });
+}
+
 function refreshPerfSingle() {
   const year = document.getElementById('perfYear') ? document.getElementById('perfYear').value : perfYear;
   perfYear = year;
@@ -16014,38 +16135,40 @@ function refreshPerfSingle() {
   const items = (cfg.items || []).filter(it => it.enabled);
   const bonusList = (cfg.bonus || []).filter(b => b.enabled);
   const baseMap = buildSalesBaseForYear(year);
-  const rows = [...spSet].filter(perfFilterSp).map(sp => {
+  // 预先算好每行完整展示数据(含考核项得分/加分项),排序与渲染共用,避免重复计算
+  let rows = [...spSet].filter(perfFilterSp).map(sp => {
     const rec = getPerfRecord(year, sp, month);
-    return { sp, team: getSalesTeam(sp) || '', score: getFinalScore(rec, cfg, year, sp, month) };
+    return {
+      sp, team: getSalesTeam(sp) || '', score: getFinalScore(rec, cfg, year, sp, month),
+      d: perfRowDisplay(year, sp, month, cfg, baseMap, perfViewSnapshot ? getPerfSnapshot(year, sp, month) : null)
+    };
   });
-  if (perfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
-  else if (perfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.sp.localeCompare(b.sp, 'zh'));
-  else rows.sort((a, b) => a.sp.localeCompare(b.sp, 'zh'));
+  rows = sortPerfSingleRows(rows);
 
   let h = '<thead><tr>';
-  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:120px;white-space:nowrap">销售</th>';
-  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:120px;z-index:3;background:#fff;text-align:left;width:140px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">团队</th>';
+  h += `<th rowspan="2" class="perf-freeze sort-th" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:120px;white-space:nowrap;cursor:pointer" onclick="perfSortToggle('name')">销售${perfSortInd('name')}</th>`;
+  h += `<th rowspan="2" class="perf-freeze sort-th" style="position:sticky;left:120px;z-index:3;background:#fff;text-align:left;width:140px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200);cursor:pointer" onclick="perfSortToggle('team')">团队${perfSortInd('team')}</th>`;
   items.forEach(it => {
     h += `<th colspan="3" style="text-align:center;background:#FAEEDA">${esc(it.name)}(${it.weight || 0}%)</th>`;
   });
   if (bonusList.length) h += `<th colspan="${bonusList.length}" style="text-align:center;background:#EAF3DE">加分项</th>`;
-  h += '<th rowspan="2" style="text-align:center;width:70px">当月在职天数</th>';
-  h += '<th rowspan="2" style="text-align:center;width:80px">当月销售职级</th>';
-  h += '<th rowspan="2" style="text-align:center;min-width:150px">总评</th>';
-  h += '<th rowspan="2" style="text-align:center;width:100px">绩效评分</th>';
-  h += '<th rowspan="2" style="text-align:center;width:80px">绩效基数</th>';
-  h += '<th rowspan="2" style="text-align:center;width:90px">绩效奖金</th>';
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:70px;cursor:pointer" onclick="perfSortToggle('wdays')">当月在职天数${perfSortInd('wdays')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:80px;cursor:pointer" onclick="perfSortToggle('level')">当月销售职级${perfSortInd('level')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;min-width:150px;cursor:pointer" onclick="perfSortToggle('comment')">总评${perfSortInd('comment')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:100px;cursor:pointer" onclick="perfSortToggle('score')">绩效评分${perfSortInd('score')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:80px;cursor:pointer" onclick="perfSortToggle('base')">绩效基数${perfSortInd('base')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:90px;cursor:pointer" onclick="perfSortToggle('money')">绩效奖金${perfSortInd('money')}</th>`;
   h += '</tr><tr>';
   items.forEach(it => {
-    h += `<th style="background:#FAEEDA;white-space:nowrap">要求<button class="btn btn-xs btn-outline" style="margin-left:4px;font-size:10px;padding:1px 5px;line-height:1.4" onclick="batchSetPerfStandard('${it.key}')" title="批量设置全部在职销售该项要求(考核标准)">批量</button></th>`;
-    h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' ? '完成(自动)' : '完成'}</th>`;
-    h += '<th style="background:#FAEEDA">得分</th>';
+    h += `<th class="sort-th" style="background:#FAEEDA;white-space:nowrap;cursor:pointer" onclick="perfSortToggle('i:${it.key}:std')">要求${perfSortInd('i:' + it.key + ':std')}<button class="btn btn-xs btn-outline" style="margin-left:4px;font-size:10px;padding:1px 5px;line-height:1.4" onclick="event.stopPropagation();batchSetPerfStandard('${it.key}')" title="批量设置全部在职销售该项要求(考核标准)">批量</button></th>`;
+    h += `<th class="sort-th" style="background:#FAEEDA;cursor:pointer" onclick="perfSortToggle('i:${it.key}:act')">${it.type === 'auto-demo' ? '完成(自动)' : '完成'}${perfSortInd('i:' + it.key + ':act')}</th>`;
+    h += `<th class="sort-th" style="background:#FAEEDA;cursor:pointer" onclick="perfSortToggle('i:${it.key}:score')">得分${perfSortInd('i:' + it.key + ':score')}</th>`;
   });
-  bonusList.forEach(b => { h += `<th style="background:#EAF3DE;white-space:pre-wrap">${esc(b.name)}</th>`; });
+  bonusList.forEach(b => { h += `<th class="sort-th" style="background:#EAF3DE;white-space:pre-wrap;cursor:pointer" onclick="perfSortToggle('b:${b.key}')">${esc(b.name)}${perfSortInd('b:' + b.key)}</th>`; });
   h += '</tr></thead><tbody>';
 
   rows.forEach(row => {
-    const d = perfRowDisplay(year, row.sp, month, cfg, baseMap, perfViewSnapshot ? getPerfSnapshot(year, row.sp, month) : null);
+    const d = row.d;   // 排序前已算好,这里直接复用
     const k = perfKey(year, row.sp, month);
     const rec0 = cloudData.performanceRecords[k] || {};
     const isManualScore = (rec0.finalScore !== undefined && rec0.finalScore !== null && rec0.finalScore !== '');
@@ -16366,6 +16489,34 @@ function m0PerfRefresh() {
   if (m0PerfTab === 'single') refreshM0PerfSingle();
   else refreshM0PerfMatrix();
 }
+// M0 绩效月度矩阵排序:name / team / score(末月) / m:<月>
+function sortM0PerfMatrixRows(rows, months) {
+  const k = m0PerfSortBy, dir = m0PerfSortDir === 'asc' ? 1 : -1;
+  const lastM = months.length ? months[months.length - 1] : null;
+  const val = (r) => {
+    if (k === 'name') return r.m0 || '';
+    if (k === 'team') return r.team || '';
+    if (k === 'score') return (r.scores && r.scores[lastM]) || 0;
+    if (k.indexOf('m:') === 0) return (r.scores && r.scores[parseInt(k.slice(2), 10)]) || 0;
+    return '';
+  };
+  return rows.slice().sort((a, b) => {
+    if (k === 'team') {
+      const t = teamOrderRank(a.team || '') - teamOrderRank(b.team || '');
+      if (t) return t * dir;
+    } else {
+      const va = val(a), vb = val(b);
+      if (typeof va === 'number' && typeof vb === 'number') {
+        if (va !== vb) return (va - vb) * dir;
+      } else {
+        const c = String(va).localeCompare(String(vb), 'zh');
+        if (c) return c * dir;
+      }
+    }
+    return teamOrderRank(a.m0 || '') - teamOrderRank(b.m0 || '');
+  });
+}
+
 function refreshM0PerfMatrix() {
   const year = document.getElementById('m0PerfYear') ? document.getElementById('m0PerfYear').value : m0PerfYear;
   m0PerfYear = year;
@@ -16376,17 +16527,18 @@ function refreshM0PerfMatrix() {
   for (let m = m0PerfMonthFrom; m <= m0PerfMonthTo; m++) months.push(m);
   const cfg = getM0PerfConfig();
   const lastM = months.length ? months[months.length - 1] : m0PerfMonthTo;
-  const rows = m0List.filter(m0PerfFilterSp).map(m0 => {
-    const rec = getM0PerfRecord(year, m0, lastM);
-    const gradeRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, lastM)]) || {};
-    return { m0, team: getSalesTeam(m0) || '', lastScore: getFinalScore(rec, cfg, year, m0, lastM) };
+  // 预计算每个月的绩效评分,排序与渲染共用
+  let rows = m0List.filter(m0PerfFilterSp).map(m0 => {
+    const scores = {};
+    months.forEach(m => { scores[m] = getFinalScore(getM0PerfRecord(year, m0, m), cfg, year, m0, m); });
+    return { m0, team: getSalesTeam(m0) || '', scores, lastScore: scores[lastM] || 0 };
   });
-  if (m0PerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || teamOrderRank(a.m0) - teamOrderRank(b.m0));
-  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || teamOrderRank(a.m0) - teamOrderRank(b.m0));
-  else rows.sort((a, b) => teamOrderRank(a.m0) - teamOrderRank(b.m0));
+  rows = sortM0PerfMatrixRows(rows, months);
 
-  let h = '<thead><tr><th>M0人员</th><th>团队</th>';
-  months.forEach(m => { h += `<th class="num">${m}月</th>`; });
+  let h = '<thead><tr>';
+  h += `<th class="sort-th" style="cursor:pointer" onclick="m0PerfSortToggle('name')">M0人员${m0PerfSortInd('name')}</th>`;
+  h += `<th class="sort-th" style="cursor:pointer" onclick="m0PerfSortToggle('team')">团队${m0PerfSortInd('team')}</th>`;
+  months.forEach(m => { h += `<th class="num sort-th" style="cursor:pointer" onclick="m0PerfSortToggle('m:${m}')">${m}月${m0PerfSortInd('m:' + m)}</th>`; });
   h += '</tr></thead><tbody>';
   rows.forEach(row => {
     h += `<tr><td>${esc(row.m0)}${userStatusBadge(row.m0, statusMap)}</td><td>${esc(row.team) || '-'}</td>`;
@@ -16394,7 +16546,7 @@ function refreshM0PerfMatrix() {
       const gradeRec = (cloudData.m0Records && cloudData.m0Records[m0Key(year, row.m0, m)]) || {};
       const level = gradeRec.grade || '-';
       const rec = getM0PerfRecord(year, row.m0, m);
-      const score = getFinalScore(rec, cfg, year, row.m0, m);
+      const score = (row.scores && row.scores[m] !== undefined) ? row.scores[m] : getFinalScore(rec, cfg, year, row.m0, m);
       const saved = isPerfSnapshotSaved('m0', year, row.m0, m);
       const colorVal = saved ? scoreColor(score) : 'var(--gray-400)';
       const _m0pRec = getM0PerfRecord(year, row.m0, m);
@@ -16444,6 +16596,49 @@ function exportM0PerfMatrixXlsx() {
   XLSX.writeFile(wb, `M0绩效看板矩阵_${year}年${m0PerfMonthFrom}-${m0PerfMonthTo}月.xlsx`);
   showToast('已导出 M0 绩效看板矩阵(' + rows.length + ' 人)', 'success');
 }
+// M0 绩效单月看板排序(所有固定列 + 考核项要求/完成/得分 + 加分项)
+function sortM0PerfSingleRows(rows) {
+  const k = m0PerfSortBy, dir = m0PerfSortDir === 'asc' ? 1 : -1;
+  const num = (v) => (parseFloat(v) || 0);
+  const val = (r) => {
+    const d = r.d || {};
+    if (k === 'name') return r.m0 || '';
+    if (k === 'team') return r.team || '';
+    if (k === 'wdays') return num(d.workingDays);
+    if (k === 'level') return d.level || '';
+    if (k === 'comment') return d.comment || '';
+    if (k === 'score') return num(d.finalScore);
+    if (k === 'base') return num(d.base);
+    if (k === 'money') return num(d.base) * num(d.finalScore) / 100;
+    if (k.indexOf('i:') === 0) {
+      const p = k.split(':');
+      const x = (d.items || []).find(y => y.it && y.it.key === p[1]);
+      if (!x) return 0;
+      return p[2] === 'std' ? num(x.standard) : (p[2] === 'act' ? num(x.actual) : num(x.score));
+    }
+    if (k.indexOf('b:') === 0) {
+      const x = (d.bonus || []).find(y => y.b && y.b.key === k.slice(2));
+      return x ? num(x.cnt) : 0;
+    }
+    return '';
+  };
+  return rows.slice().sort((a, b) => {
+    if (k === 'team') {
+      const t = teamOrderRank(a.team || '') - teamOrderRank(b.team || '');
+      if (t) return t * dir;
+    } else {
+      const va = val(a), vb = val(b);
+      if (typeof va === 'number' && typeof vb === 'number') {
+        if (va !== vb) return (va - vb) * dir;
+      } else {
+        const c = String(va).localeCompare(String(vb), 'zh');
+        if (c) return c * dir;
+      }
+    }
+    return teamOrderRank(a.m0 || '') - teamOrderRank(b.m0 || '');   // 同值时按固定次序稳定排序
+  });
+}
+
 function refreshM0PerfSingle() {
   const year = document.getElementById('m0PerfYear') ? document.getElementById('m0PerfYear').value : m0PerfYear;
   m0PerfYear = year;
@@ -16454,38 +16649,40 @@ function refreshM0PerfSingle() {
   const cfg = getM0PerfConfig();
   const items = (cfg.items || []).filter(it => it.enabled);
   const bonusList = (cfg.bonus || []).filter(b => b.enabled);
-  const rows = m0List.filter(m0PerfFilterSp).map(m0 => {
+  // 预计算每行完整展示数据(含考核项得分/加分项),排序与渲染共用
+  let rows = m0List.filter(m0PerfFilterSp).map(m0 => {
     const rec = getM0PerfRecord(year, m0, month);
-    return { m0, team: getSalesTeam(m0) || '', score: getFinalScore(rec, cfg, year, m0, month) };
+    return {
+      m0, team: getSalesTeam(m0) || '', score: getFinalScore(rec, cfg, year, m0, month),
+      d: m0PerfRowDisplay(year, m0, month, cfg, m0PerfViewSnapshot ? getM0PerfSnapshot(year, m0, month) : null)
+    };
   });
-  if (m0PerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || teamOrderRank(a.m0) - teamOrderRank(b.m0));
-  else if (m0PerfSortBy === 'score') rows.sort((a, b) => b.score - a.score || teamOrderRank(a.m0) - teamOrderRank(b.m0));
-  else rows.sort((a, b) => teamOrderRank(a.m0) - teamOrderRank(b.m0));
+  rows = sortM0PerfSingleRows(rows);
 
   let h = '<thead><tr>';
-  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:110px;white-space:nowrap">M0人员</th>';
-  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:110px;z-index:3;background:#fff;text-align:left;width:130px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">团队</th>';
+  h += `<th rowspan="2" class="perf-freeze sort-th" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:110px;white-space:nowrap;cursor:pointer" onclick="m0PerfSortToggle('name')">M0人员${m0PerfSortInd('name')}</th>`;
+  h += `<th rowspan="2" class="perf-freeze sort-th" style="position:sticky;left:110px;z-index:3;background:#fff;text-align:left;width:130px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200);cursor:pointer" onclick="m0PerfSortToggle('team')">团队${m0PerfSortInd('team')}</th>`;
   items.forEach(it => {
     h += `<th colspan="3" style="text-align:center;background:#FAEEDA">${esc(it.name)}(${it.weight || 0}%)</th>`;
   });
   if (bonusList.length) h += `<th colspan="${bonusList.length}" style="text-align:center;background:#EAF3DE">加分项</th>`;
-  h += '<th rowspan="2" style="text-align:center;width:70px">当月在职天数</th>';
-  h += '<th rowspan="2" style="text-align:center;width:80px">当月M0职级</th>';
-  h += '<th rowspan="2" style="text-align:center;min-width:150px">总评</th>';
-  h += '<th rowspan="2" style="text-align:center;width:100px">绩效评分</th>';
-  h += '<th rowspan="2" style="text-align:center;width:80px">绩效基数</th>';
-  h += '<th rowspan="2" style="text-align:center;width:90px">绩效奖金</th>';
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:70px;cursor:pointer" onclick="m0PerfSortToggle('wdays')">当月在职天数${m0PerfSortInd('wdays')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:80px;cursor:pointer" onclick="m0PerfSortToggle('level')">当月M0职级${m0PerfSortInd('level')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;min-width:150px;cursor:pointer" onclick="m0PerfSortToggle('comment')">总评${m0PerfSortInd('comment')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:100px;cursor:pointer" onclick="m0PerfSortToggle('score')">绩效评分${m0PerfSortInd('score')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:80px;cursor:pointer" onclick="m0PerfSortToggle('base')">绩效基数${m0PerfSortInd('base')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:90px;cursor:pointer" onclick="m0PerfSortToggle('money')">绩效奖金${m0PerfSortInd('money')}</th>`;
   h += '</tr><tr>';
   items.forEach(it => {
-    h += '<th style="background:#FAEEDA">要求</th>';
-    h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' || it.type === 'auto-team' || it.type === 'auto-m0-demo' ? '完成(自动)' : '完成'}</th>`;
-    h += '<th style="background:#FAEEDA">得分</th>';
+    h += `<th class="sort-th" style="background:#FAEEDA;cursor:pointer" onclick="m0PerfSortToggle('i:${it.key}:std')">要求${m0PerfSortInd('i:' + it.key + ':std')}</th>`;
+    h += `<th class="sort-th" style="background:#FAEEDA;cursor:pointer" onclick="m0PerfSortToggle('i:${it.key}:act')">${it.type === 'auto-demo' || it.type === 'auto-team' || it.type === 'auto-m0-demo' ? '完成(自动)' : '完成'}${m0PerfSortInd('i:' + it.key + ':act')}</th>`;
+    h += `<th class="sort-th" style="background:#FAEEDA;cursor:pointer" onclick="m0PerfSortToggle('i:${it.key}:score')">得分${m0PerfSortInd('i:' + it.key + ':score')}</th>`;
   });
-  bonusList.forEach(b => { h += `<th style="background:#EAF3DE;white-space:pre-wrap">${esc(b.name)}</th>`; });
+  bonusList.forEach(b => { h += `<th class="sort-th" style="background:#EAF3DE;white-space:pre-wrap;cursor:pointer" onclick="m0PerfSortToggle('b:${b.key}')">${esc(b.name)}${m0PerfSortInd('b:' + b.key)}</th>`; });
   h += '</tr></thead><tbody>';
 
   rows.forEach(row => {
-    const d = m0PerfRowDisplay(year, row.m0, month, cfg, m0PerfViewSnapshot ? getM0PerfSnapshot(year, row.m0, month) : null);
+    const d = row.d;   // 排序前已算好,这里直接复用
     const k = m0Key(year, row.m0, month);
     const rec0 = cloudData.m0PerformanceRecords[k] || {};
     const isManualScore = (rec0.finalScore !== undefined && rec0.finalScore !== null && rec0.finalScore !== '');
@@ -17284,6 +17481,34 @@ function mgrPerfRefresh() {
   if (mgrPerfTab === 'single') refreshMgrPerfSingle();
   else refreshMgrPerfMatrix();
 }
+// 管理绩效月度矩阵排序:name / team / score(末月) / m:<月>
+function sortMgrPerfMatrixRows(rows, months) {
+  const k = mgrPerfSortBy, dir = mgrPerfSortDir === 'asc' ? 1 : -1;
+  const lastM = months.length ? months[months.length - 1] : null;
+  const val = (r) => {
+    if (k === 'name') return r.mgr || '';
+    if (k === 'team') return r.team || '';
+    if (k === 'score') return (r.scores && r.scores[lastM]) || 0;
+    if (k.indexOf('m:') === 0) return (r.scores && r.scores[parseInt(k.slice(2), 10)]) || 0;
+    return '';
+  };
+  return rows.slice().sort((a, b) => {
+    if (k === 'team') {
+      const t = teamOrderRank(a.team || '') - teamOrderRank(b.team || '');
+      if (t) return t * dir;
+    } else {
+      const va = val(a), vb = val(b);
+      if (typeof va === 'number' && typeof vb === 'number') {
+        if (va !== vb) return (va - vb) * dir;
+      } else {
+        const c = String(va).localeCompare(String(vb), 'zh');
+        if (c) return c * dir;
+      }
+    }
+    return (a.mgr || '').localeCompare(b.mgr || '', 'zh');
+  });
+}
+
 function refreshMgrPerfMatrix() {
   const year = document.getElementById('mgrPerfYear') ? document.getElementById('mgrPerfYear').value : mgrPerfYear;
   mgrPerfYear = year;
@@ -17294,22 +17519,24 @@ function refreshMgrPerfMatrix() {
   for (let m = mgrPerfMonthFrom; m <= mgrPerfMonthTo; m++) months.push(m);
   const cfg = getMgrPerfConfig();
   const lastM = months.length ? months[months.length - 1] : mgrPerfMonthTo;
-  const rows = mgrList.filter(mgrPerfFilterSp).map(mgr => {
-    const rec = getMgrPerfRecord(year, mgr, lastM);
-    return { mgr, team: getSalesTeam(mgr) || '', lastScore: getFinalScore(rec, cfg, year, mgr, lastM) };
+  // 预计算每个月的绩效评分,排序与渲染共用
+  let rows = mgrList.filter(mgrPerfFilterSp).map(mgr => {
+    const scores = {};
+    months.forEach(m => { scores[m] = getFinalScore(getMgrPerfRecord(year, mgr, m), cfg, year, mgr, m); });
+    return { mgr, team: getSalesTeam(mgr) || '', scores, lastScore: scores[lastM] || 0 };
   });
-  if (mgrPerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.mgr.localeCompare(b.mgr, 'zh'));
-  else if (mgrPerfSortBy === 'score') rows.sort((a, b) => b.lastScore - a.lastScore || a.mgr.localeCompare(b.mgr, 'zh'));
-  else rows.sort((a, b) => a.mgr.localeCompare(b.mgr, 'zh'));
+  rows = sortMgrPerfMatrixRows(rows, months);
 
-  let h = '<thead><tr><th>管理者</th><th>团队</th>';
-  months.forEach(m => { h += `<th class="num">${m}月</th>`; });
+  let h = '<thead><tr>';
+  h += `<th class="sort-th" style="cursor:pointer" onclick="mgrPerfSortToggle('name')">管理者${mgrPerfSortInd('name')}</th>`;
+  h += `<th class="sort-th" style="cursor:pointer" onclick="mgrPerfSortToggle('team')">团队${mgrPerfSortInd('team')}</th>`;
+  months.forEach(m => { h += `<th class="num sort-th" style="cursor:pointer" onclick="mgrPerfSortToggle('m:${m}')">${m}月${mgrPerfSortInd('m:' + m)}</th>`; });
   h += '</tr></thead><tbody>';
   rows.forEach(row => {
     h += `<tr><td>${esc(row.mgr)}${userStatusBadge(row.mgr, statusMap)}</td><td>${esc(row.team) || '-'}</td>`;
     months.forEach(m => {
       const rec = getMgrPerfRecord(year, row.mgr, m);
-      const score = getFinalScore(rec, cfg, year, row.mgr, m);
+      const score = (row.scores && row.scores[m] !== undefined) ? row.scores[m] : getFinalScore(rec, cfg, year, row.mgr, m);
       const saved = isPerfSnapshotSaved('mgr', year, row.mgr, m);
       const colorVal = saved ? scoreColor(score) : 'var(--gray-400)';
       h += `<td class="num drill-td" style="text-align:center" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(row.mgr+' '+m+'月 绩效评分')}','${drillPut(rec?[rec]:[])}')"><div style="color:${colorVal};font-weight:700">${score.toFixed(2)}</div></td>`;
@@ -17356,6 +17583,48 @@ function exportMgrPerfMatrixXlsx() {
   XLSX.writeFile(wb, `管理绩效看板矩阵_${year}年${mgrPerfMonthFrom}-${mgrPerfMonthTo}月.xlsx`);
   showToast('已导出管理绩效看板矩阵(' + rows.length + ' 人)', 'success');
 }
+// 管理绩效单月看板排序(所有固定列 + 考核项要求/完成/得分 + 加分项)
+function sortMgrPerfSingleRows(rows) {
+  const k = mgrPerfSortBy, dir = mgrPerfSortDir === 'asc' ? 1 : -1;
+  const num = (v) => (parseFloat(v) || 0);
+  const val = (r) => {
+    const d = r.d || {};
+    if (k === 'name') return r.mgr || '';
+    if (k === 'team') return r.team || '';
+    if (k === 'wdays') return num(d.workingDays);
+    if (k === 'comment') return d.comment || '';
+    if (k === 'score') return num(d.finalScore);
+    if (k === 'base') return num(d.base);
+    if (k === 'money') return num(d.base) * num(d.finalScore) / 100;
+    if (k.indexOf('i:') === 0) {
+      const p = k.split(':');
+      const x = (d.items || []).find(y => y.it && y.it.key === p[1]);
+      if (!x) return 0;
+      return p[2] === 'std' ? num(x.standard) : (p[2] === 'act' ? num(x.actual) : num(x.score));
+    }
+    if (k.indexOf('b:') === 0) {
+      const x = (d.bonus || []).find(y => y.b && y.b.key === k.slice(2));
+      return x ? num(x.cnt) : 0;
+    }
+    return '';
+  };
+  return rows.slice().sort((a, b) => {
+    if (k === 'team') {
+      const t = teamOrderRank(a.team || '') - teamOrderRank(b.team || '');
+      if (t) return t * dir;
+    } else {
+      const va = val(a), vb = val(b);
+      if (typeof va === 'number' && typeof vb === 'number') {
+        if (va !== vb) return (va - vb) * dir;
+      } else {
+        const c = String(va).localeCompare(String(vb), 'zh');
+        if (c) return c * dir;
+      }
+    }
+    return (a.mgr || '').localeCompare(b.mgr || '', 'zh');
+  });
+}
+
 function refreshMgrPerfSingle() {
   const year = document.getElementById('mgrPerfYear') ? document.getElementById('mgrPerfYear').value : mgrPerfYear;
   mgrPerfYear = year;
@@ -17366,37 +17635,39 @@ function refreshMgrPerfSingle() {
   const cfg = getMgrPerfConfig();
   const items = (cfg.items || []).filter(it => it.enabled);
   const bonusList = (cfg.bonus || []).filter(b => b.enabled);
-  const rows = mgrList.filter(mgrPerfFilterSp).map(mgr => {
+  // 预计算每行完整展示数据(含考核项得分/加分项),排序与渲染共用
+  let rows = mgrList.filter(mgrPerfFilterSp).map(mgr => {
     const rec = getMgrPerfRecord(year, mgr, month);
-    return { mgr, team: getSalesTeam(mgr) || '', score: getFinalScore(rec, cfg, year, mgr, month) };
+    return {
+      mgr, team: getSalesTeam(mgr) || '', score: getFinalScore(rec, cfg, year, mgr, month),
+      d: mgrPerfRowDisplay(year, mgr, month, cfg, mgrPerfViewSnapshot ? getMgrPerfSnapshot(year, mgr, month) : null)
+    };
   });
-  if (mgrPerfSortBy === 'team') rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.mgr.localeCompare(b.mgr, 'zh'));
-  else if (mgrPerfSortBy === 'score') rows.sort((a, b) => b.score - a.score || a.mgr.localeCompare(b.mgr, 'zh'));
-  else rows.sort((a, b) => a.mgr.localeCompare(b.mgr, 'zh'));
+  rows = sortMgrPerfSingleRows(rows);
 
   let h = '<thead><tr>';
-  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:110px;white-space:nowrap">管理者</th>';
-  h += '<th rowspan="2" class="perf-freeze" style="position:sticky;left:110px;z-index:3;background:#fff;text-align:left;width:130px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200)">团队</th>';
+  h += `<th rowspan="2" class="perf-freeze sort-th" style="position:sticky;left:0;z-index:3;background:#fff;text-align:left;width:110px;white-space:nowrap;cursor:pointer" onclick="mgrPerfSortToggle('name')">管理者${mgrPerfSortInd('name')}</th>`;
+  h += `<th rowspan="2" class="perf-freeze sort-th" style="position:sticky;left:110px;z-index:3;background:#fff;text-align:left;width:130px;white-space:nowrap;box-shadow:2px 0 0 0 var(--gray-200);cursor:pointer" onclick="mgrPerfSortToggle('team')">团队${mgrPerfSortInd('team')}</th>`;
   items.forEach(it => {
     h += `<th colspan="3" style="text-align:center;background:#FAEEDA">${esc(it.name)}(${it.weight || 0}%)</th>`;
   });
   if (bonusList.length) h += `<th colspan="${bonusList.length}" style="text-align:center;background:#EAF3DE">加分项</th>`;
-  h += '<th rowspan="2" style="text-align:center;width:70px">当月在职天数</th>';
-  h += '<th rowspan="2" style="text-align:center;min-width:150px">总评</th>';
-  h += '<th rowspan="2" style="text-align:center;width:100px">绩效评分</th>';
-  h += '<th rowspan="2" style="text-align:center;width:80px">绩效基数</th>';
-  h += '<th rowspan="2" style="text-align:center;width:90px">绩效奖金</th>';
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:70px;cursor:pointer" onclick="mgrPerfSortToggle('wdays')">当月在职天数${mgrPerfSortInd('wdays')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;min-width:150px;cursor:pointer" onclick="mgrPerfSortToggle('comment')">总评${mgrPerfSortInd('comment')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:100px;cursor:pointer" onclick="mgrPerfSortToggle('score')">绩效评分${mgrPerfSortInd('score')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:80px;cursor:pointer" onclick="mgrPerfSortToggle('base')">绩效基数${mgrPerfSortInd('base')}</th>`;
+  h += `<th rowspan="2" class="sort-th" style="text-align:center;width:90px;cursor:pointer" onclick="mgrPerfSortToggle('money')">绩效奖金${mgrPerfSortInd('money')}</th>`;
   h += '</tr><tr>';
   items.forEach(it => {
-    h += '<th style="background:#FAEEDA">要求</th>';
-    h += `<th style="background:#FAEEDA">${it.type === 'auto-demo' || it.type === 'auto-team' || it.type === 'auto-m0-demo' ? '完成(自动)' : '完成'}</th>`;
-    h += '<th style="background:#FAEEDA">得分</th>';
+    h += `<th class="sort-th" style="background:#FAEEDA;cursor:pointer" onclick="mgrPerfSortToggle('i:${it.key}:std')">要求${mgrPerfSortInd('i:' + it.key + ':std')}</th>`;
+    h += `<th class="sort-th" style="background:#FAEEDA;cursor:pointer" onclick="mgrPerfSortToggle('i:${it.key}:act')">${it.type === 'auto-demo' || it.type === 'auto-team' || it.type === 'auto-m0-demo' ? '完成(自动)' : '完成'}${mgrPerfSortInd('i:' + it.key + ':act')}</th>`;
+    h += `<th class="sort-th" style="background:#FAEEDA;cursor:pointer" onclick="mgrPerfSortToggle('i:${it.key}:score')">得分${mgrPerfSortInd('i:' + it.key + ':score')}</th>`;
   });
-  bonusList.forEach(b => { h += `<th style="background:#EAF3DE;white-space:pre-wrap">${esc(b.name)}</th>`; });
+  bonusList.forEach(b => { h += `<th class="sort-th" style="background:#EAF3DE;white-space:pre-wrap;cursor:pointer" onclick="mgrPerfSortToggle('b:${b.key}')">${esc(b.name)}${mgrPerfSortInd('b:' + b.key)}</th>`; });
   h += '</tr></thead><tbody>';
 
   rows.forEach(row => {
-    const d = mgrPerfRowDisplay(year, row.mgr, month, cfg, mgrPerfViewSnapshot ? getMgrPerfSnapshot(year, row.mgr, month) : null);
+    const d = row.d;   // 排序前已算好,这里直接复用
     const k = mgrKey(year, row.mgr, month);
     const rec0 = cloudData.mgrPerformanceRecords[k] || {};
     const isManualScore = (rec0.finalScore !== undefined && rec0.finalScore !== null && rec0.finalScore !== '');
