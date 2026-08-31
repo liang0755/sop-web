@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260831112939';
-const APP_VERSION = '1.42.96'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260831122949';
+const APP_VERSION = '1.42.97'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -3127,9 +3127,10 @@ function toggleReportChSort(key) {
   if (reportChSort.key === key) reportChSort.dir = reportChSort.dir === 'asc' ? 'desc' : 'asc';
   else reportChSort = { key: key, dir: (key === 'channel' || key === 'issues' ? 'asc' : 'desc') };
   try { localStorage.setItem('sop_reportChSort', JSON.stringify(reportChSort)); } catch (e) {}
-  // 重渲染当前所在页面(两张表的容器不同,据此判断)
+  // 重渲染当前所在页面(三张表的容器不同,据此判断)
   if (document.getElementById('dataResults')) loadDataView(window.__dvType || 'daily');
   else if (document.getElementById('summaryContent')) renderSummaryTab();
+  else if (typeof renderApprovals === 'function') renderApprovals();   // 审批中心内嵌渠道表
 }
 function sortReportChRows(rows) {
   const s = reportChSort, dir = s.dir === 'asc' ? 1 : -1;
@@ -3158,6 +3159,43 @@ function sortReportChRows(rows) {
 function reportChTh(key, label, extraStyle) {
   const ind = reportChSort.key === key ? (reportChSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
   return `<th class="sort-th" style="cursor:pointer${extraStyle || ''}" onclick="toggleReportChSort('${key}')">${label}${ind}</th>`;
+}
+
+// ===================== 通用表头排序工具(所有表格复用) =====================
+// 用法:
+//   let xxSort = mkSortState('xx', 'name', 'asc');
+//   function toggleXxSort(k){ toggleSortState(xxSort, 'xx', k, ['name','team'], renderXx); }
+//   function xxInd(k){ return sortIndOf(xxSort, k); }
+//   rows = sortRowsBy(rows, xxSort, r => /* 取该行排序值 */);
+function mkSortState(name, defKey, defDir) {
+  const st = { key: defKey, dir: defDir || 'asc' };
+  try {
+    const s = JSON.parse(localStorage.getItem('sop_sort_' + name) || '');
+    if (s && s.key) { st.key = s.key; st.dir = (s.dir === 'desc' ? 'desc' : 'asc'); }
+  } catch (e) {}
+  return st;
+}
+function toggleSortState(st, name, key, textKeys, refreshFn) {
+  if (st.key === key) st.dir = st.dir === 'asc' ? 'desc' : 'asc';
+  else { st.key = key; st.dir = ((textKeys || []).indexOf(key) >= 0 ? 'asc' : 'desc'); }
+  try { localStorage.setItem('sop_sort_' + name, JSON.stringify(st)); } catch (e) {}
+  if (typeof refreshFn === 'function') refreshFn();
+}
+function sortIndOf(st, key) {
+  return st.key === key ? (st.dir === 'asc' ? ' ▲' : ' ▼') : '';
+}
+const SORT_NUM = (v) => (parseFloat(v) || 0);
+// 通用行排序:数值按大小、其余按中文 localeCompare;tieFn 用于同值时稳定排序
+function sortRowsBy(rows, st, valFn, tieFn) {
+  const dir = st.dir === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const va = valFn(a), vb = valFn(b);
+    let c;
+    if (typeof va === 'number' && typeof vb === 'number') c = va - vb;
+    else c = String(va == null ? '' : va).localeCompare(String(vb == null ? '' : vb), 'zh');
+    if (c) return c * dir;
+    return tieFn ? tieFn(a, b) : 0;
+  });
 }
 
 function loadDataView(type) {
@@ -4058,6 +4096,10 @@ function loadMergeSummary() {
   renderSubFilters();
 }
 
+// 合并统计(日报+周报)渠道明细表排序:channel / source / count / 各指标 / 两个比率
+let mergeChSort = mkSortState('mergeCh', 'channel', 'asc');
+function toggleMergeChSort(key) { toggleSortState(mergeChSort, 'mergeCh', key, ['channel', 'source'], renderMergeSummary); }
+
 function renderMergeSummary() {
   if(!mergeSummaryData){document.getElementById('sumResults').innerHTML='<div class="empty-state"><div class="icon">📭</div>请点击"合并统计"按钮</div>';return;}
   const c=document.getElementById('sumResults');
@@ -4086,6 +4128,14 @@ function renderMergeSummary() {
       if(chMap[wk]){seen.add(wk);orderedRows.push(chMap[wk]);}
     });
     Object.values(chMap).forEach(c=>{const k=c.channel+'|||'+c.source;if(!seen.has(k))orderedRows.push(c);});
+    const mcInd=(kk)=>sortIndOf(mergeChSort,kk);
+    const mcTh=(kk,label)=>sortTh(kk,label,'toggleMergeChSort',mcInd(kk));
+    orderedRows = sortRowsBy(orderedRows, mergeChSort, (c) => {
+      const kk = mergeChSort.key;
+      if (kk === 'source') return c.source === 'daily' ? '日报' : '周报';
+      if (kk === 'contactToAbRate' || kk === 'completionRate') return SORT_NUM(String(c[kk] || '').replace('%', ''));
+      return (typeof c[kk] === 'number') ? c[kk] : SORT_NUM(c[kk]);
+    }, (a, b) => (a.channel || '').localeCompare(b.channel || '', 'zh'));
     const statBar=[
       {l:'报告数',v:ds.count||0},
       {l:'新增线索',v:f(ds.newLeads)},
@@ -4124,7 +4174,7 @@ function renderMergeSummary() {
       <div class="card-body" style="padding:16px">
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(95px,1fr));gap:8px;margin-bottom:16px">${statBar}</div>
         <div class="table-wrap"><table><thead><tr>
-          <th>渠道</th><th>来源</th><th>报告数</th><th>新增线索</th><th>有效建联</th><th>AB意向</th><th>成交客户</th><th>成交金额</th><th>建联转AB率</th><th>目标金额</th><th>完成率</th>
+          ${mcTh('channel','渠道')}${mcTh('source','来源')}${mcTh('count','报告数')}${mcTh('newLeads','新增线索')}${mcTh('effectiveContacts','有效建联')}${mcTh('abIntent','AB意向')}${mcTh('closedCustomers','成交客户')}${mcTh('dealAmount','成交金额')}${mcTh('contactToAbRate','建联转AB率')}${mcTh('targetAmount','目标金额')}${mcTh('completionRate','完成率')}
         </tr></thead><tbody>
           ${chRowsHtml}
           <tr style="font-weight:700;background:var(--gray-50);border-top:2px solid ${color}">
@@ -5276,7 +5326,8 @@ function approvalCardHtml(a, isAdmin) {
     : a.status === 'approved'
       ? '<span class="badge" style="background:#f0fdf4;color:#16a34a">✅ 已通过</span>'
       : '<span class="badge" style="background:#fef2f2;color:#dc2626">❌ 已拒绝</span>';
-  const rows = (a.channels || []).map(ch => {
+  // 复用「渠道明细表」的排序状态(列与日报周报数据页完全一致)
+  const apRows = sortReportChRows(a.channels || []).map(ch => {
     const ec = parseFloat(ch.effectiveContacts) || 0, ab = parseFloat(ch.abIntent) || 0, da = parseFloat(ch.dealAmount) || 0, ta = parseFloat(ch.targetAmount) || 0;
     const ctr = ch.effectiveContacts === '' || ch.effectiveContacts === '/' ? '/' : (ec > 0 ? (ab / ec * 100).toFixed(1) + '%' : '0%');
     const cpr = ch.targetAmount === '' || ch.targetAmount === '/' ? '/' : (ta > 0 ? (da / ta * 100).toFixed(1) + '%' : '0%');
@@ -5310,7 +5361,7 @@ function approvalCardHtml(a, isAdmin) {
       </div>
     </div>
     <div class="card-body">
-      <div class="table-wrap"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50)"><th style="text-align:left;padding:6px 8px">渠道</th><th style="padding:6px 8px">新增线索</th><th style="padding:6px 8px">有效建联</th><th style="padding:6px 8px">AB意向</th><th style="padding:6px 8px">成交客户</th><th style="padding:6px 8px">成交金额</th><th style="padding:6px 8px">建联转AB率</th><th style="padding:6px 8px">目标金额</th><th style="padding:6px 8px">完成率</th><th style="padding:6px 8px">问题/提升动作</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="table-wrap"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr style="background:var(--gray-50)">${reportChTh('channel','渠道',';text-align:left;padding:6px 8px')}${reportChTh('newLeads','新增线索',';padding:6px 8px')}${reportChTh('effectiveContacts','有效建联',';padding:6px 8px')}${reportChTh('abIntent','AB意向',';padding:6px 8px')}${reportChTh('closedCustomers','成交客户',';padding:6px 8px')}${reportChTh('dealAmount','成交金额',';padding:6px 8px')}${reportChTh('contactToAbRate','建联转AB率',';padding:6px 8px')}${reportChTh('targetAmount','目标金额',';padding:6px 8px')}${reportChTh('completionRate','完成率',';padding:6px 8px')}${reportChTh('issues','问题/提升动作',';padding:6px 8px')}</tr></thead><tbody>${apRows}</tbody></table></div>
       ${remark}
       ${reviewHtml}
       ${actions}
@@ -9723,6 +9774,10 @@ function renderSnapshotCardHTML(snap) {
   </div>`;
 }
 
+// 管理周报-拜访结果汇总表排序:result / cnt / emps
+let mgrVisitSort = mkSortState('mgrVisit', 'cnt', 'desc');
+function toggleMgrVisitSort(key) { toggleSortState(mgrVisitSort, 'mgrVisit', key, ['result', 'emps'], updateMgrVisitSummary); }
+
 function updateMgrVisitSummary() {
   const weekVal = document.getElementById('mgrWeekSel')?.value || '';
   const dept = document.getElementById('mgrDeptSel')?.value || '';
@@ -9762,15 +9817,22 @@ function updateMgrVisitSummary() {
     const emp = rec.employee || '未知';
     resultMap[vr][emp] = (resultMap[vr][emp] || 0) + 1;
   });
-  const resultRows = Object.keys(resultMap).map(result => {
+  const mvInd = (k) => sortIndOf(mgrVisitSort, k);
+  const resultRows = sortRowsBy(Object.keys(resultMap).map(result => {
     const empMap = resultMap[result];
     const emps = Object.keys(empMap).map(name => ({ name, count: empMap[name] }));
     const cnt = summary.byResult[result] || emps.reduce((s, e) => s + e.count, 0);
     const ridx = allResults.indexOf(result);
     const color = ridx >= 0 ? colors[ridx % colors.length] : 'var(--gray-400)';
     const empStr = emps.map(e => `${e.name}(${e.count})`).join(',');
-    return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span><strong>${result}</strong></td><td style="text-align:center">${cnt}</td><td style="font-size:12px;color:var(--gray-600)">${empStr}</td></tr>`;
-  }).join('');
+    return { result, cnt, color, empStr };
+  }), mgrVisitSort, (r) => {
+    if (mgrVisitSort.key === 'result') return r.result;
+    if (mgrVisitSort.key === 'emps') return r.empStr;
+    return r.cnt;
+  }, (a, b) => b.cnt - a.cnt)
+    .map(r => `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${r.color};margin-right:6px"></span><strong>${r.result}</strong></td><td style="text-align:center">${r.cnt}</td><td style="font-size:12px;color:var(--gray-600)">${r.empStr}</td></tr>`)
+    .join('');
 
   container.innerHTML = `
     <div style="border:1px solid var(--gray-200);border-radius:8px;overflow:hidden">
@@ -9779,7 +9841,11 @@ function updateMgrVisitSummary() {
       </div>
       <div style="padding:14px">
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;margin-bottom:12px">${cards}</div>
-        ${resultRows ? `<div class="table-wrap"><table style="font-size:12px"><thead><tr><th>拜访结果</th><th style="width:60px;text-align:center">次数</th><th>销售人员</th></tr></thead><tbody>${resultRows}</tbody></table></div>` : '<div style="text-align:center;color:var(--gray-400);padding:8px;font-size:13px">该部门本周暂无拜访记录</div>'}
+        ${resultRows ? `<div class="table-wrap"><table style="font-size:12px"><thead><tr>`
+          + sortTh('result', '拜访结果', 'toggleMgrVisitSort', mvInd('result'))
+          + sortTh('cnt', '次数', 'toggleMgrVisitSort', mvInd('cnt'), '', 'width:60px;text-align:center')
+          + sortTh('emps', '销售人员', 'toggleMgrVisitSort', mvInd('emps'))
+          + `</tr></thead><tbody>${resultRows}</tbody></table></div>` : '<div style="text-align:center;color:var(--gray-400);padding:8px;font-size:13px">该部门本周暂无拜访记录</div>'}
       </div>
     </div>
   `;
@@ -10071,6 +10137,13 @@ function computeM0VisitRows() {
   rows.sort((a, b) => a.date.localeCompare(b.date) || teamOrderRank(a.m0) - teamOrderRank(b.m0));
   return rows;
 }
+// M0 陪访明细表排序:date / m0 / cnt / issues
+let m0vDetailSort = mkSortState('m0vDetail', 'date', 'desc');
+function toggleM0vDetailSort(key) { toggleSortState(m0vDetailSort, 'm0vDetail', key, ['date', 'm0', 'issues'], renderM0VisitStats); }
+// M0 陪访统计矩阵排序:name / p:<期间序号> / total
+let m0VisitSort = mkSortState('m0Visit', 'total', 'desc');
+function toggleM0VisitSort(key) { toggleSortState(m0VisitSort, 'm0Visit', key, ['name'], renderM0VisitStats); }
+
 function renderM0VisitStats() {
   m0vChannelFilter = takeFilterDefault('m0visit.channel', m0vChannelFilter);
   m0vPersonFilter = takeFilterDefault('m0visit.person', m0vPersonFilter);
@@ -10125,11 +10198,20 @@ function renderM0VisitStats() {
   const m0Count = m0Set.length;
   const avg = m0Count ? (totalCnt / m0Count).toFixed(2) : '0.00';
   // matrix html
+  // 排序:name(M0) / p:<idx> 该期间 / total 合计(期间标签含特殊字符,故用序号做 key)
+  const m0vVal = (m0, key) => {
+    if (key === 'name') return m0;
+    if (key === 'total') { let s = 0; periods.forEach(p => { s += (m0Map[m0][p.key] || 0); }); return s; }
+    if (key.indexOf('p:') === 0) { const p = periods[parseInt(key.slice(2), 10)]; return p ? (m0Map[m0][p.key] || 0) : 0; }
+    return 0;
+  };
+  m0Set = sortRowsBy(m0Set, m0VisitSort, (m0) => m0vVal(m0, m0VisitSort.key), (a, b) => a.localeCompare(b, 'zh'));
+  const m0vInd = (kk) => sortIndOf(m0VisitSort, kk);
   let matrixHtml;
   if (m0Set.length && periods.length) {
-    let head = '<th style="text-align:left;white-space:nowrap;position:sticky;left:0;background:#fff;z-index:2">M0</th>';
-    periods.forEach(p => head += `<th style="text-align:center;white-space:nowrap">${esc(p.label)}</th>`);
-    head += '<th style="text-align:center;background:#FFF8EE">合计</th>';
+    let head = sortTh('name', 'M0', 'toggleM0VisitSort', m0vInd('name'), '', 'text-align:left;white-space:nowrap;position:sticky;left:0;background:#fff;z-index:2');
+    periods.forEach((p, pi) => head += sortTh('p:' + pi, esc(p.label), 'toggleM0VisitSort', m0vInd('p:' + pi), '', 'text-align:center;white-space:nowrap'));
+    head += sortTh('total', '合计', 'toggleM0VisitSort', m0vInd('total'), '', 'text-align:center;background:#FFF8EE');
     let body = '';
     const colTotals = {};
     let grand = 0;
@@ -10156,7 +10238,14 @@ function renderM0VisitStats() {
   // detail
   const persons = allM0s;
   const personOpts = '<option value="all" ' + (m0vPersonFilter === 'all' ? 'selected' : '') + '>全部 M0</option>' + persons.map(p => `<option value="${esc(p)}" ${p === m0vPersonFilter ? 'selected' : ''}>${esc(p)}</option>`).join('');
-  const detailRows = m0vPersonFilter.length ? rows.filter(r => m0vPersonFilter.indexOf(r.m0) >= 0) : rows;
+  let detailRows = m0vPersonFilter.length ? rows.filter(r => m0vPersonFilter.indexOf(r.m0) >= 0) : rows;
+  // 明细表排序:date / m0 / cnt / issues
+  detailRows = sortRowsBy(detailRows, m0vDetailSort, (r) => {
+    const kk = m0vDetailSort.key;
+    if (kk === 'cnt') return SORT_NUM(r.cnt);
+    if (kk === 'issues') return r.issues || '';
+    return (kk === 'm0') ? (r.m0 || '') : (r.date || '');
+  }, (a, b) => (b.date || '').localeCompare(a.date || ''));
   let dbody = detailRows.map(r => `<tr><td style="white-space:nowrap">${r.date}</td><td style="white-space:nowrap">${esc(r.m0)}</td><td style="text-align:center;font-weight:600">${r.cnt}</td><td style="max-width:420px;white-space:pre-wrap">${esc(r.issues).replace(/\n/g, '<br>')}</td></tr>`).join('');
   if (!detailRows.length) dbody = '<tr><td colspan="4" style="text-align:center;color:var(--gray-400);padding:18px">暂无明细</td></tr>';
   const kpis = [
@@ -10202,7 +10291,7 @@ function renderM0VisitStats() {
           <button class="btn btn-sm btn-success" onclick="exportM0VisitXlsx()">📥 Excel</button>
         </div>
       </div>
-      <div class="table-wrap"><table class="table"><thead><tr><th>日期</th><th>M0</th><th style="text-align:center">有效建联数</th><th>问题/提升动作</th></tr></thead><tbody>${dbody}</tbody></table></div>
+      <div class="table-wrap"><table class="table"><thead><tr>${sortTh('date','日期','toggleM0vDetailSort',sortIndOf(m0vDetailSort,'date'))}${sortTh('m0','M0','toggleM0vDetailSort',sortIndOf(m0vDetailSort,'m0'))}${sortTh('cnt','有效建联数','toggleM0vDetailSort',sortIndOf(m0vDetailSort,'cnt'),'','text-align:center')}${sortTh('issues','问题/提升动作','toggleM0vDetailSort',sortIndOf(m0vDetailSort,'issues'))}</tr></thead><tbody>${dbody}</tbody></table></div>
     </div></div>`;
 }
 function onM0VisitChannelChange(sel) {
@@ -10460,6 +10549,10 @@ function setVisitDateRange(type, btn) {
   loadVisitStats();
 }
 
+// 各团队拜访卡点汇总矩阵排序:result / d:<部门序号> / total
+let blockerSort = mkSortState('blocker', 'total', 'desc');
+function toggleBlockerSort(key) { toggleSortState(blockerSort, 'blocker', key, ['result'], loadVisitStats); }
+
 function loadVisitStats() {
   if (visitStatsTab === 'm0visit') { renderM0VisitStats(); return; }
   const s = document.getElementById('visitStatsStart')?.value || '';
@@ -10520,8 +10613,18 @@ function loadVisitStats() {
   });
   const grandTotal = records.length;
   const dColors = ['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#0891b2','#db2777','#4f46e5'];
+  // 排序:result 拜访结果 / d:<部门序号> 该部门 / total 汇总(部门名可能含引号,故用序号做 key)
+  const bkVal = (res, key) => {
+    if (key === 'result') return res;
+    if (key === 'total') return resultTotals[res] || 0;
+    if (key.indexOf('d:') === 0) { const dp = depts[parseInt(key.slice(2), 10)]; return dp ? (countMap[res][dp] || 0) : 0; }
+    return 0;
+  };
+  const sortedRes = sortRowsBy(resultLabels.filter(res => resultTotals[res] > 0), blockerSort,
+    (res) => bkVal(res, blockerSort.key), (a, b) => (resultTotals[b] || 0) - (resultTotals[a] || 0));
+  const bkInd = (kk) => sortIndOf(blockerSort, kk);
   // 矩阵表主体
-  const matrixRows = resultLabels.filter(res => resultTotals[res] > 0).map(res => {
+  const matrixRows = sortedRes.map(res => {
     const kColor = res === '未标记' ? 'var(--gray-400)' : (colors[allResults.indexOf(res) % colors.length] || 'var(--primary)');
     const deptCells = depts.map((dept, idx) => {
       const val = countMap[res][dept];
@@ -10548,9 +10651,9 @@ function loadVisitStats() {
         <table style="font-size:13px;min-width:${220 + depts.length * 110}px">
           <thead>
             <tr>
-              <th style="min-width:140px">拜访结果</th>
-              ${depts.map(dept => `<th style="text-align:center;min-width:110px">${dept}</th>`).join('')}
-              <th style="text-align:center;min-width:80px">汇总</th>
+              ${sortTh('result', '拜访结果', 'toggleBlockerSort', bkInd('result'), '', 'min-width:140px')}
+              ${depts.map((dept, di) => sortTh('d:' + di, dept, 'toggleBlockerSort', bkInd('d:' + di), '', 'text-align:center;min-width:110px')).join('')}
+              ${sortTh('total', '汇总', 'toggleBlockerSort', bkInd('total'), '', 'text-align:center;min-width:80px')}
             </tr>
           </thead>
           <tbody>
@@ -10956,19 +11059,45 @@ function drillColumns(records){
   return Object.keys(sample).filter(k=>!k.startsWith('_') && k!=='__key' && typeof sample[k]!=='function');
 }
 function escapeTitle(t){ return String(t||'').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+// 明细弹窗表排序(按列序号;切换数据源时自动重置)
+let drillSort = { key: null, dir: 'desc', storeKey: null, title: '' };
+function toggleDrillSort(colIdx, key) {
+  if (drillSort.storeKey !== key) drillSort = { key: colIdx, dir: 'desc', storeKey: key, title: drillSort.title };
+  else if (drillSort.key === colIdx) drillSort.dir = drillSort.dir === 'asc' ? 'desc' : 'asc';
+  else { drillSort.key = colIdx; drillSort.dir = 'desc'; }
+  openDrillDetail(drillSort.title || '', key);
+}
+
 function openDrillDetail(title, key){
   const records = window.__drillStore[key] || [];
   if (!records.length) { toast('暂无明细数据'); return; }
+  // 切换数据源(key 变化)时重置排序,避免沿用上一个弹窗的列
+  if (drillSort.storeKey !== key) drillSort = { key: null, dir: 'desc', storeKey: key, title: title };
+  else drillSort.title = title;
   const cols = drillColumns(records);
-  const labels = cols.map(c => DRILL_LABELS[c] || c);
-  const body = records.slice(0,500).map(r=>'<tr>'+cols.map(c=>{
+  let list = records.slice();
+  if (drillSort.key !== null && cols[drillSort.key] !== undefined) {
+    const col = cols[drillSort.key], dir = drillSort.dir === 'asc' ? 1 : -1;
+    const cellOf = (r) => { let v = r[col]; if (v && typeof v === 'object') v = JSON.stringify(v); return (v === undefined || v === null) ? '' : v; };
+    list.sort((a, b) => {
+      const va = cellOf(a), vb = cellOf(b);
+      const na = parseFloat(va), nb = parseFloat(vb);
+      if (!isNaN(na) && !isNaN(nb) && String(va).trim() !== '' && String(vb).trim() !== '') return (na - nb) * dir;
+      return String(va).localeCompare(String(vb), 'zh') * dir;
+    });
+  }
+  const heads = cols.map((c, i) => {
+    const ind = (drillSort.key === i) ? (drillSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<th class="sort-th" style="cursor:pointer;white-space:nowrap" onclick="toggleDrillSort(${i},'${key}')">${escapeHtml(DRILL_LABELS[c] || c)}${ind}</th>`;
+  }).join('');
+  const body = list.slice(0,500).map(r=>'<tr>'+cols.map(c=>{
     let v=r[c]; if(v&&typeof v==='object') v=JSON.stringify(v);
     v=(v===undefined||v===null||v==='')?'':v;
     return '<td>'+(v===''?'':escapeHtml(String(v)))+'</td>';
   }).join('')+'</tr>').join('');
   const content = `<div style="margin-bottom:10px;color:var(--gray-600);font-size:13px">共 <b>${records.length}</b> 条记录${records.length>500?'（仅显示前 500 条）':''}</div>
     <div style="max-height:60vh;overflow:auto;border:1px solid var(--gray-200);border-radius:10px">
-    <table class="drill-table"><thead><tr>${labels.map(l=>'<th>'+escapeHtml(l)+'</th>').join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <table class="drill-table"><thead><tr>${heads}</tr></thead><tbody>${body}</tbody></table></div>
     <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
       <button class="btn btn-outline btn-sm" onclick="exportDrillXLSX('${key}','${escapeTitle(title)}')">📊 导出Excel</button>
       <button class="btn btn-outline btn-sm" onclick="exportDrillWord('${key}','${escapeTitle(title)}')">📄 导出Word</button>
@@ -12569,7 +12698,13 @@ function resetSalesSigningYear() {
   const mfr = sbMonthFilters.sig; if (mfr) { mfr.start = '01'; mfr.end = sbMonthEnd; }
   renderSalesSigningTable(year);
 }
+// 销售签约表排序:name / m|<月>|<分组序号> / tot|<分组序号>(分组名可能含引号,故用序号做 key)
+let sigCurrentYear = '';
+let sigSort = mkSortState('sig', 'name', 'asc');
+function toggleSigSort(key) { toggleSortState(sigSort, 'sig', key, ['name'], () => renderSalesSigningTable(sigCurrentYear)); }
+
 function renderSalesSigningTable(year) {
+  sigCurrentYear = year;
   const wrap = document.getElementById('sigTableWrap');
   if (!wrap) return;
   let users = getActiveSalesUsers();
@@ -12577,10 +12712,32 @@ function renderSalesSigningTable(year) {
   const { result, groupOrder, months } = aggregateSalesSigning(year);
   if (!users.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无在岗销售成员</div>'; return; }
   const ng = groupOrder.length;
-  let head = '<thead><tr><th rowspan="2" style="min-width:100px;position:sticky;left:0;background:#fff;z-index:2">销售</th>';
+  // 排序(按当前排序键取该销售在该列的值)
+  const sigVal = (u, key) => {
+    if (key === 'name') return u.name || '';
+    const row = result[u.name] || {};
+    if (key.indexOf('tot|') === 0) {
+      const g = groupOrder[parseInt(key.slice(4), 10)] || '';
+      let s = 0; months.forEach(m => { s += ((row[m] || {})[g]) || 0; });
+      return s;
+    }
+    if (key.indexOf('m|') === 0) {
+      const p = key.slice(2).split('|');
+      const g = groupOrder[parseInt(p[1], 10)] || '';
+      return ((row[p[0]] || {})[g]) || 0;
+    }
+    return 0;
+  };
+  users = sortRowsBy(users, sigSort, (u) => sigVal(u, sigSort.key), (a, b) => (a.name || '').localeCompare(b.name || '', 'zh'));
+  const sigInd = (k) => sortIndOf(sigSort, k);
+  let head = '<thead><tr>'
+    + sortTh('name', '销售', 'toggleSigSort', sigInd('name'), '', 'min-width:100px;position:sticky;left:0;background:#fff;z-index:2');
   months.forEach(m => { head += `<th colspan="${ng}">${parseInt(m, 10)}月</th>`; });
   head += `<th colspan="${ng}" style="background:var(--gray-100)">合计</th></tr><tr>`;
-  months.concat(['合计']).forEach(() => { groupOrder.forEach(g => { head += `<th class="num" style="white-space:nowrap">${esc(g)}</th>`; }); });
+  months.forEach(m => {
+    groupOrder.forEach((g, gi) => { head += sortTh('m|' + m + '|' + gi, esc(g), 'toggleSigSort', sigInd('m|' + m + '|' + gi), 'num', 'white-space:nowrap'); });
+  });
+  groupOrder.forEach((g, gi) => { head += sortTh('tot|' + gi, esc(g), 'toggleSigSort', sigInd('tot|' + gi), 'num', 'white-space:nowrap'); });
   head += '</tr></thead>';
   let body = '<tbody>';
   const colAmount = {};
@@ -13367,6 +13524,15 @@ function renderSalesBoardTable(tid, key) {
   });
   if (sbSortCol) {
     rowsArr.sort((a, b) => {
+      // 名称列按中文排序(团队视图按团队固定次序,更符合阅读习惯)
+      if (sbSortCol === 'name') {
+        if (key === 'team') {
+          const t = teamOrderRank(a.k) - teamOrderRank(b.k);
+          if (t) return sbSortDir === 'asc' ? t : -t;
+        }
+        const c = String(a.k || '').localeCompare(String(b.k || ''), 'zh');
+        return sbSortDir === 'asc' ? c : -c;
+      }
       let va, vb;
       if (sbSortCol === 'total') { va = a.t; vb = b.t; }
       else if (sbSortCol === 'dynyoy') { va = (a.dynYoy == null ? -1e15 : a.dynYoy); vb = (b.dynYoy == null ? -1e15 : b.dynYoy); }
@@ -13378,7 +13544,9 @@ function renderSalesBoardTable(tid, key) {
   }
   const userMap = key === 'salesperson' ? buildUserStatusMap() : null;
   const teamTargets = (key === 'team' && cloudData.formConfig.teamTargets && cloudData.formConfig.teamTargets[sbYearVal]) || {};
-  let h = '<thead><tr><th>' + (key === 'salesperson' ? '销售员' : '团队/门店') + '</th>';
+  const nmInd = sbSortCol === 'name' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
+  const nmAct = sbSortCol === 'name' ? ' active' : '';
+  let h = `<thead><tr><th class="sort-th${nmAct}" style="cursor:pointer" onclick="sbSortBy('name', '${tid}')">${key === 'salesperson' ? '销售员' : '团队/门店'}<span class="sort-ind${nmAct}">${nmInd}</span></th>`;
   months.forEach(m => {
     const ind = sbSortCol === m ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
     const act = sbSortCol === m ? ' active' : '';
@@ -13733,6 +13901,15 @@ function exportSalesBoard2() {
 }
 
 // ===== 团队人数:设置 / 导入 / 导出(用于报表看板3·团队人效统计)=====
+// 团队人数配置表排序:name / 01~12 各月 / year 全年合计
+let sbHcSort = mkSortState('sbHc', 'name', 'asc');
+function toggleSbHcSort(key) {
+  toggleSortState(sbHcSort, 'sbHc', key, ['name'], () => {
+    const y = document.getElementById('hcYearLbl') ? document.getElementById('hcYearLbl').textContent : '';
+    renderTeamHeadcountEditor(y);
+  });
+}
+
 function renderTeamHeadcountEditor(year) {
   sbHeadcountDraftYear = year;
   const saved = (cloudData.formConfig.teamHeadcount && cloudData.formConfig.teamHeadcount[year]) || {};
@@ -13741,9 +13918,19 @@ function renderTeamHeadcountEditor(year) {
   sbHeadcountTeams = teams;
   const lbl = document.getElementById('hcYearLbl'); if (lbl) lbl.textContent = year;
   const mm = i => String(i).padStart(2, '0');
-  let h = '<thead><tr><th>团队/门店</th>';
-  for (let i = 1; i <= 12; i++) h += `<th class="num">${i}月</th>`;
-  h += '<th class="num">全年人数合计</th></tr></thead><tbody>';
+  // 表头排序(团队名按团队固定次序,各月/合计按人数)
+  const hcSort = sbHcSort;
+  const hcInd = (k) => sortIndOf(hcSort, k);
+  const hcTh = (key, label, cls) => `<th class="${cls || ''} sort-th" style="cursor:pointer" onclick="toggleSbHcSort('${key}')">${label}${hcInd(key)}</th>`;
+  const hcVal = (t, key) => {
+    if (key === 'name') return t;
+    if (key === 'year') { let s = 0; for (let i = 1; i <= 12; i++) s += (sbHeadcountDraft[t] && sbHeadcountDraft[t][mm(i)]) || 0; return s; }
+    return (sbHeadcountDraft[t] && sbHeadcountDraft[t][key]) || 0;
+  };
+  teams = sortRowsBy(teams, hcSort, (t) => hcVal(t, hcSort.key), (a, b) => teamOrderRank(a) - teamOrderRank(b));
+  let h = '<thead><tr>' + hcTh('name', '团队/门店');
+  for (let i = 1; i <= 12; i++) h += hcTh(mm(i), i + '月', 'num');
+  h += hcTh('year', '全年人数合计', 'num') + '</tr></thead><tbody>';
   if (!teams.length) {
     h += `<tr><td colspan="14" style="text-align:center;color:var(--gray-400);padding:20px">当前年度暂无团队数据,可先"导入报表"设置人数,</td></tr>`;
   }
@@ -13883,6 +14070,12 @@ function renderSalesBoardTableEff(tid, key) {
   });
   if (sbSortCol) {
     rowsArr.sort((a, b) => {
+      if (sbSortCol === 'name') {
+        const t = teamOrderRank(a.k) - teamOrderRank(b.k);
+        if (t) return sbSortDir === 'asc' ? t : -t;
+        const c = String(a.k || '').localeCompare(String(b.k || ''), 'zh');
+        return sbSortDir === 'asc' ? c : -c;
+      }
       const va = sbSortCol === 'total' ? a.t : (sbSortCol === 'total-eff' ? a.eff : (a[sbSortCol] || 0));
       const vb = sbSortCol === 'total' ? b.t : (sbSortCol === 'total-eff' ? b.eff : (b[sbSortCol] || 0));
       return sbSortDir === 'asc' ? va - vb : vb - va;
@@ -13894,13 +14087,17 @@ function renderSalesBoardTableEff(tid, key) {
       return b.t - a.t;
     });
   }
-  let h = '<thead><tr><th>团队/门店</th>';
+  const effNmInd = sbSortCol === 'name' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
+  const effNmAct = sbSortCol === 'name' ? ' active' : '';
+  let h = `<thead><tr><th class="sort-th${effNmAct}" style="cursor:pointer" onclick="sbSortBy('name', '${tid}')">团队/门店<span class="sort-ind${effNmAct}">${effNmInd}</span></th>`;
   months.forEach(m => {
     const ind = sbSortCol === m ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
     const act = sbSortCol === m ? ' active' : '';
     h += `<th class="num sort-th${act}" onclick="sbSortBy('${m}', '${tid}')">${m.slice(5)}月<span class="sort-ind${act}">${ind}</span></th>`;
   });
-  h += '<th class="num">合计</th></tr></thead><tbody>';
+  const effTInd = sbSortCol === 'total' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
+  const effTAct = sbSortCol === 'total' ? ' active' : '';
+  h += `<th class="num sort-th${effTAct}" style="cursor:pointer" onclick="sbSortBy('total', '${tid}')">合计<span class="sort-ind${effTAct}">${effTInd}</span></th></tr></thead><tbody>`;
   const colTot = {}, colHc = {};
   rowsArr.forEach(row => {
     h += `<tr><td><span class="badge badge-team">${esc(row.k)}</span></td>`;
@@ -14287,6 +14484,29 @@ let salesGradeSpFilter = [];          // 选中的销售名单(空数组=全部�
 let salesGradeSpFilterLoaded = false; // 是否已从 localStorage 载入默认
 let salesGradeTeamFilter = [];        // 按团队筛选(空=全部)
 let salesGradeSortBy = 'amount';      // 排序方式:'amount' 按评级业绩降序,'team' 按团队+姓名
+                                      // 表头点击扩展:'sp' 按姓名 / 'roll:<月>' 按该月滚动3月业绩
+let salesGradeSortDir = 'desc';
+try { const _d = localStorage.getItem('sop_salesGradeSortDir'); if (_d === 'asc' || _d === 'desc') salesGradeSortDir = _d; } catch (e) {}
+function sgSortToggle(key) {
+  // 销售评级矩阵表排序(与 refreshSalesGrade 的表头点击共用一个方向状态)
+  if (key === 'sp' || key === 'team') {
+    // 与筛选栏下拉保持一致(下拉用 'team' / 'amount')
+    salesGradeSortBy = (key === 'team') ? 'team' : (salesGradeSortBy === 'sp' ? 'sp' : 'sp');
+  }
+  const cur = (salesGradeSortBy === 'name' || salesGradeSortBy === 'sp') ? 'sp' : salesGradeSortBy;
+  if (cur === key) salesGradeSortDir = salesGradeSortDir === 'asc' ? 'desc' : 'asc';
+  else { salesGradeSortBy = key; salesGradeSortDir = (key === 'sp' || key === 'team') ? 'asc' : 'desc'; }
+  try { localStorage.setItem('sop_salesGradeSortDir', salesGradeSortDir); } catch (e) {}
+  refreshSalesGrade();
+}
+// 销售评级单月表排序(同一方向状态,独立刷新入口)
+function sgSingleSortToggle(key) {
+  const cur = (salesGradeSortBy === 'name' || salesGradeSortBy === 'sp') ? 'sp' : salesGradeSortBy;
+  if (cur === key) salesGradeSortDir = salesGradeSortDir === 'asc' ? 'desc' : 'asc';
+  else { salesGradeSortBy = key; salesGradeSortDir = (key === 'sp' || key === 'team') ? 'asc' : 'desc'; }
+  try { localStorage.setItem('sop_salesGradeSortDir', salesGradeSortDir); } catch (e) {}
+  refreshSalesGradeSingle();
+}
 // ===== M0 看板状态 =====
 let m0ConfigPanelOpen = false;        // 配置面板是否展开
 let m0ConfigDraft = null;             // 编辑中的配置副本(保存前不落库)
@@ -14678,6 +14898,10 @@ function sgNoteText() {
   }
   return `说明:每个单元格为"滚动3个月评级业绩"= 该销售员当月及前 2 个月业绩之和(如 3月 = 1月+2月+3月),纵向仅显示在册<b>在职</b>销售,横向为所选月份区间(${sgMStart}-${sgMEnd}月),每个单元格含:滚动业绩,单月业绩,<b>当月评级</b>(按"表单配置-评级标准配置"自动评定,可手动修改),<b>备注</b>(手动填写);单元格<b>底纹</b>为<b>实时</b>按当月职级对比上月职级自动计算:<b style="color:#dc2626">升级</b>浅红底 / <b style="color:#16a34a">降级</b>浅绿底(持平无底色),<b>评级支持"暂存 + 最终保存"</b>:修改评级或点"🔄 按月份自动填充"会先<b>暂存</b>(格子显示 ●暂存,可点 ↺ 恢复为自动评级),最后点"💾 最终保存"才写入;也可"↩️ 放弃改动",`;
 }
+// M0 看板排序:name(M0 名) / m:<月> 该月考核业绩 / total 合计
+let m0GradeSort = mkSortState('m0Grade', 'total', 'desc');
+function toggleM0GradeSort(key) { toggleSortState(m0GradeSort, 'm0Grade', key, ['name'], refreshM0Grade); }
+
 function refreshM0Grade() {
   const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
   salesGradeYear = year;
@@ -14687,14 +14911,23 @@ function refreshM0Grade() {
   const months = (salesGradeTab === 'm0matrix') ? sgMonthRange() : [1,2,3,4,5,6,7,8,9,10,11,12];
   const m0GradeCfg = (cloudData.formConfig && cloudData.formConfig.m0GradeConfig) || [];
   const m0GradeOpts = [''].concat(m0GradeCfg.length ? m0GradeCfg.map(l => l.name) : ['初级M0','中级M0','高级M0']);
-  const rows = groups.map(g => {
+  let rows = groups.map(g => {
     const amts = {}; let total = 0;
     months.forEach(m => { const v = m0GroupAmount(base, g, m); amts[m] = v; total += v; });
     return { g, amts, total };
   });
-  let h = '<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">(M0)</span></th>';
-  months.forEach(m => { h += `<th class="num">${m}月</th>`; });
-  h += `<th class="num">${(salesGradeTab === 'm0matrix') ? (sgMStart + '-' + sgMEnd + '月合计') : '全年合计业绩'}</th></tr></thead><tbody>`;
+  rows = sortRowsBy(rows, m0GradeSort, (row) => {
+    const k = m0GradeSort.key;
+    if (k === 'name') return (row.g && row.g.m0) || '';
+    if (k === 'total') return row.total;
+    if (k.indexOf('m:') === 0) return row.amts[parseInt(k.slice(2), 10)] || 0;
+    return row.total;
+  }, (a, b) => String((a.g && a.g.m0) || '').localeCompare(String((b.g && b.g.m0) || ''), 'zh'));
+  const mgInd = (k) => sortIndOf(m0GradeSort, k);
+  let h = '<thead><tr>' + sortTh('name', '销售员<span style="font-size:11px;color:var(--gray-400)">(M0)</span>', 'toggleM0GradeSort', mgInd('name'));
+  months.forEach(m => { h += sortTh('m:' + m, m + '月', 'toggleM0GradeSort', mgInd('m:' + m), 'num'); });
+  const mgTotLabel = (salesGradeTab === 'm0matrix') ? (sgMStart + '-' + sgMEnd + '月合计') : '全年合计业绩';
+  h += sortTh('total', mgTotLabel, 'toggleM0GradeSort', mgInd('total'), 'num') + '</tr></thead><tbody>';
   const colTot = {}; months.forEach(m => colTot[m] = 0); let totalAll = 0;
   if (!rows.length) {
     h += `<tr><td colspan="${months.length + 2}" style="text-align:center;color:var(--gray-400);padding:24px">尚未配置 M0 计算范围,请点击上方"⚙️ M0 计算范围"设置分组,</td></tr>`;
@@ -14732,6 +14965,10 @@ function refreshM0Grade() {
   const tbl = document.getElementById('sgTable');
   if (tbl) tbl.innerHTML = h;
 }
+// M0 单月评级表排序:name / team / v 考核业绩 / grade 本月评级 / chg 升降级 / note / prevGrade / prevNote
+let m0GradeSingleSort = mkSortState('m0GradeSingle', 'v', 'desc');
+function toggleM0GradeSingleSort(key) { toggleSortState(m0GradeSingleSort, 'm0GradeSingle', key, ['name', 'team', 'grade', 'chg', 'note', 'prevGrade', 'prevNote'], refreshM0GradeSingle); }
+
 function refreshM0GradeSingle() {
   const year = document.getElementById('sgYear') ? document.getElementById('sgYear').value : salesGradeYear;
   salesGradeYear = year;
@@ -14743,8 +14980,41 @@ function refreshM0GradeSingle() {
   const statusMap = buildUserStatusMap();
   const m0GradeCfg = (cloudData.formConfig && cloudData.formConfig.m0GradeConfig) || [];
   const m0GradeOpts = [''].concat(m0GradeCfg.length ? m0GradeCfg.map(l => l.name) : ['初级M0','中级M0','高级M0']);
-  const rows = groups.map(g => ({ g, v: m0GroupAmount(base, g, month) })).sort((a, b) => b.v - a.v);
-  let h = `<colgroup><col style="width:7%"><col style="width:10%"><col style="width:13%"><col style="width:8%"><col style="width:6%"><col style="width:26%"><col style="width:9%"><col style="width:21%"></colgroup><thead><tr><th>姓名</th><th>团队</th><th class="num">${month}月 M0 考核业绩</th><th>本月评级</th><th style="text-align:center">升降级</th><th>备注</th><th class="sg-prev-col">${prevMonth}月评级</th><th class="sg-prev-col">${prevMonth}月备注</th></tr></thead><tbody>`;
+  // 预计算排序所需字段(渲染仍用原逻辑,这里只额外带出排序值)
+  let rows = groups.map(g => {
+    const m0 = g.m0 || '(未命名)';
+    const k = m0Key(year, m0, month);
+    const rec = (cloudData.m0Records && cloudData.m0Records[k]) || {};
+    const prevRec = (month > 1) ? ((cloudData.m0Records && cloudData.m0Records[m0Key(year, m0, month - 1)]) || {}) : {};
+    return { g, v: m0GroupAmount(base, g, month), team: getSalesTeam(m0) || '',
+      _grade: m0EffectiveGrade(k, rec.grade || ''), _chg: rec.chg || '',
+      _note: m0EffectiveNote(k, rec.note || ''),
+      _prevGrade: (month > 1) ? (prevRec.grade || '-') : '-',
+      _prevNote: (month > 1) ? (prevRec.note || '') : '' };
+  });
+  rows = sortRowsBy(rows, m0GradeSingleSort, (r) => {
+    const kk = m0GradeSingleSort.key;
+    if (kk === 'name') return (r.g && r.g.m0) || '';
+    if (kk === 'team') return teamOrderRank(r.team || '');
+    if (kk === 'v') return r.v;
+    if (kk === 'grade') return r._grade;
+    if (kk === 'chg') return r._chg;
+    if (kk === 'note') return r._note;
+    if (kk === 'prevGrade') return r._prevGrade;
+    if (kk === 'prevNote') return r._prevNote;
+    return r.v;
+  }, (a, b) => b.v - a.v);
+  const mgsInd = (kk) => sortIndOf(m0GradeSingleSort, kk);
+  let h = `<colgroup><col style="width:7%"><col style="width:10%"><col style="width:13%"><col style="width:8%"><col style="width:6%"><col style="width:26%"><col style="width:9%"><col style="width:21%"></colgroup><thead><tr>`
+    + sortTh('name', '姓名', 'toggleM0GradeSingleSort', mgsInd('name'))
+    + sortTh('team', '团队', 'toggleM0GradeSingleSort', mgsInd('team'))
+    + sortTh('v', month + '月 M0 考核业绩', 'toggleM0GradeSingleSort', mgsInd('v'), 'num')
+    + sortTh('grade', '本月评级', 'toggleM0GradeSingleSort', mgsInd('grade'))
+    + sortTh('chg', '升降级', 'toggleM0GradeSingleSort', mgsInd('chg'), '', 'text-align:center')
+    + sortTh('note', '备注', 'toggleM0GradeSingleSort', mgsInd('note'))
+    + sortTh('prevGrade', prevMonth + '月评级', 'toggleM0GradeSingleSort', mgsInd('prevGrade'), 'sg-prev-col')
+    + sortTh('prevNote', prevMonth + '月备注', 'toggleM0GradeSingleSort', mgsInd('prevNote'), 'sg-prev-col')
+    + `</tr></thead><tbody>`;
   if (!rows.length) h += `<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:24px">尚未配置 M0 计算范围,请点击上方"⚙️ M0 计算范围"设置分组,</td></tr>`;
   rows.forEach(row => {
     const m0 = row.g.m0 || '(未命名)';
@@ -14861,7 +15131,8 @@ function refreshSalesGrade() {
     spSet.add(sp);
   });
   const months = (salesGradeTab === 'matrix') ? sgMonthRange() : [1,2,3,4,5,6,7,8,9,10,11,12];
-  const rows = [...spSet].filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp)).map(sp => {
+  // 排序:sp 姓名 / team 团队(按团队固定次序) / roll:<月> 该月滚动3月业绩 / roll 末月(兼容下拉框原值)
+  let rows = [...spSet].filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp)).map(sp => {
     const row = { sp, team: getSalesTeam(sp) || '', roll: {}, single: base[sp] || {} };
     months.forEach(m => {
       let s = 0;
@@ -14870,14 +15141,19 @@ function refreshSalesGrade() {
     });
     return row;
   });
-  if (salesGradeSortBy === 'team') {
-    rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
-  } else {
-    const sortMonth = (salesGradeTab === 'matrix') ? Math.max(sgMStart, sgMEnd) : 12;
-    rows.sort((a, b) => b.roll[sortMonth] - a.roll[sortMonth] || a.sp.localeCompare(b.sp, 'zh'));
-  }
-  let h = '<thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">(在职)</span></th><th>团队</th>';
-  months.forEach(m => { h += `<th class="num">${m}月</th>`; });
+  const sgSortMonth = (salesGradeTab === 'matrix') ? Math.max(sgMStart, sgMEnd) : 12;
+  const sgKey = (salesGradeSortBy === 'name' || salesGradeSortBy === 'sp') ? 'sp' : salesGradeSortBy;
+  rows = sortRowsBy(rows, { key: sgKey, dir: salesGradeSortDir }, (r) => {
+    if (sgKey === 'sp') return r.sp || '';
+    if (sgKey === 'team') return teamOrderRank(r.team || '');
+    if (sgKey.indexOf('roll:') === 0) return r.roll[parseInt(sgKey.slice(5), 10)] || 0;
+    return r.roll[sgSortMonth] || 0;
+  }, (a, b) => (a.sp || '').localeCompare(b.sp || '', 'zh'));
+  const sgInd = (k) => sortIndOf({ key: sgKey, dir: salesGradeSortDir }, k);
+  let h = '<thead><tr>'
+    + sortTh('sp', '销售员<span style="font-size:11px;color:var(--gray-400)">(在职)</span>', 'sgSortToggle', sgInd('sp'))
+    + sortTh('team', '团队', 'sgSortToggle', sgInd('team'));
+  months.forEach(m => { h += sortTh('roll:' + m, m + '月', 'sgSortToggle', sgInd('roll:' + m), 'num'); });
   h += '</tr></thead><tbody>';
   const colTot = {}; months.forEach(m => colTot[m] = 0);
   const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
@@ -15022,12 +15298,46 @@ function refreshSalesGradeSingle() {
   });
   const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
   const gradeOpts = (levels.length ? levels.map(l => l.name) : ['未定级']).concat(['未定级']);
-  if (salesGradeSortBy === 'team') {
-    rows.sort((a, b) => teamOrderRank(a.team || '') - teamOrderRank(b.team || '') || a.sp.localeCompare(b.sp, 'zh'));
-  } else {
-    rows.sort((a, b) => (b.roll[month] || 0) - (a.roll[month] || 0) || a.sp.localeCompare(b.sp, 'zh'));
-  }
-  let h = `<colgroup><col style="width:7%"><col style="width:10%"><col style="width:13%"><col style="width:8%"><col style="width:6%"><col style="width:26%"><col style="width:9%"><col style="width:21%"></colgroup><thead><tr><th>销售员<span style="font-size:11px;color:var(--gray-400)">(在职)</span></th><th>团队</th><th class="num">${month}月 评级业绩<br><span style="font-weight:400;font-size:10px;color:var(--gray-400)">滚动3月</span></th><th>本月评级</th><th style="text-align:center">升降级</th><th>备注</th><th class="sg-prev-col">${prevMonth}月评级</th><th class="sg-prev-col">${prevMonth}月备注</th></tr></thead><tbody>`;
+  // 预计算评级相关字段(排序与渲染共用)
+  rows.forEach(row => {
+    const rg = sgComputeGrades(row.roll, levels, year, row.sp);
+    const kk = gradeKey(year, row.sp, month);
+    const rc = (cloudData.gradeRecords && cloudData.gradeRecords[kk]) || {};
+    const pk = gradeKey(year, row.sp, prevMonth);
+    const prc = (cloudData.gradeRecords && cloudData.gradeRecords[pk]) || {};
+    row._grades = rg;
+    row._v = row.roll[month] || 0;
+    row._auto = (rg[month] || {}).autoName || '';
+    row._rec = rc;
+    row._prevRec = prc;
+    const pend = sgPending[kk];
+    row._grade = (pend && pend.grade !== undefined) ? pend.grade : (rc.grade || '');
+    row._chg = (pend && pend.chg !== undefined) ? pend.chg : (rc.chg || '');
+    row._note = (pend && pend.note !== undefined) ? pend.note : (rc.note || '');
+  });
+  const sgsKey = (salesGradeSortBy === 'name' || salesGradeSortBy === 'sp') ? 'sp' : salesGradeSortBy;
+  rows = sortRowsBy(rows, { key: sgsKey, dir: salesGradeSortDir }, (r) => {
+    if (sgsKey === 'sp') return r.sp || '';
+    if (sgsKey === 'team') return teamOrderRank(r.team || '');
+    if (sgsKey === 'v') return r._v;
+    if (sgsKey === 'grade') return r._grade || r._auto || '';
+    if (sgsKey === 'chg') return r._chg || '';
+    if (sgsKey === 'note') return r._note || '';
+    if (sgsKey === 'prevGrade') return r._prevRec.grade || '-';
+    if (sgsKey === 'prevNote') return r._prevRec.note || '';
+    return r._v;
+  }, (a, b) => (a.sp || '').localeCompare(b.sp || '', 'zh'));
+  const sgsInd = (kk) => sortIndOf({ key: sgsKey, dir: salesGradeSortDir }, kk);
+  let h = `<colgroup><col style="width:7%"><col style="width:10%"><col style="width:13%"><col style="width:8%"><col style="width:6%"><col style="width:26%"><col style="width:9%"><col style="width:21%"></colgroup><thead><tr>`
+    + sortTh('sp', '销售员<span style="font-size:11px;color:var(--gray-400)">(在职)</span>', 'sgSingleSortToggle', sgsInd('sp'))
+    + sortTh('team', '团队', 'sgSingleSortToggle', sgsInd('team'))
+    + sortTh('v', month + '月 评级业绩<br><span style="font-weight:400;font-size:10px;color:var(--gray-400)">滚动3月</span>', 'sgSingleSortToggle', sgsInd('v'), 'num')
+    + sortTh('grade', '本月评级', 'sgSingleSortToggle', sgsInd('grade'))
+    + sortTh('chg', '升降级', 'sgSingleSortToggle', sgsInd('chg'), '', 'text-align:center')
+    + sortTh('note', '备注', 'sgSingleSortToggle', sgsInd('note'))
+    + sortTh('prevGrade', prevMonth + '月评级', 'sgSingleSortToggle', sgsInd('prevGrade'), 'sg-prev-col')
+    + sortTh('prevNote', prevMonth + '月备注', 'sgSingleSortToggle', sgsInd('prevNote'), 'sg-prev-col')
+    + `</tr></thead><tbody>`;
   if (!rows.length) {
     h += `<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:24px">该月暂无在职销售的业绩数据</td></tr>`;
   }
@@ -17233,6 +17543,11 @@ function showMgrAttachPreview(src) {
 }
 
 // 列表页:每条记录一行;同团队用 rowspan 合并首列;团队末尾追加"+ 新增记录"
+// 管理绩效附件留存表排序:name 团队 / title 首条标题 / imgs 图片总数 / upd 最后更新时间
+// (仅排团队顺序,团队内记录顺序与 rowspan 结构不变)
+let mgrAttachSort = mkSortState('mgrAttach', 'name', 'asc');
+function toggleMgrAttachSort(key) { toggleSortState(mgrAttachSort, 'mgrAttach', key, ['name', 'title'], renderMgrPerfAttachmentsTab); }
+
 function renderMgrPerfAttachmentsTab() {
   const curYear = prevMonth().year.toString();
   if (!mgrPerfYear || mgrPerfYearOptions().indexOf('value="' + mgrPerfYear + '"') < 0) mgrPerfYear = curYear;
@@ -17240,8 +17555,20 @@ function renderMgrPerfAttachmentsTab() {
   mgrPerfAttachMonth = parseInt(takeSelectDefault('mgrPerf.attachMonth', String(mgrPerfAttachMonth)), 10);
   const isAdmin = hasPermission('admin');
   const monthOpts = [1,2,3,4,5,6,7,8,9,10,11,12].map(m => `<option value="${m}" ${m===mgrPerfAttachMonth?'selected':''}>${m}月</option>`).join('');
-  const teams = mgrPerfAttachTeams();
+  let teams = mgrPerfAttachTeams();
   const year = mgrPerfYear, month = mgrPerfAttachMonth;
+  // 排序(仅排团队顺序;团队内记录顺序与 rowspan 结构保持不变)
+  const attachVal = (team, key) => {
+    const rs = mgrPerfAttachGetRecords(year, month, team);
+    if (key === 'name') return team;
+    if (key === 'title') return (rs[0] && rs[0].title) || '';
+    if (key === 'imgs') return rs.reduce((s, r) => s + ((r.images || []).length), 0);
+    if (key === 'upd') { let latest = ''; rs.forEach(r => { const u = r.updatedAt || ''; if (u > latest) latest = u; }); return latest; }
+    return 0;
+  };
+  teams = sortRowsBy(teams, mgrAttachSort, (t) => attachVal(t, mgrAttachSort.key), (a, b) => teamOrderRank(a) - teamOrderRank(b));
+  const maInd = (kk) => sortIndOf(mgrAttachSort, kk);
+  const maTh = (kk, label, style) => sortTh(kk, label, 'toggleMgrAttachSort', maInd(kk), '', style);
 
   const rows = [];
   let totalRecords = 0;
@@ -17312,10 +17639,10 @@ function renderMgrPerfAttachmentsTab() {
         <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">说明:管理绩效附件留存按"团队 + 月"分类,每个团队每月可挂多条记录,每条记录包含标题和图片(最多 10 张),图片自动压缩到宽 1200px JPEG(≤~300KB)后转 base64 存云端;拖动到上传区或点击选择均可,点击列表中的小图可放大预览,${isAdmin ? '你是管理员,可以新增/编辑/删除,' : '当前账号仅可查看,不可编辑,'}</div>
         <div class="table-wrap"><table class="sticky-cols" style="min-width:100%">
           <thead><tr style="background:var(--gray-50)">
-            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:160px;vertical-align:top">团队</th>
-            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:240px">标题</th>
-            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200)">图片</th>
-            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:180px">最后更新</th>
+            ${maTh('name', '团队', 'padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:160px;vertical-align:top')}
+            ${maTh('title', '标题', 'padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:240px')}
+            ${maTh('imgs', '图片', 'padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200)')}
+            ${maTh('upd', '最后更新', 'padding:10px 12px;text-align:left;border-bottom:1px solid var(--gray-200);width:180px')}
             <th style="padding:10px 12px;text-align:right;border-bottom:1px solid var(--gray-200);width:160px">操作</th>
           </tr></thead>
           <tbody>${rows.join('') || '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--gray-400)">暂无团队</td></tr>'}</tbody>
