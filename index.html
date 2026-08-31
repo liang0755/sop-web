@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260829195732';
-const APP_VERSION = '1.42.93'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260831101653';
+const APP_VERSION = '1.42.94'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -5423,9 +5423,23 @@ function fmtCallAvg(sec) {
   if (sec >= 60) return Math.floor(sec / 60) + '分' + (sec % 60) + '秒';
   return sec + '秒';
 }
-// 筛选后的外呼记录(起止日期+部门+员工)
+// 无效外呼记录判定(全空记录 / 解析错位脏数据)—— 列表、统计、导出、AI 上下文统一剔除
+// 无效 = ①联系时间不是合法的 "YYYY-MM-DD HH:MM" 开头(脏数据) ②客户/联系人/电话/员工/部门全空且通话时长为 0(全空记录)
+const CALL_CONTENT_KEYS = ['customer', 'contactPerson', 'phone', 'employee', 'department'];
+function isInvalidCallRecord(r) {
+  if (!r || typeof r !== 'object') return true;
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(r.contactTime || '').trim())) return true;
+  const hasContent = CALL_CONTENT_KEYS.some(k => String(r[k] || '').trim())
+    || (Number(r.durationSec) || 0) > 0;
+  return !hasContent;
+}
+function countInvalidCallRecords() {
+  return (cloudData.callRecords || []).filter(isInvalidCallRecord).length;
+}
+// 筛选后的外呼记录(起止日期+部门+员工),已自动剔除无效记录
 function filterCallRecords(s, e, deptF, personF) {
   return (cloudData.callRecords || []).filter(r => {
+    if (isInvalidCallRecord(r)) return false;
     const d = (r.date || '').slice(0, 10);
     if (s && d < s) return false;
     if (e && d > e) return false;
@@ -5571,10 +5585,33 @@ function renderCallData() {
         <button class="btn btn-xs btn-outline" onclick="callQuickRange('thisYear',this)">今年</button>
         <button class="btn btn-xs btn-outline" onclick="callQuickRange('lastYear',this)">去年</button>
       </div>
-      <div style="font-size:12px;color:var(--gray-500);margin-top:8px">支持上传外呼系统导出的 CSV(表头:联系时间,客户,工作单位/联系人,电话号码,通话时长,通话方式,员工,部门),按「联系时间+电话号码」自动去重追加,不会重复入库</div>
+      <div style="font-size:12px;color:var(--gray-500);margin-top:8px">支持上传外呼系统导出的 CSV(表头:联系时间,客户,工作单位/联系人,电话号码,通话时长,通话方式,员工,部门),按「联系时间+电话号码」自动去重追加,不会重复入库;<b>全空记录(除联系时间外无任何内容且时长为 0)与格式异常行会自动跳过,不入库</b></div>
+      ${renderInvalidCallBar()}
     </div></div>
     <div id="callDataList"></div>`;
   renderCallDataList();
+}
+
+// 无效记录(全空/格式异常)提示条 + 一键彻底清理
+function renderInvalidCallBar() {
+  const n = countInvalidCallRecords();
+  if (!n) return '';
+  return `<div style="margin-top:10px;padding:8px 12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:#9a3412">
+    <span>⚠️ 云端存在 <b>${n}</b> 条无效记录(内容全空或格式异常),已在列表/统计/导出/AI 读取中自动过滤</span>
+    <button class="btn btn-outline btn-sm" onclick="cleanupInvalidCallRecords()">🧹 从库中彻底删除</button>
+  </div>`;
+}
+async function cleanupInvalidCallRecords() {
+  const bad = (cloudData.callRecords || []).filter(r => isInvalidCallRecord(r) && r.id);
+  if (!bad.length) { showToast('没有可清理的无效记录', 'success'); return; }
+  if (!confirm('确定删除 ' + bad.length + ' 条无效外呼记录吗?这些记录除联系时间外无任何内容(或格式异常),删除后不可恢复。')) return;
+  let ok = 0, fail = 0;
+  for (let i = 0; i < bad.length; i++) {
+    try { await apiDelete('callRecords', bad[i].id); ok++; } catch (e) { fail++; }
+  }
+  cloudData.callRecords = (cloudData.callRecords || []).filter(r => !isInvalidCallRecord(r));
+  renderCallData();
+  showToast('清理完成:成功 ' + ok + ' 条' + (fail ? ',失败 ' + fail + ' 条' : ''), fail ? 'warning' : 'success');
 }
 
 function renderCallDataList() {
@@ -5625,12 +5662,13 @@ function handleCallUpload(event) {
   if (!files || !files.length) return;
   const input = event.target;
   let pending = files.length;
-  let okCount = 0, skipCount = 0, failCount = 0, badCount = 0;
+  let okCount = 0, skipCount = 0, failCount = 0, badCount = 0, blankCount = 0;
   function finish() {
     if (pending > 0) return;
     input.value = '';
     showToast('上传完成:新增 ' + okCount + ' 条,跳过重复 ' + skipCount + ' 条'
       + (badCount ? ',跳过格式异常 ' + badCount + ' 行' : '')
+      + (blankCount ? ',跳过全空记录 ' + blankCount + ' 行' : '')
       + (failCount ? ',失败 ' + failCount + ' 条' : ''), failCount ? 'warning' : 'success', 6000);
     renderCallData();
   }
@@ -5670,6 +5708,10 @@ function handleCallUpload(event) {
           const get = (n) => (cells[idx[n]] || '').trim();
           const contactTime = get('联系时间');
           if (!contactTime) { badCount++; continue; }
+          // 全空记录:客户/联系人/电话/员工/部门全空且通话时长为 0 → 跳过,不入库
+          const hasContent = ['客户', '工作单位/联系人', '电话号码', '员工', '部门'].some(n => get(n))
+            || callDurToSec(get('通话时长')) > 0;
+          if (!hasContent) { blankCount++; continue; }
           const phone = get('电话号码');
           const key = contactTime + '|' + phone;
           if (fileKeys.has(key)) continue;
@@ -6651,7 +6693,8 @@ function buildAIContext() {
   });
 
   // ===== 外呼数据(电话通话记录:次数/时长/平均时长/接通率,接通=时长>0) =====
-  const callDataAi = (cloudData.callRecords || []).map(r => ({
+  // 与页面列表/统计同一口径:自动剔除全空记录与解析错位的脏数据
+  const callDataAi = (cloudData.callRecords || []).filter(r => !isInvalidCallRecord(r)).map(r => ({
     contactTime: r.contactTime || '',
     employee: r.employee || '',
     department: r.department || '',
