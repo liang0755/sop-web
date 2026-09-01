@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260831123430';
-const APP_VERSION = '1.42.98'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260901151011';
+const APP_VERSION = '1.42.99'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -4125,7 +4125,7 @@ function renderMergeSummary() {
     const chMap=deptChannels[dept];
     const ds=deptSummary[dept]||{};
     const color=dColors[ci%dColors.length];ci++;
-    const orderedRows=[];
+    let orderedRows=[]; // 下方会被 sortRowsBy 重新赋值,必须 let
     const seen=new Set();
     channelOrder.forEach(cn=>{
       const dk=cn+'|||daily',wk=cn+'|||weekly';
@@ -10190,7 +10190,7 @@ function renderM0VisitStats() {
     }
   }
   // matrix: m0 -> period -> sum
-  const m0Set = [];
+  let m0Set = []; // 下方会被 sortRowsBy 重新赋值,必须 let
   const m0Map = {};
   fRows.forEach(r => {
     if (!m0Map[r.m0]) { m0Map[r.m0] = {}; m0Set.push(r.m0); }
@@ -13919,7 +13919,7 @@ function renderTeamHeadcountEditor(year) {
   sbHeadcountDraftYear = year;
   const saved = (cloudData.formConfig.teamHeadcount && cloudData.formConfig.teamHeadcount[year]) || {};
   sbHeadcountDraft = JSON.parse(JSON.stringify(saved));
-  const teams = sbAllTeams(year);
+  let teams = sbAllTeams(year); // 下方会被 sortRowsBy 重新赋值,必须 let
   sbHeadcountTeams = teams;
   const lbl = document.getElementById('hcYearLbl'); if (lbl) lbl.textContent = year;
   const mm = i => String(i).padStart(2, '0');
@@ -15296,7 +15296,7 @@ function refreshSalesGradeSingle() {
     spSet.add(sp);
   });
   const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  const rows = [...spSet].filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp)).map(sp => {
+  let rows = [...spSet].filter(sp => (!salesGradeSpFilter.length || salesGradeSpFilter.indexOf(sp) >= 0) && sgPassTeamFilter(sp)).map(sp => { // 下方会被 sortRowsBy 重新赋值,必须 let
     const row = { sp, team: getSalesTeam(sp) || '', roll: {}, single: base[sp] || {} };
     months.forEach(m => { let s = 0; for (let k = Math.max(1, m - 2); k <= m; k++) s += (base[sp][k] || 0); row.roll[m] = s; });
     return row;
