@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260901165708';
-const APP_VERSION = '1.42.101'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260901173734';
+const APP_VERSION = '1.42.102'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -7667,9 +7667,11 @@ function switchConfigTab(tab) {
   }
 }
 
+// 拖拽手柄(点阵)SVG:提升为顶层常量,供 renderConfigContent 与 renderCustomerSourceGroupsCard 等独立函数共用
+// (此前定义在 renderConfigContent 函数体内,renderCustomerSourceGroupsCard 访问不到 → ReferenceError 整页白屏)
+const FC_GRIP = '<svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><circle cx="3" cy="3" r="1.7"/><circle cx="9" cy="3" r="1.7"/><circle cx="3" cy="8" r="1.7"/><circle cx="9" cy="8" r="1.7"/><circle cx="3" cy="13" r="1.7"/><circle cx="9" cy="13" r="1.7"/></svg>';
 function renderConfigContent() {
   const c = document.getElementById('configContent');
-  const FC_GRIP = '<svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><circle cx="3" cy="3" r="1.7"/><circle cx="9" cy="3" r="1.7"/><circle cx="3" cy="8" r="1.7"/><circle cx="9" cy="8" r="1.7"/><circle cx="3" cy="13" r="1.7"/><circle cx="9" cy="13" r="1.7"/></svg>';
   // ===== 签到事件固定选项配置 tab(用于拜访数据手动修改下拉框)=====
   if (configTab === 'signinEvents') {
     if (!cloudData.formConfig.signinEvents) cloudData.formConfig.signinEvents = [];
@@ -7798,7 +7800,7 @@ function renderConfigContent() {
     const lv = cloudData.formConfig.gradeConfig;
     c.innerHTML = `
       <h2 class="fc-panel-title">评级标准配置</h2>
-      <p class="fc-panel-desc">配置销售升降级看板的"评级标准",每行一个级别:<b>升级业绩</b>=达到此业绩即升入该级别(下界);<b>降级业绩</b>=跌破此值则降出该级别(保底线,需 ≤ 升级业绩),列表按升级业绩<b>升序</b>排列,第一个级别为基准级(升级业绩建议填 0),修改后点击底部"保存配置"生效,</p>
+      <p class="fc-panel-desc">配置销售升降级看板的"评级标准",每行一个级别:<b>升级业绩</b>=达到此业绩即升入该级别(下界);<b>降级业绩</b>=跌破此值则降出该级别(保底线,需 ≤ 升级业绩),列表按升级业绩<b>升序</b>排列,第一个级别为基准级(升级业绩建议填 0),修改后点击底部"保存配置"生效。每行左侧的<b>点阵手柄</b>可按住拖动调整顺序,</p>
       <div class="config-toolbar" style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0">
         <button class="btn btn-outline btn-sm" onclick="downloadGradeTemplate()">📋 下载模板</button>
         <button class="btn btn-primary btn-sm" onclick="document.getElementById('gradeImportFile').click()">📥 导入 Excel</button>
@@ -7807,7 +7809,8 @@ function renderConfigContent() {
       </div>
       <div class="fc-opt-list" id="gradeLevelList">
         ${lv.map((g, i) => `
-          <div class="fc-opt-row">
+          <div class="fc-opt-row gc-row" data-idx="${i}" ondragover="gcDragOver(event)" ondrop="gcDrop(event,${i})">
+            <span class="fc-grip" draggable="true" title="拖动排序" ondragstart="gcDragStart(event,${i})" ondragend="gcDragEnd(event)">${FC_GRIP}</span>
             <span class="fc-idx" style="width:auto;font-weight:600;color:var(--gray-700);white-space:nowrap">级别 ${i + 1}</span>
             <input type="text" class="fc-opt-input" style="max-width:220px" value="${g.name.replace(/"/g,'&quot;')}" onchange="updateGradeLevel(${i}, 'name', this.value)" placeholder="级别名称,如:中级销售">
             <div style="display:flex;align-items:center;gap:6px"><span style="font-size:12px;color:var(--gray-500)">升级业绩</span><input type="number" class="fc-opt-input" style="width:110px;flex:none" value="${g.promote}" onchange="updateGradeLevel(${i}, 'promote', parseFloat(this.value)||0)"></div>
@@ -8149,11 +8152,12 @@ function renderConfigContent() {
         </div>
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><h4>${curM} 奖项列表(${list.length} 条)</h4><span style="font-size:12px;color:var(--gray-500)">保存配置后写入云端(Firebase /honorRecords)</span></div>
+        <div class="card-header"><h4>${curM} 奖项列表(${list.length} 条)</h4><span style="font-size:12px;color:var(--gray-500)">保存配置后写入云端(Firebase /honorRecords);每行最左侧的<b>点阵手柄</b>可按住拖动调整展示顺序</span></div>
         <div class="card-body">
           ${list.length === 0 ? '<div class="empty-state" style="padding:20px"><div class="icon" style="font-size:32px">🏆</div>该月份暂无奖项,点击上方"新增一条奖项"开始添加</div>' : `
-          <div style="overflow-x:auto"><table class="data-table" style="min-width:920px">
+          <div style="overflow-x:auto"><table class="data-table" style="min-width:954px">
             <thead><tr style="background:var(--gray-50)">
+              <th style="width:34px" title="拖动排序"></th>
               <th style="width:140px">奖项名称</th>
               <th style="width:200px">姓名(支持换行/多人)</th>
               <th style="width:100px">奖金</th>
@@ -8163,7 +8167,8 @@ function renderConfigContent() {
             </tr></thead>
             <tbody id="honorCfgTbody">
               ${list.map((it, i) => `
-                <tr>
+                <tr class="hc-row" data-idx="${i}" ondragover="hcDragOver(event)" ondrop="hcDrop(event,${i})">
+                  <td style="text-align:center"><span class="fc-grip" draggable="true" title="拖动排序" ondragstart="hcDragStart(event,${i})" ondragend="hcDragEnd(event)">${FC_GRIP}</span></td>
                   <td><input type="text" class="form-control form-control-sm" list="honorAwardDl" value="${esc(it.awardName || '')}" onchange="updateHonorCfgItem(${i}, 'awardName', this.value)" placeholder="如:外部攻坚奖"></td>
                   <td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;width:100%;font-size:12px" onchange="updateHonorCfgItem(${i}, 'salesperson', this.value)" placeholder="可填写多人,每行一人">${esc(it.salesperson || '')}</textarea></td>
                   <td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;width:100%;font-size:12px" onchange="updateHonorCfgItem(${i}, 'bonus', this.value)" placeholder="可填写多人奖金,每行一人(与姓名行对应)">${esc(it.bonus != null ? it.bonus : '')}</textarea></td>
@@ -8374,14 +8379,15 @@ function renderCustomerSourceGroupsCard() {
   const groups = ensureCustomerSourceGroups();
   const sourceList = (cloudData.formConfig.customerTags && cloudData.formConfig.customerTags.customerSource) || [];
   let html = '';
-  Object.keys(groups).forEach(groupName => {
+  Object.keys(groups).forEach((groupName, gi) => {
     const items = groups[groupName] || [];
     const itemBadges = items.map(it => `<span class="badge" style="font-size:12px;padding:5px 10px;margin:3px 4px 3px 0;background:var(--primary-light);color:var(--primary-dark);cursor:pointer" onclick="removeItemFromCustomerSourceGroup('${esc(groupName)}','${esc(it)}')" title="点击移除">${esc(it)} ×</span>`).join('');
     const availOpts = sourceList.filter(it => !items.includes(it));
     const addSelect = availOpts.length > 0 ? `<select class="form-control" style="display:inline-block;width:auto;margin-top:8px;font-size:12px;padding:4px 8px;min-width:160px" onchange="if(this.value){addItemToCustomerSourceGroup('${esc(groupName)}', this.value); this.value='';}"><option value="">+ 从"客户来源"添加</option>${availOpts.map(it => `<option value="${esc(it)}">${esc(it)}</option>`).join('')}</select>` : '';
     html += `
-      <div class="fc-nested" style="border-left-color:var(--primary)">
+      <div class="fc-nested csg-row" data-idx="${gi}" style="border-left-color:var(--primary)" ondragover="csgDragOver(event)" ondrop="csgDrop(event,${gi})">
         <div class="fc-nested-head">
+          <span class="fc-grip" draggable="true" title="拖动排序" ondragstart="csgDragStart(event,${gi})" ondragend="csgDragEnd(event)">${FC_GRIP}</span>
           <span class="fc-tag manual" style="background:var(--primary-light);color:var(--primary)">分组</span>
           <input type="text" class="fc-opt-input" style="max-width:200px" value="${esc(groupName)}" onchange="renameCustomerSourceGroup('${esc(groupName)}', this.value)" />
           <span style="font-size:12px;color:var(--gray-500)">${items.length} 项</span>
@@ -8451,6 +8457,43 @@ function removeItemFromCustomerSourceGroup(groupName, item) {
   if (idx >= 0) g.splice(idx, 1);
   renderConfigContent();
 }
+// 客户来源分组:分组卡片拖拽排序(customerSourceGroups 是{组名:[项]}对象,靠重建对象来调整 key 顺序)
+let csgDragIndex = -1;
+function csgDragStart(e, i) {
+  csgDragIndex = i;
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', String(i)); } catch (_) {}
+  const row = e.target.closest('.csg-row');
+  if (row) row.style.opacity = '0.4';
+}
+function csgDragOver(e) {
+  if (csgDragIndex < 0) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.csg-row').forEach(r => { r.style.outline = ''; r.style.background = ''; });
+  const row = e.currentTarget;
+  row.style.outline = '2px dashed var(--primary)';
+  row.style.background = 'rgba(0,0,0,0.03)';
+}
+function csgDrop(e, i) {
+  e.preventDefault();
+  if (csgDragIndex < 0) { csgReset(); return; }
+  const groups = ensureCustomerSourceGroups();
+  const keys = Object.keys(groups);
+  const from = csgDragIndex, to = i;
+  if (from === to || from < 0 || to < 0 || from >= keys.length || to >= keys.length) { csgReset(); return; }
+  keys.splice(to, 0, keys.splice(from, 1)[0]);
+  const next = {};
+  keys.forEach(k => { next[k] = groups[k]; });
+  cloudData.formConfig.customerTags.customerSourceGroups = next;
+  csgReset();
+  renderConfigContent();
+}
+function csgDragEnd() { csgReset(); }
+function csgReset() {
+  csgDragIndex = -1;
+  document.querySelectorAll('.csg-row').forEach(r => { r.style.opacity = ''; r.style.outline = ''; r.style.background = ''; });
+}
 
 // ===== 评级标准配置 编辑助手 =====
 function updateGradeLevel(i, field, value) {
@@ -8466,6 +8509,41 @@ function deleteGradeLevel(i) {
   if (!confirm('确定删除此级别吗>')) return;
   if (cloudData.formConfig.gradeConfig) cloudData.formConfig.gradeConfig.splice(i, 1);
   renderConfigContent();
+}
+// 评级标准配置:行拖拽排序(独立 handler,避免与 ct-* / m0g-* 互相干扰)
+let gcDragIndex = -1;
+function gcDragStart(e, i) {
+  gcDragIndex = i;
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', String(i)); } catch (_) {}
+  const row = e.target.closest('.gc-row');
+  if (row) row.style.opacity = '0.4';
+}
+function gcDragOver(e) {
+  if (gcDragIndex < 0) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.gc-row').forEach(r => { r.style.outline = ''; r.style.background = ''; });
+  const row = e.currentTarget;
+  row.style.outline = '2px dashed var(--primary)';
+  row.style.background = 'rgba(0,0,0,0.03)';
+}
+function gcDrop(e, i) {
+  e.preventDefault();
+  if (gcDragIndex < 0) { gcReset(); return; }
+  const arr = cloudData.formConfig.gradeConfig;
+  if (!arr) { gcReset(); return; }
+  const from = gcDragIndex, to = i;
+  if (from === to) { gcReset(); return; }
+  const item = arr.splice(from, 1)[0];
+  arr.splice(to, 0, item);
+  gcReset();
+  renderConfigContent();
+}
+function gcDragEnd() { gcReset(); }
+function gcReset() {
+  gcDragIndex = -1;
+  document.querySelectorAll('.gc-row').forEach(r => { r.style.opacity = ''; r.style.outline = ''; r.style.background = ''; });
 }
 
 // ===== 销售绩效配置 编辑助手 =====
@@ -8778,6 +8856,42 @@ function deleteHonorCfgItem(i) {
   arr.splice(i, 1);
   if (!arr.length) delete cloudData.honorRecords[ym];
   renderConfigContent();
+}
+// 荣誉激励:表格行拖拽排序(数据源 = cloudData.honorRecords[当前月份])
+let hcDragIndex = -1;
+function hcDragStart(e, i) {
+  hcDragIndex = i;
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', String(i)); } catch (_) {}
+  const row = e.target.closest('.hc-row');
+  if (row) row.style.opacity = '0.4';
+}
+function hcDragOver(e) {
+  if (hcDragIndex < 0) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.hc-row').forEach(r => { r.style.outline = ''; r.style.background = ''; });
+  const row = e.currentTarget;
+  row.style.outline = '2px dashed var(--primary)';
+  row.style.background = 'rgba(0,0,0,0.03)';
+}
+function hcDrop(e, i) {
+  e.preventDefault();
+  if (hcDragIndex < 0) { hcReset(); return; }
+  const ym = honorEffectiveMonth();
+  if (!/^\d{4}-\d{2}$/.test(ym)) { hcReset(); return; }
+  const arr = _ensureHonorBucket(ym);
+  const from = hcDragIndex, to = i;
+  if (from === to || !arr[from] || !arr[to]) { hcReset(); return; }
+  const item = arr.splice(from, 1)[0];
+  arr.splice(to, 0, item);
+  hcReset();
+  renderConfigContent();
+}
+function hcDragEnd() { hcReset(); }
+function hcReset() {
+  hcDragIndex = -1;
+  document.querySelectorAll('.hc-row').forEach(r => { r.style.opacity = ''; r.style.outline = ''; r.style.background = ''; });
 }
 
 // 下载评级标准配置 Excel 模板
