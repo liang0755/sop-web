@@ -859,8 +859,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260901161628';
-const APP_VERSION = '1.42.100'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260901165708';
+const APP_VERSION = '1.42.101'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -7919,10 +7919,11 @@ function renderConfigContent() {
     const lv = cloudData.formConfig.m0GradeConfig;
     c.innerHTML = `
       <h2 class="fc-panel-title">M0 评级配置</h2>
-      <p class="fc-panel-desc">配置 M0 评级看板的"评级标准"(仅级别名称,<b>无</b>升降级业绩要求),列表顺序即职级高低(从上到下由低到高),用于 M0 看板"评级"下拉与"升降级"自动判断(升级 / 降级 / 持平),修改后点击底部"保存配置"生效,</p>
+      <p class="fc-panel-desc">配置 M0 评级看板的"评级标准"(仅级别名称,<b>无</b>升降级业绩要求),列表顺序即职级高低(从上到下由低到高),用于 M0 看板"评级"下拉与"升降级"自动判断(升级 / 降级 / 持平),修改后点击底部"保存配置"生效。每行左侧的<b>点阵手柄</b>可按住拖动调整顺序,</p>
       <div class="fc-opt-list" id="m0GradeList">
         ${lv.map((g, i) => `
-          <div class="fc-opt-row">
+          <div class="fc-opt-row m0g-row" data-idx="${i}" ondragover="m0gDragOver(event)" ondrop="m0gDrop(event,${i})">
+            <span class="fc-grip" draggable="true" title="拖动排序" ondragstart="m0gDragStart(event,${i})" ondragend="m0gDragEnd(event)">${FC_GRIP}</span>
             <span class="fc-idx" style="width:auto;font-weight:600;color:var(--gray-700);white-space:nowrap">级别 ${i + 1}</span>
             <input type="text" class="fc-opt-input" style="max-width:260px" value="${g.name.replace(/"/g,'&quot;')}" onchange="updateM0GradeLevel(${i}, 'name', this.value)" placeholder="级别名称,如:中级M0">
             <div class="fc-opt-actions"><button class="fc-icon-btn danger" title="删除" onclick="deleteM0GradeLevel(${i})">🗑</button></div>
@@ -8551,6 +8552,41 @@ function deleteM0GradeLevel(i) {
   if (!confirm('确定删除此 M0 级别吗>')) return;
   if (cloudData.formConfig.m0GradeConfig) cloudData.formConfig.m0GradeConfig.splice(i, 1);
   renderConfigContent();
+}
+// M0 评级配置:行拖拽排序(与客户标签的 ct-* 同一套模式,独立 handler 避免与 customerTags 互相干扰)
+let m0gDragIndex = -1;
+function m0gDragStart(e, i) {
+  m0gDragIndex = i;
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', String(i)); } catch (_) {}
+  const row = e.target.closest('.m0g-row');
+  if (row) row.style.opacity = '0.4';
+}
+function m0gDragOver(e) {
+  if (m0gDragIndex < 0) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.m0g-row').forEach(r => { r.style.outline = ''; r.style.background = ''; });
+  const row = e.currentTarget;
+  row.style.outline = '2px dashed var(--primary)';
+  row.style.background = 'rgba(0,0,0,0.03)';
+}
+function m0gDrop(e, i) {
+  e.preventDefault();
+  if (m0gDragIndex < 0) { m0gReset(); return; }
+  const arr = cloudData.formConfig.m0GradeConfig;
+  if (!arr) { m0gReset(); return; }
+  const from = m0gDragIndex, to = i;
+  if (from === to) { m0gReset(); return; }
+  const item = arr.splice(from, 1)[0];
+  arr.splice(to, 0, item);
+  m0gReset();
+  renderConfigContent();
+}
+function m0gDragEnd() { m0gReset(); }
+function m0gReset() {
+  m0gDragIndex = -1;
+  document.querySelectorAll('.m0g-row').forEach(r => { r.style.opacity = ''; r.style.outline = ''; r.style.background = ''; });
 }
 // ===== M0 绩效配置 编辑助手 =====
 function getM0PerfConfig() {
