@@ -876,8 +876,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260903142317';
-const APP_VERSION = '1.42.105'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260903142836';
+const APP_VERSION = '1.42.106'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -13876,7 +13876,7 @@ function renderSalesBoardTable(tid, key) {
     rowsArr.sort((a, b) => b.t - a.t);
   }
   const userMap = key === 'salesperson' ? buildUserStatusMap() : null;
-  const teamTargets = key === 'team' ? sbTeamTargets(sbYearVal) : {};
+  const teamTargets = key === 'team' ? fcTeamMap('teamTargets', sbYearVal) : {};
   const nmInd = sbSortCol === 'name' ? (sbSortDir === 'asc' ? '▲' : '▼') : '↕';
   const nmAct = sbSortCol === 'name' ? ' active' : '';
   let h = `<thead><tr><th class="sort-th${nmAct}" style="cursor:pointer" onclick="sbSortBy('name', '${tid}')">${key === 'salesperson' ? '销售员' : '团队/门店'}<span class="sort-ind${nmAct}">${nmInd}</span></th>`;
@@ -14010,23 +14010,23 @@ h += '</tbody><tfoot><tr class="total-row"><td>合计</td>';
 }
 
 // ===== 团队月目标:设置 / 导入 / 导出 =====
-// v1.42.104:cloudData.formConfig 在云端配置拉取完成前为 null,统一走这里取值,
-// 避免冷缓存(首次登录 / 清过缓存)打开业绩看板时 renderTeamTargetEditor 直接抛错导致整页渲染中断
-function sbTeamTargets(year) {
+// v1.42.105:cloudData.formConfig 在云端配置拉取完成前为 null,统一走这里取「年-团队」映射
+// (teamTargets 团队月目标 / teamHeadcount 团队人数),避免冷缓存首次打开业绩看板时整页渲染中断
+function fcTeamMap(field, year) {
   const fc = cloudData.formConfig;
-  return (fc && fc.teamTargets && fc.teamTargets[year]) || {};
+  return (fc && fc[field] && fc[field][year]) || {};
 }
 function sbAllTeams(year) {
   const set = new Set();
   cloudData.salesRecords.forEach(r => { if ((r.docMonth || '').slice(0, 4) === year) set.add(r.team || '(未分类)'); });
-  const tg = sbTeamTargets(year);
+  const tg = fcTeamMap('teamTargets', year);
   Object.keys(tg).forEach(t => set.add(t));
   return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'));
 }
 
 function renderTeamTargetEditor(year) {
   sbTargetDraftYear = year;
-  const saved = sbTeamTargets(year);
+  const saved = fcTeamMap('teamTargets', year);
   sbTargetDraft = JSON.parse(JSON.stringify(saved));
   const teams = sbAllTeams(year);
   sbTargetTeams = teams;
@@ -14251,7 +14251,7 @@ function toggleSbHcSort(key) {
 
 function renderTeamHeadcountEditor(year) {
   sbHeadcountDraftYear = year;
-  const saved = (cloudData.formConfig.teamHeadcount && cloudData.formConfig.teamHeadcount[year]) || {};
+  const saved = fcTeamMap('teamHeadcount', year);
   sbHeadcountDraft = JSON.parse(JSON.stringify(saved));
   let teams = sbAllTeams(year); // 下方会被 sortRowsBy 重新赋值,必须 let
   sbHeadcountTeams = teams;
@@ -14399,7 +14399,7 @@ function renderSalesBoardTableEff(tid, key) {
     map[k][dm] = (map[k][dm] || 0) + toNum(r.amount);
   });
   const year = document.getElementById('sbYear') ? document.getElementById('sbYear').value : '';
-  const headcount = (key === 'team' && cloudData.formConfig.teamHeadcount && cloudData.formConfig.teamHeadcount[year]) || {};
+  const headcount = key === 'team' ? fcTeamMap('teamHeadcount', year) : {};
   let rowsArr = Object.keys(map).map(k => {
     const row = { k };
     let t = 0, hc = 0, sN = 0, sV = 0;
@@ -14477,7 +14477,7 @@ function exportSalesBoard3() {
   if (typeof XLSX === 'undefined') { showToast('表格组件未加载,请刷新页面', 'error'); return; }
   const year = document.getElementById('sbYear') ? document.getElementById('sbYear').value : new Date().getFullYear().toString();
   const months = sbMonthList();
-  const headcount = (cloudData.formConfig.teamHeadcount && cloudData.formConfig.teamHeadcount[year]) || {};
+  const headcount = fcTeamMap('teamHeadcount', year);
   const map = {};
   cloudData.salesRecords.forEach(r => { const dm = r.docMonth || ''; if (!months.includes(dm)) return; const k = r.team || '(未分类)'; if (!map[k]) map[k] = {}; map[k][dm] = (map[k][dm] || 0) + toNum(r.amount); });
   const rows = Object.keys(map).map(k => { let t = 0, hc = 0, sN = 0, sV = 0; months.forEach(m => { const v = map[k][m] || 0; const hcm = (headcount[k] && headcount[k][m.slice(5)]) || 0; t += v; hc += hcm; if (hcm > 0) { sN++; sV += v; } }); return { k, t, hc, sN, sV, eff: hc > 0 ? t / hc : 0 }; }).sort((a, b) => b.t - a.t);
