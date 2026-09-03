@@ -69,6 +69,18 @@ textarea.form-control{resize:vertical;min-height:60px}
 .perf-cell:hover{background:#eff6ff;outline:1px dashed var(--primary)}
 .perf-cell-empty{color:var(--gray-400);font-size:11px}
 .perf-cell-comment{display:block;white-space:pre-wrap;text-align:left;min-width:150px;font-size:12px;line-height:1.5}
+/* 客户汇总后三列「已改动·未保存」标记(v1.42.104) */
+.cs-tag-dirty{outline:2px dashed #f59e0b;outline-offset:-2px}
+.cs-cell-dirty{background:#fffbeb}
+.cs-dirty-flag{display:none}
+.cs-cell-dirty .cs-dirty-flag{display:block;font-size:10px;color:#b45309;font-weight:600;margin-top:2px;line-height:1.4}
+#csSaveBar{margin-top:12px;padding:11px 14px;border:1px solid #f59e0b;background:#fffbeb;border-radius:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+#csSaveBar.cs-savebar-idle{border-color:var(--gray-200);background:var(--gray-50)}
+#csSaveBar .cs-savebar-txt{font-size:13px;color:#92400e;line-height:1.6}
+#csSaveBar.cs-savebar-idle .cs-savebar-txt{color:var(--gray-400)}
+#csSaveBar .cs-savebar-txt b{color:#b45309}
+#csSaveBar .cs-savebar-sp{flex:1}
+#csSaveBar .btn{flex:0 1 auto}
 select.form-control{cursor:pointer}
 .card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
 .card-header{padding:16px 20px;border-bottom:1px solid var(--gray-200);display:flex;align-items:center;justify-content:space-between}
@@ -864,8 +876,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260903130941';
-const APP_VERSION = '1.42.103'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260903141239';
+const APP_VERSION = '1.42.104'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -12187,6 +12199,10 @@ let csSalesFilter = [];  // 客户汇总:按人员筛选(空=全部)
 let csSourceFilter = [];   // 客户汇总:按客户来源筛选(空=全部,多选)
 let csCategoryFilter = []; // 客户汇总:按品类筛选(空=全部,多选)
 let csProfileFilter = [];  // 客户汇总:按客户画像筛选(空=全部,多选)
+let csTagBuffer = {};      // 客户汇总后三列暂存(v1.42.104):{ aggKey: { customerSource|category|customerProfile: 新值 } };改后不写库,由表格底部「保存修改」统一提交
+let csTagOrig = {};        // 客户汇总后三列原值快照:{ aggKey: { field: 原值 } };改回原值即自动撤销该处暂存
+let csTagSaving = false;   // 客户汇总统一保存防重复点击锁
+let csTagWarnBound = false;// 是否已挂 beforeunload「有未保存修改」提醒
 
 // ===== 客户来源汇总 / 客户画像汇总 / 销售签约分析 的团队&人员筛选 =====
 // 团队筛选(空=全部);人员多选(空数组=全部)
@@ -13129,7 +13145,7 @@ function renderSalesBoardCustomer() {
         <label style="font-size:12px;color:var(--gray-500)">月份(可多选,默认上个月)</label>
         <div id="csMonthChips">${csMonthChipsHtml(csMonths)}</div>
       </div>
-          <div style="font-size:12px;color:var(--gray-500);margin-top:6px">💡 后三列(客户来源 / 品类 / 客户画像)为下拉框,选中后即时保存并着色,${hasPermission('salesDetail') ? '' : '(当前账号仅查看,无编辑权限)'}</div>
+          <div style="font-size:12px;color:var(--gray-500);margin-top:6px">💡 后三列(客户来源 / 品类 / 客户画像)为下拉框,选中后<b>先暂存</b>(橙色虚线 + ● 未保存,<b>不会立即写库</b>),全部改完点表格底部 <b>💾 保存修改</b> 统一提交;改回原值会自动撤销该处暂存,${hasPermission('salesDetail') ? '' : '(当前账号仅查看,无编辑权限)'}</div>
         </div>
         <div style="flex:1;min-width:260px;max-width:480px;background:var(--primary-light);border:1px solid var(--gray-200);border-radius:8px;padding:14px 16px">
           <div style="font-size:12px;color:var(--primary);font-weight:600;margin-bottom:8px">📌 说明</div>
@@ -13142,7 +13158,7 @@ function renderSalesBoardCustomer() {
         <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="csExportCustomerSummary()">📤 导出筛选结果</button>
         <button class="btn btn-outline btn-sm" onclick="showCsImportModal()">📥 导入回填</button>
       </div>
-      <div class="card-body"><div class="table-wrap" id="csTableWrap"></div><div id="csBatchBar" class="sticky-submit-bar" style="display:none"></div></div>
+      <div class="card-body"><div class="table-wrap" id="csTableWrap"></div><div id="csSaveBar" style="display:none"></div><div id="csBatchBar" class="sticky-submit-bar" style="display:none"></div><div id="csBatchSpacer" style="height:0"></div></div>
     </div>`;
   const yEl = document.getElementById('csYear'); if (yEl && !__fdDirty['csYear']) yEl.value = __fdYearValue('customerSummary.year', year);
   renderCustomerSummary();
@@ -13232,6 +13248,17 @@ function renderCustomerSummary() {
     if (!g.category && r.category) g.category = r.category;
     if (!g.customerProfile && r.customerProfile) g.customerProfile = r.customerProfile;
   });
+  // 后三列暂存(v1.42.104):先留原值快照,再把未保存的暂存值套用到聚合行,
+  // 使 表格显示 / 表头排序 / 「未填报」筛选 / 导出 四者与界面保持一致
+  Object.keys(groups).forEach(k => {
+    const g = groups[k];
+    g._orig = { customerSource: g.customerSource, category: g.category, customerProfile: g.customerProfile };
+    const buf = csTagBuffer[k];
+    if (!buf) return;
+    if (buf.customerSource !== undefined) g.customerSource = buf.customerSource;
+    if (buf.category !== undefined) g.category = buf.category;
+    if (buf.customerProfile !== undefined) g.customerProfile = buf.customerProfile;
+  });
   const defaultSort = (a, b) => (a.docMonth + a.salesperson + a.customer).localeCompare(b.docMonth + b.salesperson + b.customer);
   let rows;
   if (csSortState && csSortState.col) {
@@ -13270,23 +13297,26 @@ function renderCustomerSummary() {
   const pageRows = rows.slice(startIdx, startIdx + csPageSize);
   csPageRows = pageRows;
   const allSelOnPage = pageRows.length > 0 && pageRows.every(g => csSelectedKeys.has(g.docMonth + '|' + g.salesperson + '|' + g.customer));
-  const tagSelect = (group, aggKey, curVal) => {
+  // v1.42.104:返回完整 <td>;下拉框改动只写本地暂存,由底部「保存修改」统一提交
+  const tagSelect = (group, aggKey, curVal, origVal) => {
     const opts = (cfg[group] || []);
     const encKey = encodeURIComponent(aggKey);
     const styleBase = "width:100%;min-width:90px;padding:4px 8px;height:auto;font-size:13px";
     // 只认可表单配置内的值;真实数据值不再自动回填,也不在选项列表里出现
     const effectiveVal = curVal && opts.includes(curVal) ? curVal : '';
     const styleColor = effectiveVal ? csTagColorStyle(effectiveVal, opts) : '';
-    let h = `<select class="form-control cs-tag-select" data-group="${group}" style="${styleBase}${styleColor ? ';' + styleColor : ''}" ${canEdit ? '' : 'disabled'} onchange="saveCustomerTag('${group}','${encKey}',encodeURIComponent(this.value));csPaintTag(this)"><option value="">未设置</option>`;
+    const buf = csTagBuffer[aggKey] || {};
+    const dirty = buf[group] !== undefined;
+    let h = `<td class="${dirty ? 'cs-cell-dirty' : ''}"><select class="form-control cs-tag-select${dirty ? ' cs-tag-dirty' : ''}" data-group="${group}" data-key="${encKey}" data-orig="${esc(origVal === undefined || origVal === null ? '' : origVal)}" style="${styleBase}${styleColor ? ';' + styleColor : ''}" ${canEdit ? '' : 'disabled'} onchange="csStageTag(this);csPaintTag(this)"><option value="">未设置</option>`;
     opts.forEach(o => {
       const selected = (effectiveVal === o) ? 'selected' : '';
       h += `<option value="${esc(o)}" ${selected}>${esc(o)}</option>`;
     });
-    h += '</select>';
+    h += `</select><span class="cs-dirty-flag">● 未保存</span></td>`;
     return h;
   };
   const wrap = document.getElementById('csTableWrap');
-  if (!totalRows) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无匹配数据,请调整查询条件</div>'; updateCsBatchBar(0); return; }
+  if (!totalRows) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无匹配数据,请调整查询条件</div>'; updateCsBatchBar(0); updateCsSaveBar(); return; }
   const rowsHtml = pageRows.map((g, idx) => {
     const aggKey = g.docMonth + '|' + g.salesperson + '|' + g.customer;
     const checked = csSelectedKeys.has(aggKey) ? 'checked' : '';
@@ -13297,9 +13327,9 @@ function renderCustomerSummary() {
       <td>${esc(g.customer) || '-'}</td>
       <td class="num"><span style="color:${g.amount < 0 ? 'var(--danger)' : 'inherit'}">${fmtSalesMoney(g.amount)}</span></td>
       <td><span class="badge badge-team">${esc(g.team) || '-'}</span></td>
-      <td>${tagSelect('customerSource', aggKey, g.customerSource)}</td>
-      <td>${tagSelect('category', aggKey, g.category)}</td>
-      <td>${tagSelect('customerProfile', aggKey, g.customerProfile)}</td>
+      ${tagSelect('customerSource', aggKey, g.customerSource, g._orig ? g._orig.customerSource : g.customerSource)}
+      ${tagSelect('category', aggKey, g.category, g._orig ? g._orig.category : g.category)}
+      ${tagSelect('customerProfile', aggKey, g.customerProfile, g._orig ? g._orig.customerProfile : g.customerProfile)}
     </tr>`;
   }).join('');
   const pager = `
@@ -13320,6 +13350,7 @@ function renderCustomerSummary() {
   };
   wrap.innerHTML = `<table><thead><tr>${headCheck}${sortTh('docMonth','年/月')}${sortTh('salesperson','销售员')}<th>客户</th>${sortTh('amount','折后总金额','num')}${sortTh('team','销售员所属门店')}${sortTh('customerSource','客户来源')}${sortTh('category','品类')}${sortTh('customerProfile','客户画像')}</tr></thead><tbody>${rowsHtml}</tbody></table>${pager}`;
   updateCsBatchBar(totalRows);
+  updateCsSaveBar();
 }
 
 async function saveCustomerTag(group, encKey, encVal) {
@@ -13345,6 +13376,128 @@ async function saveCustomerTag(group, encKey, encVal) {
   if (salesBoardTab === 'signing') renderSalesBoardSigning();
   if (fail) showToast('已保存 ' + n + ' 条,' + fail + ' 条缺少存储键未写入', 'error', 2500);
   else showToast('已保存(' + n + ' 条明细)', 'success', 1500);
+}
+
+// ===== 客户汇总后三列:本地暂存 + 表格底部统一保存(v1.42.104) =====
+// 一个聚合组(年/月 × 销售员 × 客户)可对应多条 salesRecords 明细;
+// 暂存以聚合 key 为单位,点「保存修改」时再展开成明细逐条 PATCH。
+function csStageTag(sel) {
+  if (!sel) return;
+  const group = sel.dataset.group;
+  const key = decodeURIComponent(sel.dataset.key || '');
+  if (!group || !key) return;
+  if (!hasPermission('salesDetail')) { showToast('无编辑权限', 'error'); renderCustomerSummary(); return; }
+  const v = sel.value || '';
+  const o = sel.dataset.orig || '';
+  if (!csTagBuffer[key]) { csTagBuffer[key] = {}; csTagOrig[key] = {}; }
+  if (csTagOrig[key][group] === undefined) csTagOrig[key][group] = o;
+  if (v === (csTagOrig[key][group] || '')) delete csTagBuffer[key][group]; // 改回原值 → 自动撤销该处暂存
+  else csTagBuffer[key][group] = v;
+  if (!Object.keys(csTagBuffer[key]).length) { delete csTagBuffer[key]; delete csTagOrig[key]; }
+  // 就地更新标记(不整表重绘,避免下拉框失焦)
+  const dirty = (csTagBuffer[key] || {})[group] !== undefined;
+  sel.classList.toggle('cs-tag-dirty', dirty);
+  const td = sel.parentNode;
+  if (td && td.tagName === 'TD') td.classList.toggle('cs-cell-dirty', dirty);
+  updateCsSaveBar();
+}
+
+function csTagPendingCounts() {
+  let groups = 0, cells = 0;
+  Object.keys(csTagBuffer).forEach(k => { groups++; cells += Object.keys(csTagBuffer[k] || {}).length; });
+  return { groups: groups, cells: cells };
+}
+
+function updateCsSaveBar() {
+  const bar = document.getElementById('csSaveBar');
+  if (!bar) return;
+  const c = csTagPendingCounts();
+  const canEdit = hasPermission('salesDetail');
+  bar.style.display = '';
+  if (!c.cells) {
+    bar.className = 'cs-savebar-idle';
+    bar.innerHTML = `<span class="cs-savebar-txt">${canEdit ? '后三列(客户来源 / 品类 / 客户画像)改动会先暂存在这里,点「保存修改」一次性提交' : '当前账号仅查看,无编辑权限'}</span><span class="cs-savebar-sp"></span><button type="button" class="btn btn-outline btn-sm" disabled>↩ 撤销修改</button><button type="button" class="btn btn-primary btn-sm" disabled>💾 保存修改</button>`;
+  } else {
+    bar.className = '';
+    bar.innerHTML = `<span class="cs-savebar-txt">⚠️ 有 <b>${c.groups}</b> 组客户、共 <b>${c.cells}</b> 处修改<b>尚未保存</b>(仅存在本地,刷新或切换页面会丢失)</span><span class="cs-savebar-sp"></span><button type="button" class="btn btn-outline btn-sm" onclick="csDiscardTagEdits()">↩ 撤销修改</button><button type="button" class="btn btn-primary btn-sm" onclick="saveCustomerTagEdits()">💾 保存修改(${c.cells})</button>`;
+  }
+  csBindUnloadWarn(c.cells > 0);
+}
+
+function csBindUnloadWarn(on) {
+  if (on) {
+    if (!csTagWarnBound && typeof window.addEventListener === 'function') { csTagWarnBound = true; window.addEventListener('beforeunload', csUnloadWarn); }
+  } else if (csTagWarnBound) {
+    csTagWarnBound = false; window.removeEventListener('beforeunload', csUnloadWarn);
+  }
+}
+function csUnloadWarn(e) {
+  if (!csTagPendingCounts().cells) return;
+  e.preventDefault(); e.returnValue = ''; return '';
+}
+
+function csDiscardTagEdits() {
+  const c = csTagPendingCounts();
+  if (!c.cells) return;
+  if (!confirm('确定撤销这 ' + c.groups + ' 组客户、共 ' + c.cells + ' 处未保存的修改吗?')) return;
+  csTagBuffer = {}; csTagOrig = {};
+  renderCustomerSummary();
+  showToast('已撤销未保存的修改', 'success', 1800);
+}
+
+async function saveCustomerTagEdits() {
+  if (csTagSaving) return;
+  const c = csTagPendingCounts();
+  if (!c.cells) { showToast('没有需要保存的修改', 'error', 1800); return; }
+  if (!hasPermission('salesDetail')) { showToast('无编辑权限', 'error'); return; }
+  csTagSaving = true;
+  const bar = document.getElementById('csSaveBar');
+  const btn = bar ? bar.querySelector('.btn-primary') : null;
+  if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+  try {
+    // 展开:聚合组 → 对应全部明细记录,只写真正发生变化的字段
+    const tasks = [];
+    Object.keys(csTagBuffer).forEach(key => {
+      const patch = {};
+      Object.keys(csTagBuffer[key]).forEach(f => { patch[f] = csTagBuffer[key][f]; });
+      if (!Object.keys(patch).length) return;
+      const parts = key.split('|');
+      if (parts.length < 3) return;
+      const dm = parts[0], sp = parts[1], cust = parts[2];
+      cloudData.salesRecords.forEach(r => {
+        if (r.docMonth === dm && r.salesperson === sp && (r.customer || '') === cust) {
+          const real = {};
+          Object.keys(patch).forEach(f => { if ((r[f] || '') !== patch[f]) real[f] = patch[f]; });
+          if (Object.keys(real).length) tasks.push({ r: r, patch: real });
+        }
+      });
+    });
+    if (!tasks.length) {
+      csTagBuffer = {}; csTagOrig = {};
+      renderCustomerSummary();
+      showToast('内容未变化,无需保存', 'success', 1800);
+      return;
+    }
+    let n = 0, fail = 0;
+    for (const t of tasks) {
+      if (!t.r.id) { fail++; continue; }
+      try { await apiUpdate('salesRecords', t.r.id, t.patch); Object.assign(t.r, t.patch); n++; }
+      catch (e) { fail++; console.warn('saveCustomerTagEdits 写入失败:', t.r.id, e); }
+    }
+    csTagBuffer = {}; csTagOrig = {};
+    saveReportsCache();
+    renderCustomerSummary();
+    if (salesBoardTab === 'source') renderSalesBoardSource();
+    if (salesBoardTab === 'profile') renderSalesBoardProfile();
+    if (salesBoardTab === 'signing') renderSalesBoardSigning();
+    if (fail) showToast('已保存 ' + n + ' 条明细,' + fail + ' 条写入失败(请重试)', 'error', 3500);
+    else showToast('✅ 已保存 ' + c.groups + ' 组客户(' + n + ' 条明细)', 'success', 2200);
+  } catch (e) {
+    showToast('保存失败:' + (e && e.message ? e.message : e), 'error', 4000);
+  } finally {
+    csTagSaving = false;
+    updateCsSaveBar();
+  }
 }
 
 function lyMonth(mm) { const p = String(mm).split('-'); return (parseInt(p[0], 10) - 1) + '-' + p[1]; }
@@ -13389,6 +13542,9 @@ function updateCsBatchBar(totalRows) {
   const bar = document.getElementById('csBatchBar');
   if (!bar) return;
   const n = csSelectedKeys.size;
+  const sp = document.getElementById('csBatchSpacer');
+  // 批量栏是 fixed 底栏,出现时给页面底部留位,避免遮住表格最后几行与保存条
+  if (sp) sp.style.height = n ? '76px' : '0';
   if (!n) { bar.style.display = 'none'; return; }
   bar.style.display = 'flex';
   bar.innerHTML = `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
