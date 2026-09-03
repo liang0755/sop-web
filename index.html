@@ -876,8 +876,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260903142836';
-const APP_VERSION = '1.42.106'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260903144057';
+const APP_VERSION = '1.42.107'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -11376,23 +11376,40 @@ function getQuickDateRange(type){
   if (type === 'lastWeek') { const lastMonday = new Date(monday.getTime()-7*86400000); const lastSunday = new Date(monday.getTime()-1*86400000); return { start: ymd(lastMonday), end: ymd(lastSunday) }; }
   return { start: '', end: '' };
 }
-function applyVisitQuickDateFilter(type){
-  setVisitQuickDateActive(type||'');
-  if (!type) return;
-  const range = getQuickDateRange(type);
-  const startInput = document.getElementById('visitFStart');
-  const endInput = document.getElementById('visitFEnd');
-  if (startInput) startInput.value = range.start;
-  if (endInput) endInput.value = range.end;
-  resetVisitPage();
-}
-function setVisitQuickDateActive(type){
-  const wrap = document.getElementById('visitFQuickDateChips');
+// 通用快捷日期:拜访数据与业绩明细共用(v1.42.107)。type 空=全部(取消快捷选中;clearOnAll 时同时清空两个日期框)
+function setQuickDateChipsActive(chipsId, type){
+  const wrap = document.getElementById(chipsId);
   if (!wrap) return;
   wrap.querySelectorAll('.visit-quick-chip').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.type === (type||''));
   });
 }
+function applyQuickDateFilter(type, chipsId, startId, endId, afterFn, clearOnAll){
+  setQuickDateChipsActive(chipsId, type||'');
+  if (!type) {
+    if (clearOnAll) {
+      const s = document.getElementById(startId); if (s) s.value = '';
+      const e = document.getElementById(endId); if (e) e.value = '';
+    }
+    afterFn(); return;
+  }
+  const range = getQuickDateRange(type);
+  const startInput = document.getElementById(startId);
+  const endInput = document.getElementById(endId);
+  if (startInput) startInput.value = range.start;
+  if (endInput) endInput.value = range.end;
+  afterFn();
+}
+function applyVisitQuickDateFilter(type){
+  applyQuickDateFilter(type, 'visitFQuickDateChips', 'visitFStart', 'visitFEnd', () => resetVisitPage(), false);
+}
+function setVisitQuickDateActive(type){ setQuickDateChipsActive('visitFQuickDateChips', type); }
+// 业绩明细快捷日期:点击后要整页重渲染,active 状态存到 sdQuickDate 才不会丢
+function applySalesQuickDateFilter(type){
+  sdQuickDate = type || '';
+  applyQuickDateFilter(type, 'sdQuickDateChips', 'sfStart', 'sfEnd', () => applySalesFilters(), true);
+}
+function sdClearQuickDate(){ sdQuickDate = ''; }
 // 联系时间规范化:把 CSV 的 `2026/07/10 15:56` / `2026.07.10` / `2026年07月10日` 等统一成 `2026-07-10 15:56`
 // 解决斜杠格式导致日期筛选/排序/统计判断错误的问题(部分 CSV 直接以斜杠导出)
 function normContactTime(s){
@@ -11535,6 +11552,7 @@ function toNum(x) { if (x == null || x === '') return 0; if (typeof x === 'numbe
 let salesDetailPage = 1;
 let salesDetailPageSize = 20;
 let salesDetailFilters = { start:'', end:'', team:[], salesperson:[], customer:'', docType:[] };
+let sdQuickDate = ''; // 业绩明细当前选中的快捷日期类型(''=无/全部);applySalesFilters 会整页重渲染,active 得靠它恢复
 const selectedSalesIds = new Set();
 let sbSortState = {};          // 各看板独立排序状态:{ [tid]: { col: 'total'|'YYYY-MM', dir: 'asc'|'desc' } },避免看板间排序联动
 let sbLastYearTeamMap = {};    // 团队 -> { 'YYYY-MM': 金额 }(上一年,用于同比)
@@ -11977,8 +11995,9 @@ async function renderSalesDetail() {
     <div class="card-header"><h4>🔎 筛选</h4></div>
     <div class="card-body">
       <div class="filter-bar">
-        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="sfStart" value="${f.start}" onchange="applySalesFilters()"></div>
-        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="sfEnd" value="${f.end}" onchange="applySalesFilters()"></div>
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="sfStart" value="${f.start}" onchange="sdClearQuickDate();applySalesFilters()"></div>
+        <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="sfEnd" value="${f.end}" onchange="sdClearQuickDate();applySalesFilters()"></div>
+        <div class="form-group" style="min-width:380px"><label>快捷日期</label><div id="sdQuickDateChips" class="visit-quick-chips">${['','today','yesterday','thisWeek','lastWeek','thisMonth','lastMonth','thisYear'].map(t => `<button type="button" class="visit-quick-chip${sdQuickDate === t && t ? ' active' : ''}" data-type="${t}" onclick="applySalesQuickDateFilter('${t}')">${({'':'全部',today:'今天',yesterday:'昨天',thisWeek:'本周',lastWeek:'上周',thisMonth:'本月',lastMonth:'上月',thisYear:'今年'})[t]}</button>`).join('')}</div></div>
         ${multiSelectPanelHtml('sfTeam', {label:'部门 / 门店', options:teams, selected:f.team, placeholder:'全部', searchPlaceholder:'搜索门店', defaultKey:'salesDetail.team', onChange:function(arr){salesDetailFilters.team=arr; applySalesFilters();}})}
         ${multiSelectPanelHtml('sfSales', {label:'人员', options:sps, selected:f.salesperson, placeholder:'全部', searchPlaceholder:'搜索人员', defaultKey:'salesDetail.sales', onChange:function(arr){salesDetailFilters.salesperson=arr; applySalesFilters();}})}
         ${multiSelectPanelHtml('sfDocType', {label:'单据类别', options:docTypes, selected:f.docType, placeholder:'全部', searchPlaceholder:'搜索类别', defaultKey:'salesDetail.docType', onChange:function(arr){salesDetailFilters.docType=arr; applySalesFilters();}})}
@@ -12030,6 +12049,7 @@ function applySalesFilters() {
 }
 function resetSalesFilters() {
   salesDetailFilters = { start:'', end:'', team:[], salesperson:[], customer:'', docType:[] };
+  sdQuickDate = '';
   salesDetailPage = 1;
   renderSalesDetail();
 }
