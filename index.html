@@ -64,6 +64,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft Y
 .form-control:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
 .form-control:disabled{background:var(--gray-100);color:var(--gray-500)}
 textarea.form-control{resize:vertical;min-height:60px}
+/* 单月绩效看板「点击编辑」单元格(v1.42.103):完成输入后显示纯文本,点击临时变输入框 */
+.perf-cell{cursor:pointer;border-radius:4px;padding:2px 6px;display:inline-block;min-width:40px;line-height:1.6;transition:background .12s}
+.perf-cell:hover{background:#eff6ff;outline:1px dashed var(--primary)}
+.perf-cell-empty{color:var(--gray-400);font-size:11px}
+.perf-cell-comment{display:block;white-space:pre-wrap;text-align:left;min-width:150px;font-size:12px;line-height:1.5}
 select.form-control{cursor:pointer}
 .card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
 .card-header{padding:16px 20px;border-bottom:1px solid var(--gray-200);display:flex;align-items:center;justify-content:space-between}
@@ -859,8 +864,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260901173734';
-const APP_VERSION = '1.42.102'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260903130941';
+const APP_VERSION = '1.42.103'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -16120,6 +16125,82 @@ function computePerfScore(rec, cfg, year, sp, month) {
   return { itemScores, bonusScores, total, bonus, score };
 }
 
+// ===== 单月绩效看板「点击编辑」单元格(v1.42.103) =====
+// 需求:完成输入后不再常显输入框 —— 已填值的格子显示纯文本;点击临时变输入框,
+// 回车/失焦保存后回到纯文本;Esc 取消。空值显示灰色占位文字(如「描述」「评语」)。
+// 保存仍走原有 savePerfByKey / saveM0PerfByKey / saveMgrPerfByKey(PATCH 单字段,保存后整表重渲染)。
+// cast 口径与原 inline onchange 完全一致:float 空→0 / int 空→30 / score 空→null / str 原样。
+function perfCellHtml(o) {
+  const isComment = o.type === 'comment';
+  const rawVal = (o.val === undefined || o.val === null) ? '' : String(o.val);
+  const disp = (o.disp !== undefined && o.disp !== null) ? String(o.disp) : rawVal;
+  const st = o.style ? ` style="${o.style}"` : '';
+  if (isComment) {
+    return `<span class="perf-cell perf-cell-comment${disp ? '' : ' perf-cell-empty'}" data-save="${o.save}" data-field="${esc(o.field)}" data-cast="str" data-val="${esc(rawVal)}" data-k="${esc(o.k)}" onclick="perfCellEdit(this)"${st}>${disp ? esc(disp) : esc(o.ph || '评语')}</span>`;
+  }
+  return `<span class="perf-cell${disp ? '' : ' perf-cell-empty'}" data-save="${o.save}" data-field="${esc(o.field)}" data-cast="${o.cast || 'float'}" data-val="${esc(rawVal)}" data-extra="${o.extra ? esc(JSON.stringify(o.extra)) : ''}" data-w="${o.w || '90px'}" data-fs="${o.fs || ''}" data-k="${esc(o.k)}" onclick="perfCellEdit(this)"${st}>${disp ? esc(disp) : esc(o.ph || '点击填写')}</span>`;
+}
+function perfCellEdit(el) {
+  if (!el || el.dataset.editing === '1') return;
+  el.dataset.editing = '1';
+  const oldHtml = el.innerHTML;
+  const isComment = el.dataset.type === 'comment';
+  const cur = el.dataset.val || '';
+  el.classList.remove('perf-cell-empty');
+  el.innerHTML = '';
+  let inp;
+  if (isComment) {
+    inp = document.createElement('textarea');
+    inp.rows = 2;
+    inp.className = 'form-control form-control-sm';
+    inp.style.cssText = 'resize:vertical;min-height:40px;font-size:12px;width:100%';
+    inp.value = cur;
+  } else {
+    inp = document.createElement('input');
+    inp.type = el.dataset.cast === 'str' ? 'text' : 'number';
+    inp.className = 'form-control form-control-sm';
+    inp.style.cssText = 'text-align:center;width:' + (el.dataset.w || '90px') + (el.dataset.fs ? ';font-size:' + el.dataset.fs : '');
+    inp.value = cur;
+  }
+  el.appendChild(inp);
+  inp.focus();
+  if (isComment) inp.setSelectionRange(inp.value.length, inp.value.length); else inp.select();
+  let done = false;
+  const castVal = (v) => {
+    const s = (v === null || v === undefined) ? '' : String(v).trim();
+    switch (el.dataset.cast) {
+      case 'int':   return s === '' ? 30 : (parseInt(s, 10) || 30);
+      case 'float': return s === '' ? 0 : (parseFloat(s) || 0);
+      case 'score': return s === '' ? null : parseFloat(s);
+      default:      return s;
+    }
+  };
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    inp.removeEventListener('blur', onBlur);
+    inp.removeEventListener('keydown', onKey);
+    if (!save) { el.innerHTML = oldHtml; el.dataset.editing = ''; return; }
+    const v = String(inp.value === null || inp.value === undefined ? '' : inp.value).trim();
+    if (v === String(cur).trim()) { el.innerHTML = oldHtml; el.dataset.editing = ''; return; }  // 未改动不发请求
+    const payload = {};
+    payload[el.dataset.field] = castVal(v);
+    if (el.dataset.extra) { try { Object.assign(payload, JSON.parse(el.dataset.extra)); } catch (_) {} }
+    el.dataset.editing = '';
+    el.innerHTML = '<span style="font-size:11px;color:var(--gray-400)">保存中…</span>';
+    const fn = window[el.dataset.save];
+    if (typeof fn === 'function') fn(el.dataset.k, payload);
+    else { el.innerHTML = oldHtml; showToast('保存函数缺失:' + el.dataset.save, 'error'); }
+  };
+  function onBlur() { finish(true); }
+  function onKey(e) {
+    if (e.key === 'Enter' && (!isComment || !e.shiftKey)) { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  }
+  inp.addEventListener('blur', onBlur);
+  inp.addEventListener('keydown', onKey);
+}
+
 function savePerfByKey(key, patch) {
   if (!cloudData.performanceRecords) cloudData.performanceRecords = {};
   cloudData.performanceRecords[key] = Object.assign({}, cloudData.performanceRecords[key] || {}, patch);
@@ -16406,7 +16487,7 @@ function renderSalesPerf() {
           <button class="btn btn-success btn-sm" onclick="exportPerfSingleXlsx()">📥 导出Excel</button>
           `}
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明:矩阵展示每位在职销售每月的销售职级(联动销售评级看板)与绩效评分,评分按区间着色(<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>),' : '说明:单月绩效看板中,演示考核项的"完成情况"默认自动取自拜访数据"自拓演示"归类汇总(显示"自动",手动修改后点 ↺ 可重置回自动值);每行描述文字,考核要求,完成情况,加分次数,在职天数,总评均可单独编辑保存;[绩效评分]可手动修改(点 ↺ 重置为公式自动值);绩效评分(含各项封顶/总分封顶规则)与绩效基数由公式实时计算,"最终保存"可生成冻结快照,不受后续表单配置修改影响,'}</div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明:矩阵展示每位在职销售每月的销售职级(联动销售评级看板)与绩效评分,评分按区间着色(<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>),' : '说明:单月绩效看板中,演示考核项的"完成情况"默认自动取自拜访数据"自拓演示"归类汇总(显示"自动",手动修改后点 ↺ 可重置回自动值);每行描述文字,考核要求,完成情况,加分次数,在职天数,总评均可单独编辑保存(填完显示为纯文本,点击格子可再编辑,Esc 取消);[绩效评分]可手动修改(点 ↺ 重置为公式自动值);绩效评分(含各项封顶/总分封顶规则)与绩效基数由公式实时计算,"最终保存"可生成冻结快照,不受后续表单配置修改影响,'}</div>
         ${!isMatrix && perfViewSnapshot ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">📌 当前查看"最终保存"冻结快照${snapInfo}${snapExists ? ',不受表单配置修改影响;编辑已停用,' : ',但本月暂无快照数据,已回退为实时计算,'}点击"📷 返回实时"回到实时计算,</div>` : ''}
         <div class="table-wrap"><table id="perfTable" class="sticky-cols"></table></div>
         `}
@@ -16662,7 +16743,7 @@ function refreshPerfSingle() {
       // 要求列(所有考核项统一:描述 + 要求数值),演示考核与手动录入样式一致
       const stdCell = d.frozen
         ? `<div style="font-size:11px;margin-bottom:2px">${esc(x.text || '')}</div><div style="font-size:11px">要求 ${x.standard}</div>`
-        : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="savePerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="savePerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+        : `<div style="font-size:11px;margin-bottom:2px">${perfCellHtml({ k: k, save: 'savePerfByKey', field: 'text_' + ik, cast: 'str', val: x.text, ph: '描述', w: '96px', fs: '11px' })}</div>${perfCellHtml({ k: k, save: 'savePerfByKey', field: 'standard_' + ik, cast: 'float', val: x.standard, w: '70px' })}`;
       // 完成列
       let actCell;
       if (x.isAuto) {
@@ -16670,12 +16751,12 @@ function refreshPerfSingle() {
           actCell = `<div style="font-size:11px">${x.actual}</div>`;
         } else {
           const resetBtn = x.manual ? `<button class="btn btn-xs btn-outline" title="重置为自动(自拓演示)" onclick="savePerfByKey('${k}', {'manual_${ik}':false})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
-          actCell = `${resetBtn}<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:70px;margin-top:2px">`;
+          actCell = `<div>${resetBtn}</div>${perfCellHtml({ k: k, save: 'savePerfByKey', field: 'actual_' + ik, cast: 'float', val: x.actual, w: '70px', extra: { ['manual_' + ik]: true } })}`;
         }
       } else {
         actCell = d.frozen
           ? `<div style="font-size:11px">${x.actual}</div>`
-          : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="savePerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+          : perfCellHtml({ k: k, save: 'savePerfByKey', field: 'actual_' + ik, cast: 'float', val: x.actual, w: '70px' });
       }
       h += `<td style="background:#FFF8EE">${stdCell}</td>`;
       h += `<td style="background:#FFF8EE">${actCell}</td>`;
@@ -16686,14 +16767,14 @@ function refreshPerfSingle() {
         h += `<td style="text-align:center">${x.cnt}</td>`;
       } else {
         const bk = 'bonus_' + x.b.key;
-        h += `<td><input type="number" class="form-control form-control-sm" value="${x.cnt}" onchange="savePerfByKey('${k}', {'${bk}':parseFloat(this.value)||0})" style="width:60px"></td>`;
+        h += `<td>${perfCellHtml({ k: k, save: 'savePerfByKey', field: bk, cast: 'float', val: x.cnt, w: '60px' })}</td>`;
       }
     });
     // 在职天数
     if (d.frozen) {
       h += `<td style="text-align:center">${d.workingDays}</td>`;
     } else {
-      h += `<td><input type="number" class="form-control form-control-sm" value="${d.workingDays}" onchange="savePerfByKey('${k}', {workingDays:parseInt(this.value,10)||30})" style="width:70px"></td>`;
+      h += `<td>${perfCellHtml({ k: k, save: 'savePerfByKey', field: 'workingDays', cast: 'int', val: d.workingDays, w: '70px' })}</td>`;
     }
     // 当月销售职级
     h += `<td style="text-align:center">${d.level || '-'}</td>`;
@@ -16701,14 +16782,14 @@ function refreshPerfSingle() {
     if (d.frozen) {
       h += `<td style="white-space:pre-wrap">${esc(d.comment || '')}</td>`;
     } else {
-      h += `<td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;min-height:40px;font-size:12px;width:100%" onchange="savePerfByKey('${k}', {comment:this.value})" placeholder="评语">${esc(d.comment || '')}</textarea></td>`;
+      h += `<td>${perfCellHtml({ k: k, save: 'savePerfByKey', field: 'comment', val: d.comment, type: 'comment', ph: '评语' })}</td>`;
     }
     // 绩效评分(可手动修改,↺ 重置为公式自动值)
     if (d.frozen) {
       h += `<td style="text-align:center;color:${scoreColor(d.finalScore)};font-weight:700">${Number(d.finalScore).toFixed(2)}</td>`;
     } else {
       const resetBtn = isManualScore ? `<button class="btn btn-xs btn-outline" title="重置为公式自动值" onclick="savePerfByKey('${k}', {finalScore:null})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
-      h += `<td style="text-align:center">${resetBtn}<input type="number" class="form-control form-control-sm" value="${Number(d.finalScore).toFixed(2)}" onchange="savePerfByKey('${k}', {finalScore:this.value===''||this.value===null?null:parseFloat(this.value)})" style="width:90px;margin-top:2px;color:${scoreColor(d.finalScore)};font-weight:700"></td>`;
+      h += `<td style="text-align:center"><div>${resetBtn}</div>${perfCellHtml({ k: k, save: 'savePerfByKey', field: 'finalScore', cast: 'score', val: d.finalScore, disp: Number(d.finalScore).toFixed(2), w: '90px', style: `color:${scoreColor(d.finalScore)};font-weight:700` })}</td>`;
     }
     // 绩效基数
     h += `<td style="text-align:center">${fmtSalesMoney(d.base)}</td>`;
@@ -16960,7 +17041,7 @@ function renderM0Perf(mount) {
           <button class="btn btn-success btn-sm" onclick="exportM0PerfSingleXlsx()">📥 导出Excel</button>
           `}
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明:M0 绩效看板矩阵展示每位 M0 人员每月的 M0 职级(联动 M0 评级看板)与绩效评分,评分按区间着色(<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>),' : '说明:M0 单月绩效看板参考"销售单月绩效看板",考核项均为<b>手动录入</b>(不自动带入自拓演示),每行描述文字,考核要求,完成情况,加分次数,在职天数,总评均可单独编辑保存;[绩效评分]可手动修改(点 ↺ 重置为公式自动值);绩效基数,奖金由公式实时计算,"最终保存"可生成冻结快照,不受后续表单配置修改影响,'}</div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明:M0 绩效看板矩阵展示每位 M0 人员每月的 M0 职级(联动 M0 评级看板)与绩效评分,评分按区间着色(<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>),' : '说明:M0 单月绩效看板参考"销售单月绩效看板",考核项均为<b>手动录入</b>(不自动带入自拓演示),每行描述文字,考核要求,完成情况,加分次数,在职天数,总评均可单独编辑保存(填完显示为纯文本,点击格子可再编辑,Esc 取消);[绩效评分]可手动修改(点 ↺ 重置为公式自动值);绩效基数,奖金由公式实时计算,"最终保存"可生成冻结快照,不受后续表单配置修改影响,'}</div>
         ${!isMatrix && m0PerfViewSnapshot ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">📌 当前查看"最终保存"冻结快照${m0SnapInfo}${m0SnapExists ? ',不受表单配置修改影响;编辑已停用,' : ',但本月暂无快照数据,已回退为实时计算,'}点击"📷 返回实时"回到实时计算,</div>` : ''}
         ${!m0SpActiveList().length ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">⚠️ 尚未在"销售评级看板 → M0 计算范围"中配置任何 M0 分组,M0 绩效看板无数据可显示,</div>` : ''}
         <div class="table-wrap"><table id="m0PerfTable" class="sticky-cols"></table></div>`;
@@ -17175,16 +17256,16 @@ function refreshM0PerfSingle() {
       const it = x.it, ik = it.key;
       const stdCell = d.frozen
         ? `<div style="font-size:11px;margin-bottom:2px">${esc(x.text || '')}</div><div style="font-size:11px">要求 ${x.standard}</div>`
-        : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="saveM0PerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="saveM0PerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+        : `<div style="font-size:11px;margin-bottom:2px">${perfCellHtml({ k: k, save: 'saveM0PerfByKey', field: 'text_' + ik, cast: 'str', val: x.text, ph: '描述', w: '96px', fs: '11px' })}</div>${perfCellHtml({ k: k, save: 'saveM0PerfByKey', field: 'standard_' + ik, cast: 'float', val: x.standard, w: '70px' })}`;
       const actCell = (() => {
         if (x.isAuto) {
           if (d.frozen) return `<div style="font-size:11px">${x.actual}</div>`;
           const resetBtn = x.manual ? `<button class="btn btn-xs btn-outline" title="重置为自动(个人拜访量+陪访有效建联量)" onclick="saveM0PerfByKey('${k}', {'manual_${ik}':false})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
-          return `${resetBtn}<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveM0PerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:70px;margin-top:2px">`;
+          return `<div>${resetBtn}</div>${perfCellHtml({ k: k, save: 'saveM0PerfByKey', field: 'actual_' + ik, cast: 'float', val: x.actual, w: '70px', extra: { ['manual_' + ik]: true } })}`;
         }
         return d.frozen
           ? `<div style="font-size:11px">${x.actual}</div>`
-          : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveM0PerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:70px">`;
+          : perfCellHtml({ k: k, save: 'saveM0PerfByKey', field: 'actual_' + ik, cast: 'float', val: x.actual, w: '70px' });
       })();
       h += `<td style="background:#FFF8EE">${stdCell}</td>`;
       h += `<td style="background:#FFF8EE">${actCell}</td>`;
@@ -17195,25 +17276,25 @@ function refreshM0PerfSingle() {
         h += `<td style="text-align:center">${x.cnt}</td>`;
       } else {
         const bk = 'bonus_' + x.b.key;
-        h += `<td><input type="number" class="form-control form-control-sm" value="${x.cnt}" onchange="saveM0PerfByKey('${k}', {'${bk}':parseFloat(this.value)||0})" style="width:60px"></td>`;
+        h += `<td>${perfCellHtml({ k: k, save: 'saveM0PerfByKey', field: bk, cast: 'float', val: x.cnt, w: '60px' })}</td>`;
       }
     });
     if (d.frozen) {
       h += `<td style="text-align:center">${d.workingDays}</td>`;
     } else {
-      h += `<td><input type="number" class="form-control form-control-sm" value="${d.workingDays}" onchange="saveM0PerfByKey('${k}', {workingDays:parseInt(this.value,10)||30})" style="width:70px"></td>`;
+      h += `<td>${perfCellHtml({ k: k, save: 'saveM0PerfByKey', field: 'workingDays', cast: 'int', val: d.workingDays, w: '70px' })}</td>`;
     }
     h += `<td style="text-align:center">${d.level || '-'}</td>`;
     if (d.frozen) {
       h += `<td style="white-space:pre-wrap">${esc(d.comment || '')}</td>`;
     } else {
-      h += `<td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;min-height:40px;font-size:12px;width:100%" onchange="saveM0PerfByKey('${k}', {comment:this.value})" placeholder="评语">${esc(d.comment || '')}</textarea></td>`;
+      h += `<td>${perfCellHtml({ k: k, save: 'saveM0PerfByKey', field: 'comment', val: d.comment, type: 'comment', ph: '评语' })}</td>`;
     }
     if (d.frozen) {
       h += `<td class="drill-td" style="text-align:center;color:${scoreColor(d.finalScore)};font-weight:700;cursor:pointer" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(row.m0+' '+month+'月 绩效评分')}','${drillPut((rec0 && Object.keys(rec0).length) ? [rec0] : [])}')">${Number(d.finalScore).toFixed(2)}</td>`;
     } else {
       const resetBtn = isManualScore ? `<button class="btn btn-xs btn-outline" title="重置为公式自动值" onclick="saveM0PerfByKey('${k}', {finalScore:null})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
-      h += `<td style="text-align:center">${resetBtn}<input type="number" class="form-control form-control-sm" value="${Number(d.finalScore).toFixed(2)}" onchange="saveM0PerfByKey('${k}', {finalScore:this.value===''||this.value===null?null:parseFloat(this.value)})" style="width:90px;margin-top:2px;color:${scoreColor(d.finalScore)};font-weight:700"></td>`;
+      h += `<td style="text-align:center"><div>${resetBtn}</div>${perfCellHtml({ k: k, save: 'saveM0PerfByKey', field: 'finalScore', cast: 'score', val: d.finalScore, disp: Number(d.finalScore).toFixed(2), w: '90px', style: `color:${scoreColor(d.finalScore)};font-weight:700` })}</td>`;
     }
     h += `<td style="text-align:center">${fmtSalesMoney(d.base)}</td>`;
     const bonusMoney = (d.base || 0) * (d.finalScore || 0) / 100;
@@ -17614,7 +17695,7 @@ function renderMgrPerf() {
           <button class="btn btn-success btn-sm" onclick="exportMgrPerfSingleXlsx()">📥 导出Excel</button>
           `}
         </div>
-        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明:管理绩效矩阵展示每位管理者每月的绩效评分(管理者无职级之分),评分按区间着色(<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>),' : '说明:管理单月绩效看板参考"销售单月绩效看板",考核项均为<b>手动录入</b>(不自动带入自拓演示),每行描述文字,考核要求,完成情况,加分次数,在职天数,总评均可单独编辑保存;[绩效评分]可手动修改(点 ↺ 重置为公式自动值);绩效基数默认 5000(可在"表单配置 → 管理绩效配置"修改),奖金由公式实时计算,"最终保存"可生成冻结快照,不受后续表单配置修改影响,'}</div>
+        <div style="font-size:12px;color:var(--gray-500);margin:6px 0 14px">${isMatrix ? '说明:管理绩效矩阵展示每位管理者每月的绩效评分(管理者无职级之分),评分按区间着色(<span style="color:#dc2626">红&lt;60</span> / <span style="color:#d97706">黄60-90</span> / <span style="color:#16a34a">绿≥90</span>),' : '说明:管理单月绩效看板参考"销售单月绩效看板",考核项均为<b>手动录入</b>(不自动带入自拓演示),每行描述文字,考核要求,完成情况,加分次数,在职天数,总评均可单独编辑保存(填完显示为纯文本,点击格子可再编辑,Esc 取消);[绩效评分]可手动修改(点 ↺ 重置为公式自动值);绩效基数默认 5000(可在"表单配置 → 管理绩效配置"修改),奖金由公式实时计算,"最终保存"可生成冻结快照,不受后续表单配置修改影响,'}</div>
         ${!isMatrix && mgrPerfViewSnapshot ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">📌 当前查看"最终保存"冻结快照${snapInfo}${snapExists ? ',不受表单配置修改影响;编辑已停用,' : ',但本月暂无快照数据,已回退为实时计算,'}点击"📷 返回实时"回到实时计算,</div>` : ''}
         ${!mgrSpActiveList().length ? `<div style="background:#FFF8EE;border:1px solid #f5c97a;color:#9a6700;font-size:12px;padding:8px 12px;border-radius:6px;margin-bottom:12px">⚠️ 当前系统中暂无"管理者(manager)"角色且在职的用户,管理绩效看板无数据可显示,请在"用户管理"中将相关人员设置为管理者角色,</div>` : ''}
         <div class="table-wrap"><table id="mgrPerfTable" class="sticky-cols"></table></div>
@@ -18177,19 +18258,19 @@ function refreshMgrPerfSingle() {
       const it = x.it, ik = it.key;
       const stdCell = d.frozen
         ? `<div style="font-size:11px;margin-bottom:2px">${esc(x.text || '')}</div><div style="font-size:11px">要求 ${x.standard}</div>`
-        : `<div style="font-size:11px;margin-bottom:2px"><input type="text" class="form-control form-control-sm" value="${esc(x.text || '')}" onchange="saveMgrPerfByKey('${k}', {'text_${ik}':this.value})" style="width:96px;font-size:11px" placeholder="描述"></div><input type="number" class="form-control form-control-sm" value="${x.standard}" onchange="saveMgrPerfByKey('${k}', {'standard_${ik}':parseFloat(this.value)||0})" style="width:120px">${x.isAuto ? '<div style="font-size:10px;color:var(--gray-400);margin-top:2px">自动取团队目标</div>' : ''}`;
+        : `<div style="font-size:11px;margin-bottom:2px">${perfCellHtml({ k: k, save: 'saveMgrPerfByKey', field: 'text_' + ik, cast: 'str', val: x.text, ph: '描述', w: '96px', fs: '11px' })}</div>${perfCellHtml({ k: k, save: 'saveMgrPerfByKey', field: 'standard_' + ik, cast: 'float', val: x.standard, w: '120px' })}${x.isAuto ? '<div style="font-size:10px;color:var(--gray-400);margin-top:2px">自动取团队目标</div>' : ''}`;
       let actCell;
       if (x.isAuto) {
         if (d.frozen) {
           actCell = `<div style="font-size:11px">${x.actual}</div>`;
         } else {
           const resetBtn = x.manual ? `<button class="btn btn-xs btn-outline" title="重置为自动(团队业绩)" onclick="saveMgrPerfByKey('${k}', {'manual_${ik}':false})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
-          actCell = `${resetBtn}<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveMgrPerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0, 'manual_${ik}':true})" style="width:120px;margin-top:2px">`;
+          actCell = `<div>${resetBtn}</div>${perfCellHtml({ k: k, save: 'saveMgrPerfByKey', field: 'actual_' + ik, cast: 'float', val: x.actual, w: '120px', extra: { ['manual_' + ik]: true } })}`;
         }
       } else {
         actCell = d.frozen
           ? `<div style="font-size:11px">${x.actual}</div>`
-          : `<input type="number" class="form-control form-control-sm" value="${x.actual}" onchange="saveMgrPerfByKey('${k}', {'actual_${ik}':parseFloat(this.value)||0})" style="width:120px">`;
+          : perfCellHtml({ k: k, save: 'saveMgrPerfByKey', field: 'actual_' + ik, cast: 'float', val: x.actual, w: '120px' });
       }
       h += `<td style="background:#FFF8EE">${stdCell}</td>`;
       h += `<td style="background:#FFF8EE">${actCell}</td>`;
@@ -18200,24 +18281,24 @@ function refreshMgrPerfSingle() {
         h += `<td style="text-align:center">${x.cnt}</td>`;
       } else {
         const bk = 'bonus_' + x.b.key;
-        h += `<td><input type="number" class="form-control form-control-sm" value="${x.cnt}" onchange="saveMgrPerfByKey('${k}', {'${bk}':parseFloat(this.value)||0})" style="width:60px"></td>`;
+        h += `<td>${perfCellHtml({ k: k, save: 'saveMgrPerfByKey', field: bk, cast: 'float', val: x.cnt, w: '60px' })}</td>`;
       }
     });
     if (d.frozen) {
       h += `<td style="text-align:center">${d.workingDays}</td>`;
     } else {
-      h += `<td><input type="number" class="form-control form-control-sm" value="${d.workingDays}" onchange="saveMgrPerfByKey('${k}', {workingDays:parseInt(this.value,10)||30})" style="width:70px"></td>`;
+      h += `<td>${perfCellHtml({ k: k, save: 'saveMgrPerfByKey', field: 'workingDays', cast: 'int', val: d.workingDays, w: '70px' })}</td>`;
     }
     if (d.frozen) {
       h += `<td style="white-space:pre-wrap">${esc(d.comment || '')}</td>`;
     } else {
-      h += `<td><textarea class="form-control form-control-sm" rows="2" style="resize:vertical;min-height:40px;font-size:12px;width:100%" onchange="saveMgrPerfByKey('${k}', {comment:this.value})" placeholder="评语">${esc(d.comment || '')}</textarea></td>`;
+      h += `<td>${perfCellHtml({ k: k, save: 'saveMgrPerfByKey', field: 'comment', val: d.comment, type: 'comment', ph: '评语' })}</td>`;
     }
     if (d.frozen) {
       h += `<td style="text-align:center;color:${scoreColor(d.finalScore)};font-weight:700">${Number(d.finalScore).toFixed(2)}</td>`;
     } else {
       const resetBtn = isManualScore ? `<button class="btn btn-xs btn-outline" title="重置为公式自动值" onclick="saveMgrPerfByKey('${k}', {finalScore:null})">↺</button>` : `<span style="font-size:10px;color:var(--gray-400)">自动</span>`;
-      h += `<td style="text-align:center">${resetBtn}<input type="number" class="form-control form-control-sm" value="${Number(d.finalScore).toFixed(2)}" onchange="saveMgrPerfByKey('${k}', {finalScore:this.value===''||this.value===null?null:parseFloat(this.value)})" style="width:90px;margin-top:2px;color:${scoreColor(d.finalScore)};font-weight:700"></td>`;
+      h += `<td style="text-align:center"><div>${resetBtn}</div>${perfCellHtml({ k: k, save: 'saveMgrPerfByKey', field: 'finalScore', cast: 'score', val: d.finalScore, disp: Number(d.finalScore).toFixed(2), w: '90px', style: `color:${scoreColor(d.finalScore)};font-weight:700` })}</td>`;
     }
     h += `<td style="text-align:center">${fmtSalesMoney(d.base)}</td>`;
     const bonusMoney = (d.base || 0) * (d.finalScore || 0) / 100;
