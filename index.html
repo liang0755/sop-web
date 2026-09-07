@@ -876,8 +876,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260907115338';
-const APP_VERSION = '1.42.108'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260907121006';
+const APP_VERSION = '1.42.109'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -9072,6 +9072,7 @@ let visitStatsPersonFilter = [];  // 个人拜访类型统计:人员多选筛选
 let visitDeptFilter = [];     // 拜访数据:部门多选筛选
 let visitPersonFilter = [];  // 拜访数据:人员多选筛选
 let visitResultFilter = [];  // 拜访数据:拜访结果多选筛选
+let visitOnlyBlank = false;  // 拜访数据:「未填写结果」开关:true=只显示 visitResult 为空的记录(v1.42.109)
 
 // Lazy-load visit records for managers who didn't get them during initial load
 async function ensureVisitDataLoaded() {
@@ -9125,6 +9126,13 @@ async function renderVisitData() {
         ${multiSelectPanelHtml('visitDept', {label:'部门', options:depts, selected:visitDeptFilter, placeholder:'全部部门', defaultKey:'visit.dept', onChange:function(arr){ visitDeptFilter = arr; resetVisitPage(); }})}
         ${multiSelectPanelHtml('visitPerson', {label:'销售', options:persons, selected:visitPersonFilter, placeholder:'全部人员', defaultKey:'visit.person', onChange:function(arr){ visitPersonFilter = arr; resetVisitPage(); }})}
         ${multiSelectPanelHtml('visitResult', {label:'拜访结果', options:[...(vc.visitResults||[]).map(r=>({v:r,label:r})), {v:'empty',label:'⚠️ 未填写结果'}, {v:'filled',label:'已填写结果'}], selected:visitResultFilter, placeholder:'全部结果', defaultKey:'visit.result', onChange:function(arr){ visitResultFilter = arr; resetVisitPage(); }})}
+        <div class="cs-switch-wrap">
+          <label class="cs-switch" title="只显示「拜访结果」为空(未填写)的拜访记录">
+            <input type="checkbox" id="visitOnlyBlank" ${visitOnlyBlank ? 'checked' : ''} onchange="visitToggleBlank(this.checked)">
+            <span class="cs-switch-track"><span class="cs-switch-thumb"></span></span>
+            <span class="cs-switch-label">未填写结果</span>
+          </label>
+        </div>
         <div class="form-group" style="min-width:440px"><label>快捷筛选</label><div id="visitFQuickDateChips" class="visit-quick-chips"><button type="button" class="visit-quick-chip" data-type="" onclick="applyVisitQuickDateFilter('')">全部</button><button type="button" class="visit-quick-chip" data-type="today" onclick="applyVisitQuickDateFilter('today')">今天</button><button type="button" class="visit-quick-chip" data-type="yesterday" onclick="applyVisitQuickDateFilter('yesterday')">昨天</button><button type="button" class="visit-quick-chip" data-type="thisWeek" onclick="applyVisitQuickDateFilter('thisWeek')">本周</button><button type="button" class="visit-quick-chip" data-type="lastWeek" onclick="applyVisitQuickDateFilter('lastWeek')">上周</button><button type="button" class="visit-quick-chip" data-type="thisMonth" onclick="applyVisitQuickDateFilter('thisMonth')">本月</button><button type="button" class="visit-quick-chip" data-type="lastMonth" onclick="applyVisitQuickDateFilter('lastMonth')">上月</button><button type="button" class="visit-quick-chip" data-type="thisYear" onclick="applyVisitQuickDateFilter('thisYear')">今年</button></div></div>
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}" onchange="setVisitQuickDateActive('')"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}" onchange="setVisitQuickDateActive('')"></div>
@@ -9194,6 +9202,8 @@ function renderVisitTable() {
   if (fDeptSel.length) records = records.filter(r => fDeptSel.some(d => normDeptKey(r.department) === normDeptKey(d)));
   if (fPersonSel.length) records = records.filter(r => fPersonSel.indexOf(r.employee) >= 0);
   if (fResultSel.length) records = records.filter(r => fResultSel.some(f => f==='empty' ? !r.visitResult : f==='filled' ? !!r.visitResult : (r.visitResult||'')===f));
+  // v1.42.109「未填写结果」开关:用有效值判断(编辑缓冲优先),保证改了但没保存时与页面显示一致
+  if (visitOnlyBlank) records = records.filter(r => !visitEffVal(r, 'visitResult'));
   // 统一走表头排序(默认 contactTime 倒序,与历史行为一致)
   records = sortVisitRecords(records);
   const total = records.length;
@@ -9378,6 +9388,8 @@ function resetVisitPage() {
   visitCurrentPage = 1;
   renderVisitTable();
 }
+// v1.42.109:「未填写结果」开关 —— 只看 visitResult 为空的拜访记录
+function visitToggleBlank(on) { visitOnlyBlank = !!on; resetVisitPage(); }
 
 function onVisitEdit(recordId, field, value) {
   if (!visitEditBuffer[recordId]) visitEditBuffer[recordId] = {};
@@ -10940,6 +10952,7 @@ function exportVisitData() {
   if (fDeptSel.length) records = records.filter(r => fDeptSel.some(d => normDeptKey(r.department) === normDeptKey(d)));
   if (fPersonSel.length) records = records.filter(r => fPersonSel.indexOf(r.employee) >= 0);
   if (fResultSel.length) records = records.filter(r => fResultSel.some(f => f==='empty' ? !r.visitResult : f==='filled' ? !!r.visitResult : (r.visitResult||'')===f));
+  if (visitOnlyBlank) records = records.filter(r => !visitEffVal(r, 'visitResult')); // v1.42.109:导出跟随「未填写结果」开关
   if (!records.length) { showToast('当前筛选条件下没有可导出的拜访数据', 'warning'); return; }
   // 跟随页面当前表头排序
   records = sortVisitRecords(records);
