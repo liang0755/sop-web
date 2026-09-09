@@ -873,10 +873,11 @@ tr:hover td{background:var(--bg-hover)}
 .progress.warn > i{background:linear-gradient(90deg,#fbbf24,var(--warning))}
 .progress.bad > i{background:linear-gradient(90deg,#f87171,var(--danger))}
 /* 空状态 / 骨架屏 */
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 20px;text-align:center}
-.empty .ill{font-size:40px;line-height:1;margin-bottom:14px;opacity:.55}
-.empty h5{font-size:15px;color:var(--text-1);margin-bottom:6px}
-.empty p{font-size:13px;color:var(--text-3);max-width:340px;line-height:1.7}
+/* 空状态组件:命名 empty-box,不能用裸 .empty —— 漏交日历的占位格就是 .missed-cal-cell.empty,裸 .empty 的 48px 内边距会把格子撑爆(1.42.114 修复) */
+.empty-box{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 20px;text-align:center}
+.empty-box .ill{font-size:40px;line-height:1;margin-bottom:14px;opacity:.55}
+.empty-box h5{font-size:15px;color:var(--text-1);margin-bottom:6px}
+.empty-box p{font-size:13px;color:var(--text-3);max-width:340px;line-height:1.7}
 .skeleton{background:linear-gradient(90deg,var(--gray-100) 25%,var(--gray-50) 37%,var(--gray-100) 63%);background-size:400% 100%;animation:sk 1.4s ease infinite;border-radius:var(--r-sm)}
 @keyframes sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
 .sk-line{height:12px;margin-bottom:8px}
@@ -927,6 +928,12 @@ tr:hover td{background:var(--bg-hover)}
   .stat-card .stat-value{font-size:26px;letter-spacing:-.4px;font-family:var(--font-num);line-height:1.15}
   .stat-card .stat-label{font-size:12px;color:var(--text-3);margin-top:6px}
   .dash-new-card{padding:18px}
+  /* 漏交日历:原 aspect-ratio:1 铺满卡宽,格子被撑到 ~46px、整卡高 ~400px,与旁边销冠卡严重失衡;
+     改为紧凑小格:格高 28、整历限宽 244 居中,卡高回落到 ~300px */
+  .missed-cal-grid{width:244px;max-width:100%;margin:0 auto;gap:3px}
+  .missed-cal-h{font-size:11px;padding:3px 0}
+  .missed-cal-cell{height:28px;font-size:12px;aspect-ratio:auto;border-radius:6px}
+  .missed-cal-cell.missed{font-size:13px}
   /* 表格密度：行高收紧到 ~40，表头 12.5 */
   table{font-size:13px}
   th{padding:9px 14px;font-size:12.5px}
@@ -984,6 +991,11 @@ tr:hover td{background:var(--bg-hover)}
   .fc-opt-input,.modal input,.modal select,.modal textarea{font-size:16px}
   /* 空状态与骨架屏收紧 */
   .empty-state{padding:36px 16px}
+  /* 漏交日历紧凑化(与桌面一致) */
+  .missed-cal-grid{width:244px;max-width:100%;margin:0 auto;gap:3px}
+  .missed-cal-h{font-size:11px;padding:3px 0}
+  .missed-cal-cell{height:28px;font-size:12px;aspect-ratio:auto;border-radius:6px}
+  .missed-cal-cell.missed{font-size:13px}
 }
 @media (max-width:400px){
   .stat-grid{grid-template-columns:1fr}
@@ -1187,8 +1199,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260909174401';
-const APP_VERSION = '1.42.113'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260909184113';
+const APP_VERSION = '1.42.114'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
