@@ -907,33 +907,87 @@ tr:hover td{background:var(--bg-hover)}
 .empty-state .es-desc{font-size:13px;color:var(--text-3);max-width:360px;line-height:1.7}
 .empty-state .es-actions{margin-top:16px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 
-/* ===== 排版系统 v3 · Layout First =====
-   栅格 16 / 内容区 32 / 卡片 20 / 区块 24 / 字阶 20·15·13.5·12·26 / 表格行高 ~40 */
-body{font-size:13.5px}
-.content-body{padding:24px 32px 40px}
-/* 页头：面包屑 12 + 标题 20 */
-.top-bar h3{font-size:20px;line-height:1.4;letter-spacing:.1px}
-.pg-crumb{font-size:12px;line-height:1.4;color:var(--text-3);margin-bottom:1px}
-/* 卡片与区块节奏 */
-.card + .card{margin-top:16px}
-.card-header h4{font-size:15px}
-.card-body{padding:20px}
-/* KPI：图标 34 / 数值 26 / 标签 12，四卡等高 */
-.stat-grid{grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:16px;margin-bottom:24px}
-.stat-card{padding:18px 20px}
-.stat-card .stat-icon{width:34px;height:34px;border-radius:9px;font-size:17px;margin-bottom:10px}
-.stat-card .stat-value{font-size:26px;letter-spacing:-.4px;font-family:var(--font-num);line-height:1.15}
-.stat-card .stat-label{font-size:12px;color:var(--text-3);margin-top:6px}
-.dash-new-card{padding:18px}
-/* 表格密度：行高收紧到 ~40，表头 12.5 */
-table{font-size:13px}
-th{padding:9px 14px;font-size:12.5px}
-tbody td{padding:9px 14px;line-height:1.5}
-.dw-grid table th,.dw-grid table td{padding:6px 8px}
-/* 筛选栏：栅格间距统一 16，标签基线统一 */
-.filter-bar{gap:12px 16px;margin-bottom:16px}
-.filter-bar .form-group{min-width:150px}
-.filter-bar .form-group > label{margin-bottom:6px;display:block}
+/* ===== 排版系统 v3 · Layout First（桌面 ≥769px）=====
+   栅格 16 / 内容区 32 / 卡片 20 / 区块 24 / 字阶 20·15·13.5·12·26 / 表格行高 ~40
+   注意：必须限定 min-width:769px，否则会覆盖上面已有的 @media(max-width:768px) 移动端规则 */
+@media (min-width:769px){
+  body{font-size:13.5px}
+  .content-body{padding:24px 32px 40px}
+  /* 页头：面包屑 12 + 标题 20 */
+  .top-bar h3{font-size:20px;line-height:1.4;letter-spacing:.1px}
+  .pg-crumb{font-size:12px;line-height:1.4;color:var(--text-3);margin-bottom:1px}
+  /* 卡片与区块节奏 */
+  .card + .card{margin-top:16px}
+  .card-header h4{font-size:15px}
+  .card-body{padding:20px}
+  /* KPI：图标 34 / 数值 26 / 标签 12，四卡等高 */
+  .stat-grid{grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:16px;margin-bottom:24px}
+  .stat-card{padding:18px 20px}
+  .stat-card .stat-icon{width:34px;height:34px;border-radius:9px;font-size:17px;margin-bottom:10px}
+  .stat-card .stat-value{font-size:26px;letter-spacing:-.4px;font-family:var(--font-num);line-height:1.15}
+  .stat-card .stat-label{font-size:12px;color:var(--text-3);margin-top:6px}
+  .dash-new-card{padding:18px}
+  /* 表格密度：行高收紧到 ~40，表头 12.5 */
+  table{font-size:13px}
+  th{padding:9px 14px;font-size:12.5px}
+  tbody td{padding:9px 14px;line-height:1.5}
+  .dw-grid table th,.dw-grid table td{padding:6px 8px}
+  /* 筛选栏：栅格间距统一 16，标签基线统一 */
+  .filter-bar{gap:12px 16px;margin-bottom:16px}
+  .filter-bar .form-group{min-width:150px}
+  .filter-bar .form-group > label{margin-bottom:6px;display:block}
+}
+
+/* ===== 排版系统 v3 · 移动端 ≤768px ===== */
+@media (max-width:768px){
+  /* 留白层级：外 16 / 卡片 14 / 卡片间距 12 */
+  .content-body{padding:16px 12px calc(20px + env(safe-area-inset-bottom,0px))}
+  .card-body{padding:14px}
+  .card + .card{margin-top:12px}
+  /* 页头：隐藏面包屑省高度，标题单行截断 */
+  .top-bar{padding:10px 14px 10px 58px}
+  .pg-crumb{display:none}
+  .top-bar h3{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* KPI：小屏两列，数值 20，图标 30 */
+  .stat-grid{grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px}
+  .stat-card{padding:12px}
+  .stat-card .stat-value{font-size:20px}
+  .stat-card .stat-icon{width:30px;height:30px;font-size:15px;margin-bottom:6px}
+  .stat-card .stat-label{font-size:11px}
+  /* 筛选栏：字段整行，操作按钮并排两枚（不再各占一行） */
+  .filter-bar{flex-direction:row;flex-wrap:wrap;gap:10px 12px;align-items:flex-end;margin-bottom:12px}
+  .filter-bar .form-group{width:100%!important;min-width:100%!important}
+  .filter-bar > .btn{width:auto!important;flex:1 1 calc(50% - 6px);min-height:38px}
+  .filter-bar > .btn:only-child{flex:1 1 100%}
+  /* 按钮被 form-group 包一层时(拜访数据/业绩明细等),让这些 form-group 并排,
+     3 个 → 各 33%,2 个 → 各 50%,省掉整行堆叠浪费的纵向空间 */
+  @supports selector(:has(*)){
+    /* 只放了一个按钮的 form-group:缩小并与相邻按钮组并排(basis 0,避免 33% 加间隙溢出被逐个换行) */
+    .filter-bar .form-group:has(> .btn):not(:has(> .btn ~ .btn)){width:auto!important;min-width:92px!important;flex:1 1 0}
+    .filter-bar .form-group:has(> .btn):not(:has(> .btn ~ .btn)) > .btn{width:100%;min-height:38px}
+    /* 一个 form-group 里放了多个按钮(如拜访数据「上传CSV/下载模板/清理重复」):整组占满,组内按钮并排 */
+    .filter-bar .form-group:has(> .btn ~ .btn){width:100%!important;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .filter-bar .form-group:has(> .btn ~ .btn) > label{width:100%;flex:0 0 100%}
+    .filter-bar .form-group:has(> .btn ~ .btn) > .btn{flex:1 1 0;min-width:92px;min-height:38px;width:auto}
+  }
+  /* 触控目标：chip 32 / 分页 38 */
+  .chip,.visit-quick-chip,.month-chip{min-height:32px;padding:0 14px;font-size:13px}
+  .pager .btn{min-height:38px}
+  /* 表格：行高放大到便于点按，回弹滚动 */
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  th,td{padding:10px 12px;font-size:12.5px}
+  /* 侧栏抽屉 80vw，避开底部安全区 */
+  .sidebar{width:min(80vw,300px);padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  /* 底部提交条与内容避开 iPhone 手势条 */
+  .sticky-submit-bar{padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  /* 16px 输入字号，避免 iOS 聚焦时整页自动放大 */
+  .fc-opt-input,.modal input,.modal select,.modal textarea{font-size:16px}
+  /* 空状态与骨架屏收紧 */
+  .empty-state{padding:36px 16px}
+}
+@media (max-width:400px){
+  .stat-grid{grid-template-columns:1fr}
+}
 
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.01ms !important;transition-duration:.01ms !important}
@@ -1133,8 +1187,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260909172221';
-const APP_VERSION = '1.42.112'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260909174401';
+const APP_VERSION = '1.42.113'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
