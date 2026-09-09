@@ -892,6 +892,21 @@ tr:hover td{background:var(--bg-hover)}
 /* 保存条：沿用客户汇总既有实现，统一到新令牌 */
 #csSaveBar{border-radius:var(--r-md);border-color:var(--warning);background:var(--warning-light)}
 
+/* --- 侧栏可折叠分组 --- */
+.nav-group{margin-bottom:2px}
+.nav-group-title{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;padding:13px 16px 6px;font-size:11px;font-weight:600;letter-spacing:.8px;color:#7c8798;transition:color var(--dur-fast) var(--ease)}
+.nav-group-title:hover{color:#c3ccdb}
+.nav-group-title .caret{font-size:9px;opacity:.75;transition:transform var(--dur) var(--ease)}
+.nav-group.collapsed .caret{transform:rotate(-90deg)}
+.nav-group.collapsed .nav-group-items{display:none}
+.nav-group-items{display:flex;flex-direction:column;gap:1px}
+/* --- 空状态升级 --- */
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 20px;text-align:center;font-size:14px;color:var(--text-3)}
+.empty-state .icon{font-size:40px;line-height:1;margin-bottom:14px;opacity:.6}
+.empty-state .es-title{font-size:15px;font-weight:600;color:var(--text-1);margin-bottom:6px}
+.empty-state .es-desc{font-size:13px;color:var(--text-3);max-width:360px;line-height:1.7}
+.empty-state .es-actions{margin-top:16px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.01ms !important;transition-duration:.01ms !important}
 }
@@ -941,44 +956,64 @@ tr:hover td{background:var(--bg-hover)}
   <div class="sidebar" id="sidebar">
     <div class="sidebar-header"><div class="logo-icon" id="sidebarLogo">📊</div><h2 id="sidebarTitle">SOP数据管理</h2><p id="sidebarSubtitle">Team SOP System</p><p id="appVersionTag" style="font-size:11px;color:#94a3b8;margin-top:6px;letter-spacing:.5px;opacity:.85">v—</p></div>
     <div class="sidebar-refresh"><button class="sidebar-refresh-btn" id="sidebarRefreshBtn" onclick="sidebarRefresh()">🔄 刷新数据</button><span class="sidebar-refresh-time" id="sidebarRefreshTime"></span></div>
-    <div class="nav-menu">
-      <div class="nav-section-title">工作台</div>
-      <div class="nav-item active" data-page="dashboard" onclick="navTo('dashboard')"><span class="icon">🏠</span> 首页</div>
-      <div class="nav-item" data-page="aiWorkbench" onclick="navTo('aiWorkbench')" id="navAIWorkbench"><span class="icon">🤖</span> AI工作台</div>
-      <div class="nav-item" data-page="approvals" onclick="navTo('approvals')" id="navApprovals"><span class="icon">🕓</span> 审批中心<span class="nav-badge" id="approvalsNavBadge" style="display:none"></span></div>
+    <div class="nav-menu" id="navMenu">
+      <div class="nav-group" data-group="work">
+        <div class="nav-group-title" onclick="toggleNavGroup('work')"><span>工作台</span><span class="caret">▾</span></div>
+        <div class="nav-group-items">
+          <div class="nav-item active" data-page="dashboard" onclick="navTo('dashboard')"><span class="icon">🏠</span> 首页</div>
+          <div class="nav-item" data-page="aiWorkbench" onclick="navTo('aiWorkbench')" id="navAIWorkbench"><span class="icon">🤖</span> AI工作台</div>
+          <div class="nav-item" data-page="approvals" onclick="navTo('approvals')" id="navApprovals"><span class="icon">🕓</span> 审批中心<span class="nav-badge" id="approvalsNavBadge" style="display:none"></span></div>
+        </div>
+      </div>
 
-      <div class="nav-section-title">日报周报</div>
-      <div class="nav-item" data-page="dailyForm" onclick="navTo('dailyForm')"><span class="icon">📝</span> 日报填写</div>
-      <div class="nav-item" data-page="weeklyForm" onclick="navTo('weeklyForm')"><span class="icon">📋</span> 周报填写</div>
-      <div class="nav-item" data-page="dailyData" onclick="navTo('dailyData')"><span class="icon">📈</span> 日报数据</div>
-      <div class="nav-item" data-page="weeklyData" onclick="navTo('weeklyData')"><span class="icon">📉</span> 周报数据</div>
-      <div class="nav-item" data-page="summary" onclick="navTo('summary')"><span class="icon">👥</span> 团队汇总</div>
+      <div class="nav-group" data-group="report">
+        <div class="nav-group-title" onclick="toggleNavGroup('report')"><span>日报周报</span><span class="caret">▾</span></div>
+        <div class="nav-group-items">
+          <div class="nav-item" data-page="dailyForm" onclick="navTo('dailyForm')"><span class="icon">📝</span> 日报填写</div>
+          <div class="nav-item" data-page="weeklyForm" onclick="navTo('weeklyForm')"><span class="icon">📋</span> 周报填写</div>
+          <div class="nav-item" data-page="dailyData" onclick="navTo('dailyData')"><span class="icon">📈</span> 日报数据</div>
+          <div class="nav-item" data-page="weeklyData" onclick="navTo('weeklyData')"><span class="icon">📉</span> 周报数据</div>
+          <div class="nav-item" data-page="summary" onclick="navTo('summary')"><span class="icon">👥</span> 团队汇总</div>
+          <div class="nav-item" data-page="mgrReport" onclick="navTo('mgrReport')" id="navMgrReport"><span class="icon">📎</span> 管理周报</div>
+        </div>
+      </div>
 
-      <div class="nav-section-title">管理周报</div>
-      <div class="nav-item" data-page="mgrReport" onclick="navTo('mgrReport')" id="navMgrReport"><span class="icon">📎</span> 管理周报</div>
+      <div class="nav-group" data-group="outbound">
+        <div class="nav-group-title" onclick="toggleNavGroup('outbound')"><span>外呼与拜访</span><span class="caret">▾</span></div>
+        <div class="nav-group-items">
+          <div class="nav-item" data-page="callData" onclick="navTo('callData')" id="navCallData"><span class="icon">📞</span> 外呼数据</div>
+          <div class="nav-item" data-page="callStats" onclick="navTo('callStats')" id="navCallStats"><span class="icon">📊</span> 外呼统计</div>
+          <div class="nav-item" data-page="visitData" onclick="navTo('visitData')" id="navVisitData"><span class="icon">📍</span> 拜访数据</div>
+          <div class="nav-item" data-page="visitStats" onclick="navTo('visitStats')" id="navVisitStats"><span class="icon">📊</span> 拜访统计</div>
+        </div>
+      </div>
 
-      <div class="nav-section-title">外呼管理</div>
-      <div class="nav-item" data-page="callData" onclick="navTo('callData')" id="navCallData"><span class="icon">📞</span> 外呼数据</div>
-      <div class="nav-item" data-page="callStats" onclick="navTo('callStats')" id="navCallStats"><span class="icon">📊</span> 外呼统计</div>
+      <div class="nav-group" data-group="sales">
+        <div class="nav-group-title" onclick="toggleNavGroup('sales')"><span>业绩管理</span><span class="caret">▾</span></div>
+        <div class="nav-group-items">
+          <div class="nav-item" data-page="salesDetail" onclick="navTo('salesDetail')" id="navSalesDetail"><span class="icon">💰</span> 业绩明细</div>
+          <div class="nav-item" data-page="salesBoard" onclick="navTo('salesBoard')" id="navSalesBoard"><span class="icon">📺</span> 业绩看板</div>
+        </div>
+      </div>
 
-      <div class="nav-section-title">拜访管理</div>
-      <div class="nav-item" data-page="visitData" onclick="navTo('visitData')" id="navVisitData"><span class="icon">📍</span> 拜访数据</div>
-      <div class="nav-item" data-page="visitStats" onclick="navTo('visitStats')" id="navVisitStats"><span class="icon">📊</span> 拜访统计</div>
+      <div class="nav-group" data-group="grade">
+        <div class="nav-group-title" onclick="toggleNavGroup('grade')"><span>评级与绩效</span><span class="caret">▾</span></div>
+        <div class="nav-group-items">
+          <div class="nav-item" data-page="salesGrade" onclick="navTo('salesGrade')" id="navSalesGrade"><span class="icon">🎯</span> 销售评级看板</div>
+          <div class="nav-item" data-page="salesPerf" onclick="navTo('salesPerf')" id="navSalesPerf"><span class="icon">🏅</span> 销售绩效统计</div>
+          <div class="nav-item" data-page="mgrPerf" onclick="navTo('mgrPerf')" id="navMgrPerf"><span class="icon">📋</span> 管理绩效统计</div>
+        </div>
+      </div>
 
-      <div class="nav-section-title">业绩管理</div>
-      <div class="nav-item" data-page="salesDetail" onclick="navTo('salesDetail')" id="navSalesDetail"><span class="icon">💰</span> 业绩明细</div>
-      <div class="nav-item" data-page="salesBoard" onclick="navTo('salesBoard')" id="navSalesBoard"><span class="icon">📺</span> 业绩看板</div>
-
-      <div class="nav-section-title">评级和绩效管理</div>
-      <div class="nav-item" data-page="salesGrade" onclick="navTo('salesGrade')" id="navSalesGrade"><span class="icon">🎯</span> 销售评级看板</div>
-      <div class="nav-item" data-page="salesPerf" onclick="navTo('salesPerf')" id="navSalesPerf"><span class="icon">🏅</span> 销售绩效统计</div>
-      <div class="nav-item" data-page="mgrPerf" onclick="navTo('mgrPerf')" id="navMgrPerf"><span class="icon">📋</span> 管理绩效统计</div>
-
-      <div class="nav-section-title">管理</div>
-      <div class="nav-item" data-page="userManagement" onclick="navTo('userManagement')" id="navUserMgmt"><span class="icon">👤</span> 用户管理</div>
-      <div class="nav-item" data-page="roleConfig" onclick="navTo('roleConfig')" id="navRoleConfig"><span class="icon">🛡️</span> 角色权限</div>
-      <div class="nav-item" data-page="formConfig" onclick="navTo('formConfig')" id="navFormConfig"><span class="icon">⚙️</span> 表单配置</div>
-      <div class="nav-item" data-page="settings" onclick="navTo('settings')"><span class="icon">🔧</span> 设置</div>
+      <div class="nav-group" data-group="admin">
+        <div class="nav-group-title" onclick="toggleNavGroup('admin')"><span>系统管理</span><span class="caret">▾</span></div>
+        <div class="nav-group-items">
+          <div class="nav-item" data-page="userManagement" onclick="navTo('userManagement')" id="navUserMgmt"><span class="icon">👤</span> 用户管理</div>
+          <div class="nav-item" data-page="roleConfig" onclick="navTo('roleConfig')" id="navRoleConfig"><span class="icon">🛡️</span> 角色权限</div>
+          <div class="nav-item" data-page="formConfig" onclick="navTo('formConfig')" id="navFormConfig"><span class="icon">⚙️</span> 表单配置</div>
+          <div class="nav-item" data-page="settings" onclick="navTo('settings')"><span class="icon">🔧</span> 设置</div>
+        </div>
+      </div>
     </div>
     <div class="sidebar-footer">
       <div class="user-info">
@@ -1070,8 +1105,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260909160625';
-const APP_VERSION = '1.42.110'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260909165635';
+const APP_VERSION = '1.42.111'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1784,6 +1819,7 @@ async function showApp() {
   lastRefreshTime = Date.now();
   updateSidebarRefreshTime();
   updateNavVisibility();
+  applyNavCollapsedState();
   navTo(getInitialPage());
 }
 
@@ -1800,6 +1836,40 @@ function updateNavVisibility() {
     const el = document.getElementById(navId);
     if (el) el.style.display = hasPermission(perm) ? '' : 'none';
   });
+  // 整组都被隐藏时,连分组标题一起隐藏(避免出现空的分组)
+  document.querySelectorAll('.nav-group').forEach(g => {
+    const items = g.querySelectorAll('.nav-item');
+    const allHidden = items.length > 0 && [...items].every(it => it.style.display === 'none');
+    g.style.display = allHidden ? 'none' : '';
+  });
+}
+
+// ============ 侧栏分组折叠(v1.42.111) ============
+const NAV_COLLAPSED_KEY = 'sop_nav_collapsed';
+function navCollapsedSet(){ try { return new Set(JSON.parse(localStorage.getItem(NAV_COLLAPSED_KEY) || '[]')); } catch(e){ return new Set(); } }
+function saveNavCollapsed(set){ try { localStorage.setItem(NAV_COLLAPSED_KEY, JSON.stringify([...set])); } catch(e){} }
+function toggleNavGroup(key){
+  const g = document.querySelector('.nav-group[data-group="' + key + '"]');
+  if (!g) return;
+  const set = navCollapsedSet();
+  if (g.classList.toggle('collapsed')) set.add(key); else set.delete(key);
+  saveNavCollapsed(set);
+}
+function applyNavCollapsedState(){
+  const set = navCollapsedSet();
+  document.querySelectorAll('.nav-group').forEach(g => {
+    g.classList.toggle('collapsed', set.has(g.dataset.group));
+  });
+}
+// 当前页面所在分组始终展开,避免"点了菜单却看不到高亮"
+function expandNavGroupOf(page){
+  const item = document.querySelector('.nav-item[data-page="' + page + '"]');
+  if (!item || !item.closest) return;
+  const g = item.closest('.nav-group');
+  if (g && g.classList.contains('collapsed')) {
+    g.classList.remove('collapsed');
+    const set = navCollapsedSet(); set.delete(g.dataset.group); saveNavCollapsed(set);
+  }
 }
 
 // ============ Navigation ============
@@ -1820,6 +1890,7 @@ function navTo(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
+  expandNavGroupOf(page);
   const titles = {dashboard:'首页',aiWorkbench:'AI工作台',approvals:'审批中心',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',callData:'外呼数据',callStats:'外呼统计',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计',mgrPerf:'管理绩效统计'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
   // 浏览器标签页标题带上功能模块名,便于在多标签间区分(主标签与新标签均生效)
@@ -2794,7 +2865,7 @@ function renderReportForm(type) {
     </div></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
       <div class="channel-chips" id="channelChips" style="flex:1">
-        ${channels.map((ch,i)=>`<div class="channel-chip" onclick="jumpToChannel(${i})" data-chip-idx="${i}">${ch.name}<span class="chip-count" id="chipCount${i}"></span></div>`).join('')}
+        ${channels.map((ch,i)=>`<div class="chip channel-chip" onclick="jumpToChannel(${i})" data-chip-idx="${i}">${ch.name}<span class="chip-count" id="chipCount${i}"></span></div>`).join('')}
       </div>
       <div style="display:flex;gap:8px;flex-shrink:0">
         <button class="btn btn-outline btn-sm" onclick="expandAllChannels()">展开全部</button>
@@ -5877,15 +5948,15 @@ function renderCallData() {
           <input type="file" id="callFileInput" accept=".csv" multiple style="display:none" onchange="handleCallUpload(event)">
         </div>
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px" id="callDateBtns">
-        <button class="btn btn-xs btn-outline" onclick="callQuickRange('today',this)">今天</button>
-        <button class="btn btn-xs btn-outline" onclick="callQuickRange('yesterday',this)">昨天</button>
-        <button class="btn btn-xs btn-outline" onclick="callQuickRange('thisWeek',this)">本周</button>
-        <button class="btn btn-xs btn-outline" onclick="callQuickRange('lastWeek',this)">上周</button>
-        <button class="btn btn-xs btn-outline" onclick="callQuickRange('thisMonth',this)">本月</button>
-        <button class="btn btn-xs btn-outline" onclick="callQuickRange('lastMonth',this)">上月</button>
-        <button class="btn btn-xs btn-outline" onclick="callQuickRange('thisYear',this)">今年</button>
-        <button class="btn btn-xs btn-outline" onclick="callQuickRange('lastYear',this)">去年</button>
+      <div class="chip-row" style="margin-top:10px" id="callDateBtns">
+        <button class="chip" onclick="callQuickRange('today',this)">今天</button>
+        <button class="chip" onclick="callQuickRange('yesterday',this)">昨天</button>
+        <button class="chip" onclick="callQuickRange('thisWeek',this)">本周</button>
+        <button class="chip" onclick="callQuickRange('lastWeek',this)">上周</button>
+        <button class="chip" onclick="callQuickRange('thisMonth',this)">本月</button>
+        <button class="chip" onclick="callQuickRange('lastMonth',this)">上月</button>
+        <button class="chip" onclick="callQuickRange('thisYear',this)">今年</button>
+        <button class="chip" onclick="callQuickRange('lastYear',this)">去年</button>
       </div>
       <div style="font-size:12px;color:var(--gray-500);margin-top:8px">支持上传外呼系统导出的 CSV(表头:联系时间,客户,工作单位/联系人,电话号码,通话时长,通话方式,员工,部门),按「联系时间+电话号码」自动去重追加,不会重复入库;<b>全空记录、格式异常行、以及无部门或无员工的归属缺失记录会自动跳过,不入库</b></div>
       ${renderInvalidCallBar()}
@@ -6160,15 +6231,15 @@ function renderCallStats() {
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-success" onclick="exportCallStats()">📥 CSV</button></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-outline" onclick="exportCallStatsExcel()">📊 Excel</button></div>
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px" id="callStatsDateBtns">
-        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('today',this)">今天</button>
-        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('yesterday',this)">昨天</button>
-        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('thisWeek',this)">本周</button>
-        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('lastWeek',this)">上周</button>
-        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('thisMonth',this)">本月</button>
-        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('lastMonth',this)">上月</button>
-        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('thisYear',this)">今年</button>
-        <button class="btn btn-xs btn-outline" onclick="callStatsQuickRange('lastYear',this)">去年</button>
+      <div class="chip-row" style="margin-top:10px" id="callStatsDateBtns">
+        <button class="chip" onclick="callStatsQuickRange('today',this)">今天</button>
+        <button class="chip" onclick="callStatsQuickRange('yesterday',this)">昨天</button>
+        <button class="chip" onclick="callStatsQuickRange('thisWeek',this)">本周</button>
+        <button class="chip" onclick="callStatsQuickRange('lastWeek',this)">上周</button>
+        <button class="chip" onclick="callStatsQuickRange('thisMonth',this)">本月</button>
+        <button class="chip" onclick="callStatsQuickRange('lastMonth',this)">上月</button>
+        <button class="chip" onclick="callStatsQuickRange('thisYear',this)">今年</button>
+        <button class="chip" onclick="callStatsQuickRange('lastYear',this)">去年</button>
       </div>
       <div style="font-size:12px;color:var(--gray-500);margin-top:8px">接通判定:通话时长 &gt; 0 记为接通;接通率 = 接通次数 ÷ 通话次数。点击次数/时长/接通数字可查看对应明细</div>
     </div></div>
@@ -9288,7 +9359,7 @@ async function renderVisitData() {
   }
   // Ensure visit records are loaded (lazy-load for managers)
   if (cloudData.visitRecords.length === 0) {
-    document.getElementById('contentBody').innerHTML = '<div style="text-align:center;padding:60px"><div style="font-size:36px;margin-bottom:14px;animation:spin 1.5s linear infinite;display:inline-block">⏳</div><div style="font-size:15px;color:#666">正在加载拜访数据...</div></div>';
+    document.getElementById('contentBody').innerHTML = loadingSkeletonHtml('正在加载拜访数据...');
     await ensureVisitDataLoaded();
   }
   // 恢复上次记忆的每页条数
@@ -9327,7 +9398,7 @@ async function renderVisitData() {
             <span class="cs-switch-label">未填写结果</span>
           </label>
         </div>
-        <div class="form-group" style="min-width:440px"><label>快捷筛选</label><div id="visitFQuickDateChips" class="visit-quick-chips"><button type="button" class="visit-quick-chip" data-type="" onclick="applyVisitQuickDateFilter('')">全部</button><button type="button" class="visit-quick-chip" data-type="today" onclick="applyVisitQuickDateFilter('today')">今天</button><button type="button" class="visit-quick-chip" data-type="yesterday" onclick="applyVisitQuickDateFilter('yesterday')">昨天</button><button type="button" class="visit-quick-chip" data-type="thisWeek" onclick="applyVisitQuickDateFilter('thisWeek')">本周</button><button type="button" class="visit-quick-chip" data-type="lastWeek" onclick="applyVisitQuickDateFilter('lastWeek')">上周</button><button type="button" class="visit-quick-chip" data-type="thisMonth" onclick="applyVisitQuickDateFilter('thisMonth')">本月</button><button type="button" class="visit-quick-chip" data-type="lastMonth" onclick="applyVisitQuickDateFilter('lastMonth')">上月</button><button type="button" class="visit-quick-chip" data-type="thisYear" onclick="applyVisitQuickDateFilter('thisYear')">今年</button></div></div>
+        <div class="form-group" style="min-width:440px"><label>快捷筛选</label><div id="visitFQuickDateChips" class="visit-quick-chips chip-row"><button type="button" class="chip visit-quick-chip" data-type="" onclick="applyVisitQuickDateFilter('')">全部</button><button type="button" class="chip visit-quick-chip" data-type="today" onclick="applyVisitQuickDateFilter('today')">今天</button><button type="button" class="chip visit-quick-chip" data-type="yesterday" onclick="applyVisitQuickDateFilter('yesterday')">昨天</button><button type="button" class="chip visit-quick-chip" data-type="thisWeek" onclick="applyVisitQuickDateFilter('thisWeek')">本周</button><button type="button" class="chip visit-quick-chip" data-type="lastWeek" onclick="applyVisitQuickDateFilter('lastWeek')">上周</button><button type="button" class="chip visit-quick-chip" data-type="thisMonth" onclick="applyVisitQuickDateFilter('thisMonth')">本月</button><button type="button" class="chip visit-quick-chip" data-type="lastMonth" onclick="applyVisitQuickDateFilter('lastMonth')">上月</button><button type="button" class="chip visit-quick-chip" data-type="thisYear" onclick="applyVisitQuickDateFilter('thisYear')">今年</button></div></div>
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitFStart" value="${mAgo}" onchange="setVisitQuickDateActive('')"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitFEnd" value="${today}" onchange="setVisitQuickDateActive('')"></div>
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="resetVisitPage()">🔍 查询</button></div>
@@ -10875,7 +10946,7 @@ async function renderVisitStats() {
   }
   // Ensure visit records are loaded (lazy-load for managers)
   if (cloudData.visitRecords.length === 0) {
-    document.getElementById('contentBody').innerHTML = '<div style="text-align:center;padding:60px"><div style="font-size:36px;margin-bottom:14px;animation:spin 1.5s linear infinite;display:inline-block">⏳</div><div style="font-size:15px;color:#666">正在加载拜访数据...</div></div>';
+    document.getElementById('contentBody').innerHTML = loadingSkeletonHtml('正在加载拜访数据...');
     await ensureVisitDataLoaded();
   }
   const body = document.getElementById('contentBody');
@@ -11562,6 +11633,16 @@ function updateImportOverlay(txt, sub) {
   if (t) t.textContent = txt; if (s) s.textContent = sub || '';
 }
 function hideImportOverlay() { const el = document.getElementById('importOverlay'); if (el) el.style.display = 'none'; }
+// 骨架屏加载态(v1.42.111):替代原来的「⏳ 文字」,避免数据回来时的高度跳动
+function loadingSkeletonHtml(text){
+  return '<div style="padding:8px 0 4px">' +
+    '<div class="sk-box skeleton" style="margin-bottom:18px"></div>' +
+    '<div class="sk-line skeleton w80"></div>' +
+    '<div class="sk-line skeleton w60"></div>' +
+    '<div class="sk-line skeleton w40"></div>' +
+    (text ? '<div style="text-align:center;font-size:13px;color:var(--text-3);margin-top:16px">' + text + '</div>' : '') +
+    '</div>';
+}
 function showToast(msg, type='success', duration=2500) {
   const container = document.getElementById('toastContainer');
   if (!container) return;
@@ -12219,7 +12300,7 @@ async function renderSalesDetail() {
       <div class="filter-bar">
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="sfStart" value="${f.start}" onchange="sdClearQuickDate();applySalesFilters()"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="sfEnd" value="${f.end}" onchange="sdClearQuickDate();applySalesFilters()"></div>
-        <div class="form-group" style="min-width:380px"><label>快捷日期</label><div id="sdQuickDateChips" class="visit-quick-chips">${['','today','yesterday','thisWeek','lastWeek','thisMonth','lastMonth','thisYear'].map(t => `<button type="button" class="visit-quick-chip${sdQuickDate === t && t ? ' active' : ''}" data-type="${t}" onclick="applySalesQuickDateFilter('${t}')">${({'':'全部',today:'今天',yesterday:'昨天',thisWeek:'本周',lastWeek:'上周',thisMonth:'本月',lastMonth:'上月',thisYear:'今年'})[t]}</button>`).join('')}</div></div>
+        <div class="form-group" style="min-width:380px"><label>快捷日期</label><div id="sdQuickDateChips" class="visit-quick-chips chip-row">${['','today','yesterday','thisWeek','lastWeek','thisMonth','lastMonth','thisYear'].map(t => `<button type="button" class="chip visit-quick-chip${sdQuickDate === t && t ? ' active' : ''}" data-type="${t}" onclick="applySalesQuickDateFilter('${t}')">${({'':'全部',today:'今天',yesterday:'昨天',thisWeek:'本周',lastWeek:'上周',thisMonth:'本月',lastMonth:'上月',thisYear:'今年'})[t]}</button>`).join('')}</div></div>
         ${multiSelectPanelHtml('sfTeam', {label:'部门 / 门店', options:teams, selected:f.team, placeholder:'全部', searchPlaceholder:'搜索门店', defaultKey:'salesDetail.team', onChange:function(arr){salesDetailFilters.team=arr; applySalesFilters();}})}
         ${multiSelectPanelHtml('sfSales', {label:'人员', options:sps, selected:f.salesperson, placeholder:'全部', searchPlaceholder:'搜索人员', defaultKey:'salesDetail.sales', onChange:function(arr){salesDetailFilters.salesperson=arr; applySalesFilters();}})}
         ${multiSelectPanelHtml('sfDocType', {label:'单据类别', options:docTypes, selected:f.docType, placeholder:'全部', searchPlaceholder:'搜索类别', defaultKey:'salesDetail.docType', onChange:function(arr){salesDetailFilters.docType=arr; applySalesFilters();}})}
