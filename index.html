@@ -907,6 +907,34 @@ tr:hover td{background:var(--bg-hover)}
 .empty-state .es-desc{font-size:13px;color:var(--text-3);max-width:360px;line-height:1.7}
 .empty-state .es-actions{margin-top:16px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 
+/* ===== 排版系统 v3 · Layout First =====
+   栅格 16 / 内容区 32 / 卡片 20 / 区块 24 / 字阶 20·15·13.5·12·26 / 表格行高 ~40 */
+body{font-size:13.5px}
+.content-body{padding:24px 32px 40px}
+/* 页头：面包屑 12 + 标题 20 */
+.top-bar h3{font-size:20px;line-height:1.4;letter-spacing:.1px}
+.pg-crumb{font-size:12px;line-height:1.4;color:var(--text-3);margin-bottom:1px}
+/* 卡片与区块节奏 */
+.card + .card{margin-top:16px}
+.card-header h4{font-size:15px}
+.card-body{padding:20px}
+/* KPI：图标 34 / 数值 26 / 标签 12，四卡等高 */
+.stat-grid{grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{padding:18px 20px}
+.stat-card .stat-icon{width:34px;height:34px;border-radius:9px;font-size:17px;margin-bottom:10px}
+.stat-card .stat-value{font-size:26px;letter-spacing:-.4px;font-family:var(--font-num);line-height:1.15}
+.stat-card .stat-label{font-size:12px;color:var(--text-3);margin-top:6px}
+.dash-new-card{padding:18px}
+/* 表格密度：行高收紧到 ~40，表头 12.5 */
+table{font-size:13px}
+th{padding:9px 14px;font-size:12.5px}
+tbody td{padding:9px 14px;line-height:1.5}
+.dw-grid table th,.dw-grid table td{padding:6px 8px}
+/* 筛选栏：栅格间距统一 16，标签基线统一 */
+.filter-bar{gap:12px 16px;margin-bottom:16px}
+.filter-bar .form-group{min-width:150px}
+.filter-bar .form-group > label{margin-bottom:6px;display:block}
+
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.01ms !important;transition-duration:.01ms !important}
 }
@@ -1023,7 +1051,7 @@ tr:hover td{background:var(--bg-hover)}
     </div>
   </div>
   <div class="main-content">
-    <div class="top-bar"><h3 id="pageTitle">首页</h3><div style="display:flex;align-items:center;gap:14px"><span id="userWelcome" style="color:var(--gray-600);font-size:14px"></span><button class="btn btn-outline btn-sm" onclick="doLogout()">退出登录</button></div></div>
+    <div class="top-bar"><div><div class="pg-crumb" id="pageCrumb">工作台 / 首页</div><h3 id="pageTitle">首页</h3></div><div style="display:flex;align-items:center;gap:14px"><span id="userWelcome" style="color:var(--gray-600);font-size:14px"></span><button class="btn btn-outline btn-sm" onclick="doLogout()">退出登录</button></div></div>
     <div class="content-body" id="contentBody"></div>
   </div>
 </div>
@@ -1105,8 +1133,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260909165635';
-const APP_VERSION = '1.42.111'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260909172221';
+const APP_VERSION = '1.42.112'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1893,6 +1921,13 @@ function navTo(page) {
   expandNavGroupOf(page);
   const titles = {dashboard:'首页',aiWorkbench:'AI工作台',approvals:'审批中心',dailyForm:'日报填写',weeklyForm:'周报填写',dailyData:'日报数据',weeklyData:'周报数据',summary:'团队汇总',userManagement:'用户管理',roleConfig:'角色权限',formConfig:'表单配置',settings:'设置',visitData:'拜访数据',visitStats:'拜访统计',mgrReport:'管理周报',callData:'外呼数据',callStats:'外呼统计',salesDetail:'业绩明细',salesBoard:'业绩看板',salesGrade:'销售评级看板',salesPerf:'销售绩效统计',mgrPerf:'管理绩效统计'};
   document.getElementById('pageTitle').textContent = titles[page] || '';
+  // 页头面包屑:一级分组 / 当前页,与侧栏分组保持一致(v1.42.112)
+  const crumbEl = document.getElementById('pageCrumb');
+  if (crumbEl) {
+    const groups = {dashboard:'工作台',aiWorkbench:'工作台',approvals:'工作台',dailyForm:'日报周报',weeklyForm:'日报周报',dailyData:'日报周报',weeklyData:'日报周报',summary:'日报周报',mgrReport:'日报周报',callData:'外呼与拜访',callStats:'外呼与拜访',visitData:'外呼与拜访',visitStats:'外呼与拜访',salesDetail:'业绩管理',salesBoard:'业绩管理',salesGrade:'评级与绩效',salesPerf:'评级与绩效',mgrPerf:'评级与绩效',userManagement:'系统管理',roleConfig:'系统管理',formConfig:'系统管理',settings:'系统管理'};
+    const g = groups[page] || '';
+    crumbEl.textContent = g ? (g + ' / ' + (titles[page] || '')) : (titles[page] || '');
+  }
   // 浏览器标签页标题带上功能模块名,便于在多标签间区分(主标签与新标签均生效)
   document.title = (titles[page] ? titles[page] + ' · ' : '') + '团队SOP数据管理系统';
   ({dashboard:renderDashboard,aiWorkbench:renderAiWorkbench,approvals:renderApprovals,dailyForm:()=>renderReportForm('daily'),weeklyForm:()=>renderReportForm('weekly'),dailyData:()=>renderDataView('daily'),weeklyData:()=>renderDataView('weekly'),summary:renderSummary,userManagement:renderUserManagement,roleConfig:renderRoleConfig,formConfig:renderFormConfig,settings:renderSettings,visitData:renderVisitData,visitStats:renderVisitStats,mgrReport:renderMgrReport,callData:renderCallData,callStats:renderCallStats,salesDetail:renderSalesDetail,salesBoard:renderSalesBoard,salesGrade:renderSalesGrade,salesPerf:renderSalesPerf,mgrPerf:renderMgrPerf}[page]||(()=>{}))();
