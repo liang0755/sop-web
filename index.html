@@ -101,8 +101,8 @@ select.form-control{cursor:pointer}
 .card-body{padding:20px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 #sgTable{table-layout:fixed}
-th{background:var(--gray-50);padding:11px 14px;text-align:left;font-weight:600;color:var(--gray-700);border-bottom:2px solid var(--gray-200);white-space:nowrap}
-td{padding:10px 14px;border-bottom:1px solid var(--gray-100);color:var(--gray-700)}
+th{background:var(--gray-50);padding:11px 14px;text-align:center;font-weight:600;color:var(--gray-700);border-bottom:2px solid var(--gray-200);white-space:nowrap}
+td{padding:10px 14px;border-bottom:1px solid var(--gray-100);color:var(--gray-700);text-align:center}
 tr:hover td{background:var(--gray-50)}
 .table-wrap{overflow-x:auto}
 /* 冻结列底部空隙+漏底修复(销售/M0/管理单月绩效看板 + M0 升降级看板):
@@ -215,7 +215,7 @@ tr:hover > .perf-freeze{
 .drill-td{cursor:pointer;transition:background .12s}
 .drill-td:hover{background:rgba(37,99,235,.1)}
 .drill-table{width:100%;border-collapse:collapse;font-size:13px;background:#fff}
-.drill-table th,.drill-table td{border:1px solid var(--gray-200);padding:6px 10px;text-align:left;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}
+.drill-table th,.drill-table td{border:1px solid var(--gray-200);padding:6px 10px;text-align:center;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}
 .drill-table th{background:var(--gray-50);position:sticky;top:0;z-index:1;font-weight:600}
 .drill-table tbody tr:nth-child(even){background:var(--gray-50)}
 .modal h3{font-size:18px;margin-bottom:20px}
@@ -1253,8 +1253,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260910111634';
-const APP_VERSION = '1.42.120'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260910115938';
+const APP_VERSION = '1.42.121'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1778,6 +1778,103 @@ async function apiDelete(collection, id) {
     method:'DELETE'
   });
   if (!res.ok) throw new Error('API delete failed: ' + res.status);
+}
+
+// ============ 撤销导入(v1.42.121):所有导入完成后登记可撤销批次,误导入可一键回滚 ============
+const __importUndoStack = [];
+const __IMPORT_UNDO_MAX = 5;
+// step 类型:
+//  {type:'delete', collection, ids:[]}            -> 删除这些记录(数组型或对象映射型集合通用)
+//  {type:'patch',  collection, recs:[{id,data}]}  -> data!=null 则 PATCH 回去;data==null 则删除该 key
+//  {type:'config', path:[...], prev}              -> 恢复 formConfig 下某子节点(prev===undefined 表示此前不存在)
+//  {type:'departments', prev:[...]}               -> 恢复部门列表快照
+function registerUndoBatch(label, steps) {
+  try {
+    if (!steps || !steps.length) return;
+    __importUndoStack.push({ ts: Date.now(), label: label || '数据', steps: steps });
+    while (__importUndoStack.length > __IMPORT_UNDO_MAX) __importUndoStack.shift();
+    renderUndoBanner();
+  } catch (e) { /* 撤销登记失败绝不影响导入本身 */ }
+}
+function __undoApplyStep(step) {
+  if (step.type === 'delete') {
+    const arr = cloudData[step.collection];
+    const idSet = new Set(step.ids);
+    return (async () => {
+      for (const id of step.ids) { try { await apiDelete(step.collection, id); } catch (e) {} }
+      if (Array.isArray(arr)) cloudData[step.collection] = arr.filter(r => !idSet.has((r && r.id)));
+      else if (arr && typeof arr === 'object') step.ids.forEach(id => { delete arr[id]; });
+    })();
+  }
+  if (step.type === 'patch') {
+    const arr = cloudData[step.collection];
+    return (async () => {
+      for (const rec of step.recs) {
+        try {
+          if (rec.data == null) await apiDelete(step.collection, rec.id);
+          else await apiUpdate(step.collection, rec.id, rec.data);
+        } catch (e) {}
+        if (Array.isArray(arr)) {
+          const idx = arr.findIndex(x => x && x.id === rec.id);
+          if (idx >= 0) { if (rec.data == null) arr.splice(idx, 1); else arr[idx] = Object.assign({}, arr[idx], rec.data); }
+        } else if (arr && typeof arr === 'object') {
+          if (rec.data == null) delete arr[rec.id];
+          else arr[rec.id] = Object.assign({}, arr[rec.id], rec.data);
+        }
+      }
+    })();
+  }
+  if (step.type === 'config') {
+    return (async () => {
+      cloudData.formConfig = cloudData.formConfig || {};
+      let node = cloudData.formConfig;
+      for (let i = 0; i < step.path.length - 1; i++) { if (!node[step.path[i]] || typeof node[step.path[i]] !== 'object') node[step.path[i]] = {}; node = node[step.path[i]]; }
+      const last = step.path[step.path.length - 1];
+      if (step.prev === undefined) delete node[last]; else node[last] = step.prev;
+      try { await fetch(FB_BASE + '/formConfig.json', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cloudData.formConfig) }); } catch (e) {}
+    })();
+  }
+  if (step.type === 'departments') {
+    return (async () => {
+      cloudData.departments = Array.isArray(step.prev) ? step.prev.slice() : [];
+      try { await saveDepartments(); } catch (e) {}
+    })();
+  }
+  return Promise.resolve();
+}
+async function undoLastImport() {
+  const batch = __importUndoStack.pop();
+  if (!batch) return;
+  try {
+    for (const step of batch.steps) await __undoApplyStep(step);
+    showToast('已撤销导入:' + batch.label, 'success', 4000);
+  } catch (e) {
+    showToast('撤销失败:' + (e && e.message || e), 'error', 5000);
+    __importUndoStack.push(batch);
+  }
+  renderUndoBanner();
+  try { rerenderCurrentPage(true); } catch (e) {}
+}
+function dismissLastImportUndo() { try { __importUndoStack.pop(); renderUndoBanner(); } catch (e) {} }
+function renderUndoBanner() {
+  try {
+    let el = document.getElementById('importUndoBar');
+    if (!__importUndoStack.length) { if (el) el.remove(); return; }
+    const batch = __importUndoStack[__importUndoStack.length - 1];
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'importUndoBar';
+      el.style.cssText = 'position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:9998;max-width:92vw;box-shadow:0 6px 20px rgba(0,0,0,.18);font-family:inherit';
+      (document.body || document.documentElement).appendChild(el);
+    }
+    const more = __importUndoStack.length > 1 ? (' (+' + (__importUndoStack.length - 1) + ' 条更早的可撤销)') : '';
+    el.innerHTML =
+      '<div style="display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #e23b3b;border-left:4px solid #e23b3b;border-radius:10px;padding:10px 14px">' +
+        '<div style="font-size:13px;color:#333">✅ 已导入 <b>' + (batch.label || '数据') + '</b>' + more + ',<span style="color:#e23b3b;font-weight:600">可撤销</span></div>' +
+        '<button onclick="undoLastImport()" style="border:none;background:#e23b3b;color:#fff;font-weight:600;padding:7px 14px;border-radius:7px;cursor:pointer;font-size:13px">撤销导入</button>' +
+        '<button onclick="dismissLastImportUndo()" style="border:none;background:#eee;color:#666;padding:7px 10px;border-radius:7px;cursor:pointer;font-size:13px">忽略</button>' +
+      '</div>';
+  } catch (e) {}
 }
 
 // ===== 批量处理全局进度遮罩 =====
@@ -5388,6 +5485,7 @@ async function doImportUsers() {
 
   // Batch create
   const results = {success: 0, failed: []};
+  const addedUserIds = [];
   for (let i = 0; i < toCreate.length; i++) {
     const r = toCreate[i];
     try {
@@ -5401,6 +5499,7 @@ async function doImportUsers() {
       await apiCreate('users', user);
       cloudData.users.push(user);
       results.success++;
+      addedUserIds.push(user.id);
     } catch(err) {
       results.failed.push({line: r.line, username: r.username, error: err.message});
     }
@@ -5413,11 +5512,16 @@ async function doImportUsers() {
       newDepts.push(r.department);
     }
   });
+  const prevDepartments = cloudData.departments.slice();
   if (newDepts.length > 0) {
     cloudData.departments.push(...newDepts);
     cloudData.departments.sort();
     await saveDepartments();
   }
+  const userUndoSteps = [];
+  if (addedUserIds.length) userUndoSteps.push({ type:'delete', collection:'users', ids: addedUserIds });
+  if (newDepts.length) userUndoSteps.push({ type:'departments', prev: prevDepartments });
+  if (userUndoSteps.length) registerUndoBatch('成员账号(' + addedUserIds.length + ' 名)', userUndoSteps);
 
   // Show result
   let resultHtml = `<div class="alert alert-success">✅ 成功导入 ${results.success} 名成员</div>`;
@@ -6194,9 +6298,11 @@ function handleCallUpload(event) {
   const input = event.target;
   let pending = files.length;
   let okCount = 0, skipCount = 0, failCount = 0, badCount = 0, blankCount = 0;
+  const allAddedCallIds = [];
   function finish() {
     if (pending > 0) return;
     input.value = '';
+    if (allAddedCallIds.length) registerUndoBatch('外呼数据', [{ type:'delete', collection:'callRecords', ids: allAddedCallIds }]);
     showToast('上传完成:新增 ' + okCount + ' 条,跳过重复 ' + skipCount + ' 条'
       + (badCount ? ',跳过格式异常 ' + badCount + ' 行' : '')
       + (blankCount ? ',跳过全空记录 ' + blankCount + ' 行' : '')
@@ -6260,6 +6366,7 @@ function handleCallUpload(event) {
           await apiBatchPut('callRecords', newRecs.slice(i, i + 500));
         }
         cloudData.callRecords = (cloudData.callRecords || []).concat(newRecs);
+        newRecs.forEach(r => allAddedCallIds.push(r.id));
         okCount += newRecs.length;
       } catch (err) {
         failCount++;
@@ -9405,7 +9512,9 @@ function importGradeConfig(input) {
       });
       if (!list.length) { alert('没有有效的级别数据(级别名称为空)'); input.value = ''; return; }
       if (!confirm('成功识别 ' + list.length + ' 个级别,确定导入并覆盖当前评级标准配置吗>')) { input.value = ''; return; }
+      const prevGradeConfig = (cloudData.formConfig && cloudData.formConfig.gradeConfig !== undefined) ? cloudData.formConfig.gradeConfig : undefined;
       cloudData.formConfig.gradeConfig = list;
+      registerUndoBatch('评级标准配置', [{ type:'config', path:['gradeConfig'], prev: prevGradeConfig }]);
       renderConfigContent();
       // 内联保存(不依赖 saveFormConfig 的 event.target)
       fetch(FB_BASE + '/formConfig.json', {
@@ -10158,13 +10267,16 @@ async function handleVisitUpload(input) {
       newRecords.push(record);
     }
     let saved = 0;
+    const addedVisitIds = [];
     for (const rec of newRecords) {
       try {
         await apiCreate('visitRecords', rec);
         cloudData.visitRecords.push(rec);
         saved++;
+        addedVisitIds.push(rec.id);
       } catch(e) { console.warn('Failed to save visit record:', e); }
     }
+    if (addedVisitIds.length) registerUndoBatch('拜访数据', [{ type:'delete', collection:'visitRecords', ids: addedVisitIds }]);
     try { saveReportsCache(); } catch(e) {}
     if (alertEl) {
       let msg = '✅ 上传完成!新增 ' + saved + ' 条记录';
@@ -12166,7 +12278,7 @@ async function importSalesFile(file, mode = 'cover') {
           const existing = existingById.get(key);
           const merged = applySalesCover(existing, src);
           processing.set(key, { rec: merged });
-          toUpdate.push({ id: existing.id, rec: merged });
+          toUpdate.push({ id: existing.id, rec: merged, prev: Object.assign({}, existing) });
           updated++;
           continue;
         }
@@ -12200,6 +12312,11 @@ async function importSalesFile(file, mode = 'cover') {
         if (idx >= 0) cloudData.salesRecords[idx] = Object.assign({}, cloudData.salesRecords[idx], rec);
       });
     }
+    // 撤销导入(v1.42.121):登记本批次,覆盖模式额外保存被覆盖记录的旧值以便回滚
+    const salesUndoSteps = [];
+    if (toAdd.length) salesUndoSteps.push({ type:'delete', collection:'salesRecords', ids: toAdd.map(r => r.id) });
+    if (toUpdate.length) salesUndoSteps.push({ type:'patch', collection:'salesRecords', recs: toUpdate.map(t => ({ id: t.id, data: t.prev })) });
+    if (salesUndoSteps.length) registerUndoBatch('业绩数据(' + (isCover ? '覆盖导入' : '新增导入') + ')', salesUndoSteps);
     saveReportsCache();
     hideImportOverlay();
     salesDetailPage = 1;
@@ -12920,7 +13037,7 @@ function renderSalesBoardRefund() {
       grand += map[k].total; grandCnt += map[k].cnt;
     });
     const head = '<tr>'
-      + '<th class="sort-th" style="cursor:pointer;text-align:left" onclick="toggleRefundSort(\'' + which + '\',\'name\')">' + dimLabel + refundInd(which, 'name') + '</th>'
+      + '<th class="sort-th" style="cursor:pointer" onclick="toggleRefundSort(\'' + which + '\',\'name\')">' + dimLabel + refundInd(which, 'name') + '</th>'
       + years.map(y => '<th class="sort-th num" style="cursor:pointer" onclick="toggleRefundSort(\'' + which + '\',\'' + y + '\')">' + y + refundInd(which, y) + '</th>').join('')
       + '<th class="sort-th num" style="cursor:pointer;background:#FFF8EE" onclick="toggleRefundSort(\'' + which + '\',\'total\')">合计' + refundInd(which, 'total') + '</th></tr>';
     const body = rows.map(r => '<tr><td class="dim-cell">' + esc(r.name) + '</td>'
@@ -14362,6 +14479,7 @@ async function doCsImportTags() {
     (lookup[key] || (lookup[key] = [])).push(r);
   });
   let matchedGroups = 0, updatedDetails = 0, skipped = 0, fail = 0, warnOpts = 0;
+  const csUndoMap = new Map(); // id -> 导入前的 {customerSource,category,customerProfile}(仅首次触碰时记录,保证回滚到最原始值)
   for (const cells of dataRows) {
     const dm = (cells[iDocMonth] || '').trim();
     const sp = (cells[iSales] || '').trim();
@@ -14380,6 +14498,7 @@ async function doCsImportTags() {
     let grpChanged = false;
     for (const r of matched) {
       const patch = {};
+      if (!csUndoMap.has(r.id)) csUndoMap.set(r.id, { customerSource: r.customerSource, category: r.category, customerProfile: r.customerProfile });
       if (newSrc && r.customerSource !== newSrc) { r.customerSource = newSrc; patch.customerSource = newSrc; }
       if (newCat && r.category !== newCat) { r.category = newCat; patch.category = newCat; }
       if (newPro && r.customerProfile !== newPro) { r.customerProfile = newPro; patch.customerProfile = newPro; }
@@ -14390,6 +14509,7 @@ async function doCsImportTags() {
     }
     if (grpChanged) matchedGroups++;
   }
+  if (csUndoMap.size) registerUndoBatch('客户标签(来源/品类/画像)', [{ type:'patch', collection:'salesRecords', recs: Array.from(csUndoMap).map(([id, data]) => ({ id, data })) }]);
   saveReportsCache();
   closeModal();
   renderCustomerSummary();
@@ -14754,9 +14874,11 @@ function importTeamTargets(input) {
       if (!Object.keys(draft).length) { alert('没有有效的目标数据(团队名为空或金额均为 0)'); input.value = ''; return; }
       const year = sbTargetDraftYear || (new Date().getFullYear().toString());
       if (!confirm('成功识别 ' + Object.keys(draft).length + ' 个团队的目标,确定导入并覆盖 ' + year + ' 年的团队月目标吗>')) { input.value = ''; return; }
+      const prevTeamTargetsYear = (cloudData.formConfig.teamTargets && cloudData.formConfig.teamTargets[year] !== undefined) ? cloudData.formConfig.teamTargets[year] : undefined;
       Object.keys(draft).forEach(t => { sbTargetDraft[t] = draft[t]; });
       if (!cloudData.formConfig.teamTargets) cloudData.formConfig.teamTargets = {};
       cloudData.formConfig.teamTargets[year] = pruneTargetDraft();
+      registerUndoBatch('团队月目标(' + year + ')', [{ type:'config', path:['teamTargets', year], prev: prevTeamTargetsYear }]);
       fetch(FB_BASE + '/formConfig.json', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cloudData.formConfig) })
         .then(() => { showToast('团队月目标已导入并保存', 'success'); renderTeamTargetEditor(year); refreshSalesBoardStats(); })
         .catch(err => showToast('保存失败: ' + err.message, 'error', 4000));
@@ -14983,9 +15105,11 @@ function importTeamHeadcount(input) {
       if (!Object.keys(draft).length) { alert('没有有效的人数数据(团队名为空或人数均为 0)'); input.value = ''; return; }
       const year = sbHeadcountDraftYear || (new Date().getFullYear().toString());
       if (!confirm('成功识别 ' + Object.keys(draft).length + ' 个团队的人数,确定导入并覆盖 ' + year + ' 年的团队人数吗>')) { input.value = ''; return; }
+      const prevTeamHeadcountYear = (cloudData.formConfig.teamHeadcount && cloudData.formConfig.teamHeadcount[year] !== undefined) ? cloudData.formConfig.teamHeadcount[year] : undefined;
       Object.keys(draft).forEach(t => { sbHeadcountDraft[t] = draft[t]; });
       if (!cloudData.formConfig.teamHeadcount) cloudData.formConfig.teamHeadcount = {};
       cloudData.formConfig.teamHeadcount[year] = pruneHeadcountDraft();
+      registerUndoBatch('团队人数(' + year + ')', [{ type:'config', path:['teamHeadcount', year], prev: prevTeamHeadcountYear }]);
       fetch(FB_BASE + '/formConfig.json', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cloudData.formConfig) })
         .then(() => { showToast('团队人数已导入并保存', 'success'); renderTeamHeadcountEditor(year); refreshSalesBoardStats(); })
         .catch(err => showToast('保存失败: ' + err.message, 'error', 4000));
@@ -16618,23 +16742,37 @@ function importPerfScoreExcel(input, kind) {
       if (!confirm('成功匹配 ' + matched.length + ' 条绩效总分(覆盖 ' + year + ' 年)' + (umCount ? ',' + umCount + ' 个姓名未匹配系统用户已跳过' : '') + ',\n确定导入吗>导入将同时更新实时记录并[最终保存]冻结快照(矩阵立即显示彩色),')) { input.value = ''; return; }
       if (kind === 'sales') { if (!cloudData.performanceRecords) cloudData.performanceRecords = {}; if (!cloudData.performanceSnapshots) cloudData.performanceSnapshots = {}; }
       else { if (!cloudData.mgrPerformanceRecords) cloudData.mgrPerformanceRecords = {}; if (!cloudData.mgrPerformanceSnapshots) cloudData.mgrPerformanceSnapshots = {}; }
+      const perfUndoRecs = []; // {id, data} data=null 表示导入前该 key 不存在 -> 撤销时删除
+      const perfUndoSnaps = [];
       matched.forEach(it => {
         if (kind === 'sales') {
           const k = perfKey(year, it.name, it.month);
+          const prevRec = cloudData.performanceRecords[k] ? Object.assign({}, cloudData.performanceRecords[k]) : null;
+          const prevSnap = cloudData.performanceSnapshots[k] ? Object.assign({}, cloudData.performanceSnapshots[k]) : null;
           cloudData.performanceRecords[k] = Object.assign({}, cloudData.performanceRecords[k] || {}, { finalScore: it.score });
           apiUpdate('performanceRecords', k, cloudData.performanceRecords[k]).catch(() => {});
           const snap = buildPerfScoreSnapshot('sales', year, it.name, it.month);
           cloudData.performanceSnapshots[k] = snap;
           apiUpdate('performanceSnapshots', k, snap).catch(() => {});
+          perfUndoRecs.push({ id: k, data: prevRec });
+          perfUndoSnaps.push({ id: k, data: prevSnap });
         } else {
           const k = mgrKey(year, it.name, it.month);
+          const prevRec = cloudData.mgrPerformanceRecords[k] ? Object.assign({}, cloudData.mgrPerformanceRecords[k]) : null;
+          const prevSnap = cloudData.mgrPerformanceSnapshots[k] ? Object.assign({}, cloudData.mgrPerformanceSnapshots[k]) : null;
           cloudData.mgrPerformanceRecords[k] = Object.assign({}, cloudData.mgrPerformanceRecords[k] || {}, { finalScore: it.score });
           apiUpdate('mgrPerformanceRecords', k, cloudData.mgrPerformanceRecords[k]).catch(() => {});
           const snap = buildPerfScoreSnapshot('mgr', year, it.name, it.month);
           cloudData.mgrPerformanceSnapshots[k] = snap;
           apiUpdate('mgrPerformanceSnapshots', k, snap).catch(() => {});
+          perfUndoRecs.push({ id: k, data: prevRec });
+          perfUndoSnaps.push({ id: k, data: prevSnap });
         }
       });
+      if (perfUndoRecs.length) registerUndoBatch((kind === 'sales' ? '销售绩效总分' : '管理绩效总分'), [
+        { type:'patch', collection: kind === 'sales' ? 'performanceRecords' : 'mgrPerformanceRecords', recs: perfUndoRecs },
+        { type:'patch', collection: kind === 'sales' ? 'performanceSnapshots' : 'mgrPerformanceSnapshots', recs: perfUndoSnaps }
+      ]);
       showToast('已导入 ' + matched.length + ' 条绩效总分' + (umCount ? (',' + umCount + ' 个未匹配跳过') : '') + ',并已最终保存', 'success', 4500);
       if (kind === 'sales') perfRefresh(); else mgrPerfRefresh();
     } catch (err) { alert('导入失败:' + (err.message || err)); }
