@@ -1219,8 +1219,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260909190310';
-const APP_VERSION = '1.42.116'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260910100016';
+const APP_VERSION = '1.42.117'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -11516,7 +11516,7 @@ function renderGroupedVisitStats(records, s, e, mode) {
     const color = cat ? (catColorMap[cat] || '#6366f1') : '#6366f1';
     const evJson = JSON.stringify(ev);
     const active = st1.key === ev;
-    return `<th style="text-align:center;white-space:nowrap;font-size:12px;padding:8px 10px">
+    return `<th style="text-align:center;white-space:nowrap;font-size:12px;padding:8px 10px;height:80px;vertical-align:middle">
       <div>${ev}</div>
       <div style="font-size:10px;color:${color};font-weight:400;margin-bottom:2px">${cat || '-'}</div>
       <div style="display:flex;justify-content:center;gap:2px">
@@ -11552,7 +11552,7 @@ function renderGroupedVisitStats(records, s, e, mode) {
     <div class="card-body" style="padding:16px">
       <div class="table-wrap"><table style="font-size:13px;min-width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--gray-50)">
-          <th style="text-align:left;padding:8px 10px">${unitName}</th>${thCells}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计
+          <th style="text-align:left;padding:8px 10px;height:80px;vertical-align:middle">${unitName}</th>${thCells}<th style="text-align:center;white-space:nowrap;padding:8px 10px;height:80px;vertical-align:middle">合计
             <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
               <button onclick='setVisitSort("${mode}","events","__total__","asc")' title="按合计升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${st1.key==='__total__'&&st1.dir==='asc'?'#16a34a':'#6b7280'}">▲</button>
               <button onclick='setVisitSort("${mode}","events","__total__","desc")' title="按合计降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${st1.key==='__total__'&&st1.dir==='desc'?'#dc2626':'#6b7280'}">▼</button>
@@ -11567,7 +11567,7 @@ function renderGroupedVisitStats(records, s, e, mode) {
   const catTh = catNames.map(c => {
     const cJson = JSON.stringify(c);
     const active = st2.key === c;
-    return `<th style="text-align:center;white-space:nowrap;padding:8px 10px;color:${catColorMap[c] || '#6366f1'}">${c}
+    return `<th style="text-align:center;white-space:nowrap;padding:8px 10px;height:80px;vertical-align:middle;color:${catColorMap[c] || '#6366f1'}">${c}
       <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
         <button onclick='setVisitSort("${mode}","cats",${cJson},"asc")' title="按此列升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && st2.dir === 'asc' ? '#16a34a' : '#6b7280'}">▲</button>
         <button onclick='setVisitSort("${mode}","cats",${cJson},"desc")' title="按此列降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${active && st2.dir === 'desc' ? '#dc2626' : '#6b7280'}">▼</button>
@@ -11601,7 +11601,7 @@ function renderGroupedVisitStats(records, s, e, mode) {
     <div class="card-body" style="padding:16px">
       <div class="table-wrap"><table style="font-size:13px;min-width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--gray-50)">
-          <th style="text-align:left;padding:8px 10px">${unitName}</th>${catTh}<th style="text-align:center;white-space:nowrap;padding:8px 10px">合计
+          <th style="text-align:left;padding:8px 10px;height:80px;vertical-align:middle">${unitName}</th>${catTh}<th style="text-align:center;white-space:nowrap;padding:8px 10px;height:80px;vertical-align:middle">合计
             <div style="display:flex;justify-content:center;gap:2px;margin-top:2px">
               <button onclick='setVisitSort("${mode}","cats","__total__","asc")' title="按合计升序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${st2.key==='__total__'&&st2.dir==='asc'?'#16a34a':'#6b7280'}">▲</button>
               <button onclick='setVisitSort("${mode}","cats","__total__","desc")' title="按合计降序" style="border:1px solid #e5e7eb;background:#fff;border-radius:4px;cursor:pointer;font-size:10px;line-height:1.4;padding:1px 5px;color:${st2.key==='__total__'&&st2.dir==='desc'?'#dc2626':'#6b7280'}">▼</button>
