@@ -1253,8 +1253,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260910105737';
-const APP_VERSION = '1.42.119'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260910111634';
+const APP_VERSION = '1.42.120'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -6226,7 +6226,7 @@ function handleCallUpload(event) {
         header.forEach((h, i) => { idx[String(h).trim()] = i; });
         const need = ['联系时间', '客户', '工作单位/联系人', '电话号码', '通话时长', '通话方式', '员工', '部门'];
         const miss = need.filter(n => idx[n] === undefined);
-        if (miss.length) throw new Error('缺少列: ' + miss.join(','));
+        if (miss.length) throw new Error('缺少必需列: ' + miss.join(',') + (miss.indexOf('通话方式') >= 0 ? '(该文件疑似非外呼数据,已阻止导入)' : ''));
         const existKeys = new Set((cloudData.callRecords || []).map(r => (r.contactTime || '') + '|' + (r.phone || '')));
         const fileKeys = new Set();
         const newRecs = [];
@@ -9546,6 +9546,7 @@ async function renderVisitData() {
           <button class="btn btn-outline" onclick="downloadVisitTemplate()">📥 下载模板</button>
           <button class="btn btn-outline" id="visitCleanupBtn" onclick="cleanupVisitDuplicates()" title="按相同 key(联系时间+客户+联系人+手机号+签到事件+员工+部门+签到地址+备注)清理重复,每组仅保留第一条">🧹 清理重复</button>
         </div>
+        <div style="font-size:12px;color:var(--gray-500);margin-top:8px">支持上传拜访系统导出的 CSV(表头需含「签到事件」列,如:联系时间,客户,联系人,手机号,签到事件,签退时间,时长,签退状态,员工,部门,签到地址,备注,拜访结果,卡点说明),按联系时间(到分钟)+客户+联系人+手机号+员工+部门+签到地址+备注自动去重追加;<b>无「签到事件」列的文件(如外呼数据)将被阻止导入,避免数据错乱</b>。</div>
         ${multiSelectPanelHtml('visitDept', {label:'部门', options:depts, selected:visitDeptFilter, placeholder:'全部部门', defaultKey:'visit.dept', onChange:function(arr){ visitDeptFilter = arr; resetVisitPage(); }})}
         ${multiSelectPanelHtml('visitPerson', {label:'销售', options:persons, selected:visitPersonFilter, placeholder:'全部人员', defaultKey:'visit.person', onChange:function(arr){ visitPersonFilter = arr; resetVisitPage(); }})}
         ${multiSelectPanelHtml('visitResult', {label:'拜访结果', options:[...(vc.visitResults||[]).map(r=>({v:r,label:r})), {v:'empty',label:'⚠️ 未填写结果'}, {v:'filled',label:'已填写结果'}], selected:visitResultFilter, placeholder:'全部结果', defaultKey:'visit.result', onChange:function(arr){ visitResultFilter = arr; resetVisitPage(); }})}
@@ -10094,6 +10095,13 @@ async function handleVisitUpload(input) {
       else if (h.includes('拜访结果')) colMap.visitResult = i;
       else if (h.includes('卡点') || h.includes('说明')) colMap.blockerNote = i;
     });
+    // 防错导入(v1.42.120):拜访数据必须包含「签到事件」列,否则视为上传了错误文件类型(如外呼数据),
+    // 直接阻止导入,避免像此前把外呼数据误传进拜访数据导致错乱
+    if (colMap.signinEvent === undefined) {
+      if (alertEl) alertEl.innerHTML = '<div class="alert alert-danger">❌ 导入被阻止:该文件缺少「签到事件」列,疑似上传了非拜访数据(如外呼数据)。请上传包含「签到事件」列的拜访数据 CSV。</div>';
+      input.value = '';
+      return;
+    }
     // 查重前确保内存中的拜访数据是最新的(避免登录后未刷新 / 缓存为空导致 existingKeys 为空而漏查重)
     await ensureVisitDataLoaded();
     const newRecords = [];
