@@ -1040,6 +1040,25 @@ tr:hover td{background:var(--bg-hover)}
   .fc-add-btn{min-height:36px;padding-top:0;padding-bottom:0}
 }
 
+/* ===== 业绩看板·退款分析(v1.42.119) ===== */
+.refund-note{margin:0 0 16px;padding:12px 16px;background:var(--danger-light);border:1px solid #fecaca;border-radius:10px;font-size:13px;color:var(--gray-700);line-height:1.7}
+.refund-note b{color:var(--danger)}
+.kpi-row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+.kpi-card{flex:1;min-width:150px;background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:16px 18px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.kpi-val{font-size:24px;font-weight:800;color:var(--gray-900);line-height:1.2}
+.kpi-label{font-size:12px;color:var(--gray-500);margin-top:6px}
+.refund-table .dim-cell{font-weight:600;white-space:nowrap;position:sticky;left:0;background:#fff;z-index:1}
+.refund-table .money{font-weight:700;color:var(--danger);white-space:nowrap}
+.refund-table .money .cnt{font-weight:500;font-size:11px;color:var(--gray-400);margin-left:2px}
+.refund-table .empty-cell{color:var(--gray-300);text-align:center}
+.refund-table th.num,.refund-table td.num{text-align:right}
+.refund-table tr.refund-total td{background:#FFF8EE;font-weight:800;border-top:2px solid var(--gray-300)}
+.refund-table tr.refund-total .dim-cell{background:#FFF8EE}
+@media (max-width:768px){
+  .kpi-card{min-width:calc(50% - 7px);padding:12px}
+  .kpi-val{font-size:20px}
+}
+
 </style>
 </head>
 <body>
@@ -1234,8 +1253,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260910101836';
-const APP_VERSION = '1.42.118'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260910105737';
+const APP_VERSION = '1.42.119'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -2814,8 +2833,11 @@ function renderDashboard() {
   const dayBeforeYest = localYMD(new Date(Date.now() - 2*86400000));
 
   // --- Kanban 1: Daily missing reports (with date filter) ---
+  // 未在职(leaveDate 非空且 <= 筛选日期)的员工不参与日报/周报未交统计(v1.42.119)
+  const notOnDutyDaily = u => u.leaveDate && u.leaveDate <= dailyDate;
+  const notOnDutyWeekly = u => u.leaveDate && u.leaveDate <= weeklyDateEnd;
   const dailySubmitters = new Set(cloudData.dailyReports.filter(r => r.reportDate === dailyDate).map(r => r.userId));
-  const dailyMissing = activeUsers.filter(u => u.role !== 'manager' && !dailySubmitters.has(u.id));
+  const dailyMissing = activeUsers.filter(u => u.role !== 'manager' && !dailySubmitters.has(u.id) && !notOnDutyDaily(u));
   const dailyBackfill = cloudData.dailyReports.filter(r => r.reportDate === dayBeforeYest && r.createdAt && r.createdAt.split('T')[0] === today);
 
   const dailyKanban = `
@@ -2847,7 +2869,7 @@ function renderDashboard() {
 
   // --- Kanban 2: Weekly missing reports (with date filter) ---
   const weeklySubmitters = new Set(cloudData.weeklyReports.filter(r => r.weekStart === weeklyDate).map(r => r.userId));
-  const weeklyMissing = activeUsers.filter(u => u.role !== 'manager' && !weeklySubmitters.has(u.id));
+  const weeklyMissing = activeUsers.filter(u => u.role !== 'manager' && !weeklySubmitters.has(u.id) && !notOnDutyWeekly(u));
 
   const weeklyKanban = `
     <div class="card" style="margin-bottom:20px">
@@ -12805,6 +12827,7 @@ async function renderSalesBoard() {
       <div class="summary-tab ${salesBoardTab==='source'?'active':''}" onclick="switchSalesBoardTab('source')">🏷️ 客户来源汇总</div>
       <div class="summary-tab ${salesBoardTab==='profile'?'active':''}" onclick="switchSalesBoardTab('profile')">👤 客户画像汇总</div>
       <div class="summary-tab ${salesBoardTab==='signing'?'active':''}" onclick="switchSalesBoardTab('signing')">📝 销售签约分析</div>
+      <div class="summary-tab ${salesBoardTab==='refund'?'active':''}" onclick="switchSalesBoardTab('refund')">💸 退款分析</div>
     </div>
     <div id="sbContent"></div>`;
   document.getElementById('contentBody').innerHTML = html;
@@ -12825,7 +12848,129 @@ function renderSalesBoards() {
   if (salesBoardTab === 'source') { renderSalesBoardSource(); return; }
   if (salesBoardTab === 'profile') { renderSalesBoardProfile(); return; }
   if (salesBoardTab === 'signing') { renderSalesBoardSigning(); return; }
+  if (salesBoardTab === 'refund') { renderSalesBoardRefund(); return; }
   renderSalesBoardStats();
+}
+
+// ===== 退款分析(v1.42.119) =====
+// 数据来源:客户汇总数据中 客户来源(customerSource) === '退款' 的业绩记录(销售退货单)
+let refundSortTeam = { key: 'total', dir: 'desc' };
+let refundSortSales = { key: 'total', dir: 'desc' };
+function refundInd(which, key) {
+  const s = which === 'team' ? refundSortTeam : refundSortSales;
+  return s.key === key ? (s.dir === 'asc' ? ' ▲' : ' ▼') : '';
+}
+function toggleRefundSort(which, key) {
+  const s = which === 'team' ? refundSortTeam : refundSortSales;
+  if (s.key === key) s.dir = s.dir === 'asc' ? 'desc' : 'asc';
+  else { s.key = key; s.dir = 'desc'; }
+  renderSalesBoardRefund();
+}
+
+function renderSalesBoardRefund() {
+  const all = cloudData.salesRecords || [];
+  const refund = all.filter(r => (r.customerSource || '').trim() === '退款');
+  const years = [...new Set(all.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const absAmt = r => Math.abs(parseFloat(r.amount) || 0);
+  function aggregate(dimKey) {
+    const m = {};
+    refund.forEach(r => {
+      const k = ((r[dimKey] || '').trim()) || '(未分类)';
+      const ym = (r.docMonth || '').slice(0, 4);
+      if (!m[k]) m[k] = { y: {}, total: 0, cnt: 0 };
+      if (!m[k].y[ym]) m[k].y[ym] = { amt: 0, cnt: 0 };
+      const a = absAmt(r);
+      m[k].y[ym].amt += a; m[k].y[ym].cnt += 1;
+      m[k].total += a; m[k].cnt += 1;
+    });
+    return m;
+  }
+  const teamMap = aggregate('team');
+  const empMap = aggregate('salesperson');
+  function sortedRows(map, sort) {
+    const rows = Object.keys(map).map(k => ({ name: k, y: map[k].y, total: map[k].total, cnt: map[k].cnt }));
+    rows.sort((a, b) => {
+      let va, vb;
+      if (sort.key === 'name') { va = a.name; vb = b.name; return sort.dir === 'asc' ? va.localeCompare(vb, 'zh') : vb.localeCompare(va, 'zh'); }
+      if (sort.key === 'total') { va = a.total; vb = b.total; }
+      else { va = (a.y[sort.key] || { amt: 0 }).amt; vb = (b.y[sort.key] || { amt: 0 }).amt; }
+      return sort.dir === 'asc' ? va - vb : vb - va;
+    });
+    return rows;
+  }
+  function moneyCell(v) {
+    return (v && (v.amt > 0 || v.cnt > 0))
+      ? '<td class="money">¥' + v.amt.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '<span class="cnt">(' + v.cnt + '笔)</span></td>'
+      : '<td class="empty-cell">—</td>';
+  }
+  function boardHtml(which, title, dimLabel, map, sort) {
+    const rows = sortedRows(map, sort);
+    const totByYear = {}; let grand = 0, grandCnt = 0;
+    Object.keys(map).forEach(k => {
+      const yy = map[k].y;
+      Object.keys(yy).forEach(y => { if (!totByYear[y]) totByYear[y] = { amt: 0, cnt: 0 }; totByYear[y].amt += yy[y].amt; totByYear[y].cnt += yy[y].cnt; });
+      grand += map[k].total; grandCnt += map[k].cnt;
+    });
+    const head = '<tr>'
+      + '<th class="sort-th" style="cursor:pointer;text-align:left" onclick="toggleRefundSort(\'' + which + '\',\'name\')">' + dimLabel + refundInd(which, 'name') + '</th>'
+      + years.map(y => '<th class="sort-th num" style="cursor:pointer" onclick="toggleRefundSort(\'' + which + '\',\'' + y + '\')">' + y + refundInd(which, y) + '</th>').join('')
+      + '<th class="sort-th num" style="cursor:pointer;background:#FFF8EE" onclick="toggleRefundSort(\'' + which + '\',\'total\')">合计' + refundInd(which, 'total') + '</th></tr>';
+    const body = rows.map(r => '<tr><td class="dim-cell">' + esc(r.name) + '</td>'
+      + years.map(y => moneyCell(r.y[y])).join('')
+      + '<td class="money" style="background:#FFF8EE">¥' + r.total.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '<span class="cnt">(' + r.cnt + '笔)</span></td></tr>').join('');
+    const totalRow = '<tr class="refund-total"><td class="dim-cell">合计</td>'
+      + years.map(y => moneyCell(totByYear[y])).join('')
+      + '<td class="money" style="background:#FFF8EE">¥' + grand.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '<span class="cnt">(' + grandCnt + '笔)</span></td></tr>';
+    return '<div class="card" style="margin-bottom:20px">'
+      + '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
+      + '<div><h4 style="display:inline">💸 ' + title + '</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">' + dimLabel + '(纵向) × 年份(横向)</span></div>'
+      + '<button class="btn btn-outline btn-sm" onclick="exportRefundBoard(\'' + which + '\')">📤 导出</button>'
+      + '</div><div class="card-body"><div class="table-wrap"><table class="table refund-table">' + head + body + totalRow + '</table></div></div></div>';
+  }
+  const totalAmt = refund.reduce((s, r) => s + absAmt(r), 0);
+  const cont = document.getElementById('sbContent');
+  cont.innerHTML = ''
+    + '<div class="refund-note">📌 数据口径:取「客户汇总数据」中 <b>客户来源 = 退款</b> 的业绩记录(销售退货单),金额按绝对值统计。当前共 <b>' + refund.length + '</b> 笔 / <b>¥' + totalAmt.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '</b>。</div>'
+    + '<div class="kpi-row">'
+    + '<div class="kpi-card"><div class="kpi-val" style="color:var(--danger)">¥' + totalAmt.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '</div><div class="kpi-label">退款总金额</div></div>'
+    + '<div class="kpi-card"><div class="kpi-val">' + refund.length + '</div><div class="kpi-label">退款笔数</div></div>'
+    + '<div class="kpi-card"><div class="kpi-val">' + Object.keys(teamMap).length + '</div><div class="kpi-label">涉及团队</div></div>'
+    + '<div class="kpi-card"><div class="kpi-val">' + Object.keys(empMap).length + '</div><div class="kpi-label">涉及销售</div></div>'
+    + '</div>'
+    + boardHtml('team', '退款分析1 · 团队退款统计', '团队', teamMap, refundSortTeam)
+    + boardHtml('sales', '退款分析2 · 销售退款统计', '销售', empMap, refundSortSales);
+}
+
+function exportRefundBoard(which) {
+  if (typeof XLSX === 'undefined') { showToast('表格组件未加载,请刷新页面', 'error'); return; }
+  const all = cloudData.salesRecords || [];
+  const refund = all.filter(r => (r.customerSource || '').trim() === '退款');
+  const years = [...new Set(all.map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
+  const dimKey = which === 'team' ? 'team' : 'salesperson';
+  const dimLabel = which === 'team' ? '团队' : '销售';
+  const absAmt = r => Math.abs(parseFloat(r.amount) || 0);
+  const m = {};
+  refund.forEach(r => {
+    const k = ((r[dimKey] || '').trim()) || '(未分类)';
+    const ym = (r.docMonth || '').slice(0, 4);
+    if (!m[k]) m[k] = { y: {}, total: 0, cnt: 0 };
+    if (!m[k].y[ym]) m[k].y[ym] = { amt: 0, cnt: 0 };
+    const a = absAmt(r);
+    m[k].y[ym].amt += a; m[k].y[ym].cnt += 1; m[k].total += a; m[k].cnt += 1;
+  });
+  const rows = Object.keys(m).map(k => ({ name: k, y: m[k].y, total: m[k].total, cnt: m[k].cnt })).sort((a, b) => b.total - a.total);
+  const header = [dimLabel].concat(years).concat(['合计金额', '合计笔数']);
+  const aoa = [header];
+  rows.forEach(r => { const arr = [r.name]; years.forEach(y => arr.push(r.y[y] ? r.y[y].amt : 0)); arr.push(r.total); arr.push(r.cnt); aoa.push(arr); });
+  const totY = {}; let g = 0, gc = 0;
+  Object.keys(m).forEach(k => { Object.keys(m[k].y).forEach(y => { totY[y] = (totY[y] || 0) + m[k].y[y].amt; }); g += m[k].total; gc += m[k].cnt; });
+  const tarr = ['合计'].concat(years.map(y => totY[y] || 0)).concat([g, gc]);
+  aoa.push(tarr);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, which === 'team' ? '团队退款统计' : '销售退款统计');
+  XLSX.writeFile(wb, '退款分析_' + (which === 'team' ? '团队' : '销售') + '_' + (years[0] || '') + '-' + (years[years.length - 1] || '') + '.xlsx');
+  showToast('已导出' + (which === 'team' ? '团队' : '销售') + '退款统计', 'success');
 }
 
 function renderSalesBoardStats() {
