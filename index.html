@@ -1253,8 +1253,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260910115938';
-const APP_VERSION = '1.42.121'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260910120854';
+const APP_VERSION = '1.42.122'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -13023,10 +13023,16 @@ function renderSalesBoardRefund() {
     });
     return rows;
   }
-  function moneyCell(v) {
-    return (v && (v.amt > 0 || v.cnt > 0))
-      ? '<td class="money">¥' + v.amt.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '<span class="cnt">(' + v.cnt + '笔)</span></td>'
-      : '<td class="empty-cell">—</td>';
+  function moneyCell(v, drecs, extra, dimType) {
+    const has = v && (v.amt > 0 || v.cnt > 0);
+    const txt = has
+      ? '¥' + v.amt.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '<span class="cnt">(' + v.cnt + '笔)</span>'
+      : '—';
+    const cls = has ? 'money' : 'empty-cell';
+    const click = (has && drecs && drecs.length)
+      ? ' onclick="openDrillDetail(\'' + escapeTitle((dimType||'')+'退款明细 '+txt.replace(/<[^>]*>/g,'').trim()) + '\',\'' + drillPut(drecs) + '\')" style="cursor:pointer" title="点击查看明细"'
+      : '';
+    return '<td class="' + cls + '"' + click + (extra||'') + '>' + txt + '</td>';
   }
   function boardHtml(which, title, dimLabel, map, sort) {
     const rows = sortedRows(map, sort);
@@ -13036,16 +13042,20 @@ function renderSalesBoardRefund() {
       Object.keys(yy).forEach(y => { if (!totByYear[y]) totByYear[y] = { amt: 0, cnt: 0 }; totByYear[y].amt += yy[y].amt; totByYear[y].cnt += yy[y].cnt; });
       grand += map[k].total; grandCnt += map[k].cnt;
     });
+    const fk = which === 'team' ? 'team' : 'salesperson';
+    const byDim = n => refund.filter(r => (r[fk]||'').trim() === n);
     const head = '<tr>'
       + '<th class="sort-th" style="cursor:pointer" onclick="toggleRefundSort(\'' + which + '\',\'name\')">' + dimLabel + refundInd(which, 'name') + '</th>'
       + years.map(y => '<th class="sort-th num" style="cursor:pointer" onclick="toggleRefundSort(\'' + which + '\',\'' + y + '\')">' + y + refundInd(which, y) + '</th>').join('')
       + '<th class="sort-th num" style="cursor:pointer;background:#FFF8EE" onclick="toggleRefundSort(\'' + which + '\',\'total\')">合计' + refundInd(which, 'total') + '</th></tr>';
-    const body = rows.map(r => '<tr><td class="dim-cell">' + esc(r.name) + '</td>'
-      + years.map(y => moneyCell(r.y[y])).join('')
-      + '<td class="money" style="background:#FFF8EE">¥' + r.total.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '<span class="cnt">(' + r.cnt + '笔)</span></td></tr>').join('');
+    const body = rows.map(r => { const dr = byDim(r.name); return '<tr><td class="dim-cell">' + esc(r.name) + '</td>'
+      + years.map(y => moneyCell(r.y[y], dr.filter(rr => (rr.docMonth||'').startsWith(y)), '', which)).join('')
+      + moneyCell({amt:r.total,cnt:r.cnt}, dr, ' style="background:#FFF8EE"', which)
+      + '</tr>'; }).join('');
     const totalRow = '<tr class="refund-total"><td class="dim-cell">合计</td>'
-      + years.map(y => moneyCell(totByYear[y])).join('')
-      + '<td class="money" style="background:#FFF8EE">¥' + grand.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + '<span class="cnt">(' + grandCnt + '笔)</span></td></tr>';
+      + years.map(y => moneyCell(totByYear[y], refund.filter(rr => (rr.docMonth||'').startsWith(y)), '', which)).join('')
+      + moneyCell({amt:grand,cnt:grandCnt}, refund, ' style="background:#FFF8EE"', which)
+      + '</tr>';
     return '<div class="card" style="margin-bottom:20px">'
       + '<div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
       + '<div><h4 style="display:inline">💸 ' + title + '</h4><span style="font-size:12px;color:var(--gray-500);margin-left:8px">' + dimLabel + '(纵向) × 年份(横向)</span></div>'
