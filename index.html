@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260910191443';
-const APP_VERSION = '1.42.126'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260911110824';
+const APP_VERSION = '1.42.127'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -12812,7 +12812,7 @@ let csPageRows = [];
 let csPage = 1;
 let csPageSize = 20;
 let csMonths = []; // 客户汇总月份多选('01'~'12');空数组=全部月份
-let csSortState = null; // 客户汇总排序状态:{ col: 'docMonth'|'salesperson'|'customer'|'amount'|'team'|'customerSource'|'category'|'customerProfile', dir: 'asc'|'desc' };null=默认按年/月+销售员+客户 升序
+let csSortState = null; // 客户汇总排序状态:{ col: 'docMonth'|'salesperson'|'customer'|'productName'|'amount'|'team'|'customerSource'|'category'|'customerProfile', dir: 'asc'|'desc' };null=默认按年/月+销售员+客户 升序
 let csOnlyBlank = false; // 客户汇总"未填报"筛选开关:true=只显示 客户来源/品类/客户画像 任一未设置的聚合行
 let csTeamFilter = [];   // 客户汇总:按部门筛选(空=全部)
 let csSalesFilter = [];  // 客户汇总:按人员筛选(空=全部)
@@ -13985,13 +13985,17 @@ function renderCustomerSummary() {
   const groups = {};
   filtered.forEach(r => {
     const key = (r.docMonth || '') + '|' + (r.salesperson || '') + '|' + (r.customer || '');
-    if (!groups[key]) groups[key] = { docMonth: r.docMonth || '', salesperson: r.salesperson || '', customer: r.customer || '', team: r.team || '', amount: 0, customerSource: '', category: '', customerProfile: '' };
+    if (!groups[key]) groups[key] = { docMonth: r.docMonth || '', salesperson: r.salesperson || '', customer: r.customer || '', team: r.team || '', amount: 0, customerSource: '', category: '', customerProfile: '', productName: '', _products: [] };
     const g = groups[key];
     g.amount += toNum(r.amount);
     if (!g.customerSource && r.customerSource) g.customerSource = r.customerSource;
     if (!g.category && r.category) g.category = r.category;
     if (!g.customerProfile && r.customerProfile) g.customerProfile = r.customerProfile;
+    const _pn = (r.productName || '').trim();
+    if (_pn && g._products.indexOf(_pn) < 0) g._products.push(_pn);
   });
+  // 「商品名称」列(拼接显示):该聚合组(年/月×销售员×客户)下全部商品名去重后用「、」连接
+  Object.values(groups).forEach(g => { g.productName = g._products.join('、'); delete g._products; });
   // 后三列暂存(v1.42.104):先留原值快照,再把未保存的暂存值套用到聚合行,
   // 使 表格显示 / 表头排序 / 「未填报」筛选 / 导出 四者与界面保持一致
   Object.keys(groups).forEach(k => {
@@ -14069,6 +14073,7 @@ function renderCustomerSummary() {
       <td>${esc(g.docMonth)}</td>
       <td>${esc(g.salesperson)}${userStatusBadge(g.salesperson, userMap)}</td>
       <td>${esc(g.customer) || '-'}</td>
+      <td>${esc(g.productName) || '-'}</td>
       <td class="num"><span style="color:${g.amount < 0 ? 'var(--danger)' : 'inherit'}">${fmtSalesMoney(g.amount)}</span></td>
       <td><span class="badge badge-team">${esc(g.team) || '-'}</span></td>
       ${tagSelect('customerSource', aggKey, g.customerSource, g._orig ? g._orig.customerSource : g.customerSource)}
@@ -14092,7 +14097,7 @@ function renderCustomerSummary() {
     const arrow = active ? (csSortState.dir === 'asc' ? '↑' : '↓') : '⇅';
     return `<th class="sort-th${active ? ' active' : ''}${cls ? ' ' + cls : ''}" onclick="csSortBy('${col}')">${label}<span class="sort-ind${active ? ' active' : ''}">${arrow}</span></th>`;
   };
-  wrap.innerHTML = `<table><thead><tr>${headCheck}${sortTh('docMonth','年/月')}${sortTh('salesperson','销售员')}${sortTh('customer','客户')}${sortTh('amount','折后总金额','num')}${sortTh('team','销售员所属门店')}${sortTh('customerSource','客户来源')}${sortTh('category','品类')}${sortTh('customerProfile','客户画像')}</tr></thead><tbody>${rowsHtml}</tbody></table>${pager}`;
+  wrap.innerHTML = `<table><thead><tr>${headCheck}${sortTh('docMonth','年/月')}${sortTh('salesperson','销售员')}${sortTh('customer','客户')}${sortTh('productName','商品名称')}${sortTh('amount','折后总金额','num')}${sortTh('team','销售员所属门店')}${sortTh('customerSource','客户来源')}${sortTh('category','品类')}${sortTh('customerProfile','客户画像')}</tr></thead><tbody>${rowsHtml}</tbody></table>${pager}`;
   updateCsBatchBar(totalRows);
   updateCsSaveBar();
 }
@@ -14360,14 +14365,14 @@ async function csExportCustomerSummary() {
   };
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('客户汇总');
-  const headers = ['年/月', '销售员', '客户', '折后总金额', '销售员所属门店', '客户来源', '品类', '客户画像'];
+  const headers = ['年/月', '销售员', '客户', '商品名称', '折后总金额', '销售员所属门店', '客户来源', '品类', '客户画像'];
   ws.addRow(headers);
   ws.views = [{ state: 'frozen', ySplit: 1 }];
-  csAllRows.forEach(g => ws.addRow([g.docMonth, g.salesperson, g.customer, g.amount, g.team, g.customerSource, g.category, g.customerProfile]));
-  const widths = [12, 12, 20, 16, 18, 14, 14, 14];
+  csAllRows.forEach(g => ws.addRow([g.docMonth, g.salesperson, g.customer, g.productName, g.amount, g.team, g.customerSource, g.category, g.customerProfile]));
+  const widths = [12, 12, 20, 26, 16, 18, 14, 14, 14];
   ws.columns.forEach((c, i) => { c.width = widths[i] || 14; });
   const lastRow = csAllRows.length + 1;
-  for (let r = 2; r <= lastRow; r++) ws.getCell('D' + r).numFmt = '#,##0.00';
+  for (let r = 2; r <= lastRow; r++) ws.getCell('E' + r).numFmt = '#,##0.00';
   // 隐藏"选项"表,供后三列下拉引用(避免选项含逗号导致下拉失效)
   const optWs = wb.addWorksheet('选项');
   optWs.state = 'hidden';
@@ -14376,9 +14381,9 @@ async function csExportCustomerSummary() {
   putOpts('A', opts.customerSource); putOpts('B', opts.category); putOpts('C', opts.customerProfile);
   const mkDV = (ref) => ({ type: 'list', allowBlank: true, formulae: ['=选项!' + ref] });
   const last = Math.max(lastRow, 2);
-  if (nSrc > 0) for (let r = 2; r <= last; r++) ws.getCell('F' + r).dataValidation = mkDV('A1:A' + nSrc);
-  if (nCat > 0) for (let r = 2; r <= last; r++) ws.getCell('G' + r).dataValidation = mkDV('B1:B' + nCat);
-  if (nPro > 0) for (let r = 2; r <= last; r++) ws.getCell('H' + r).dataValidation = mkDV('C1:C' + nPro);
+  if (nSrc > 0) for (let r = 2; r <= last; r++) ws.getCell('G' + r).dataValidation = mkDV('A1:A' + nSrc);
+  if (nCat > 0) for (let r = 2; r <= last; r++) ws.getCell('H' + r).dataValidation = mkDV('B1:B' + nCat);
+  if (nPro > 0) for (let r = 2; r <= last; r++) ws.getCell('I' + r).dataValidation = mkDV('C1:C' + nPro);
   const year = csYearFilter.length ? csYearFilter.join('_') : '全部年份';
   const monthLabel = csMonths.length ? ('_' + csMonths.map(m => (parseInt(m, 10)) + '月').join('')) : '';
   const fname = '客户汇总_' + year + monthLabel + '.xlsx';
@@ -14395,9 +14400,9 @@ async function csExportCustomerSummary() {
 // ExcelJS 不可用时降级为普通 SheetJS 导出(无下拉)
 function csExportCustomerSummaryPlain() {
   if (typeof XLSX === 'undefined') { showToast('表格组件未加载,请刷新页面', 'error'); return; }
-  const headers = ['年/月', '销售员', '客户', '折后总金额', '销售员所属门店', '客户来源', '品类', '客户画像'];
+  const headers = ['年/月', '销售员', '客户', '商品名称', '折后总金额', '销售员所属门店', '客户来源', '品类', '客户画像'];
   const aoa = [headers];
-  csAllRows.forEach(g => { aoa.push([g.docMonth, g.salesperson, g.customer, g.amount, g.team, g.customerSource, g.category, g.customerProfile]); });
+  csAllRows.forEach(g => { aoa.push([g.docMonth, g.salesperson, g.customer, g.productName, g.amount, g.team, g.customerSource, g.category, g.customerProfile]); });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '客户汇总');
@@ -14415,11 +14420,11 @@ function showCsImportModal() {
       <label class="btn btn-outline btn-sm" style="cursor:pointer">📁 选择Excel/CSV文件<input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="csImportFile(event)"></label>
     </div>
     <div class="form-group"><label>或直接粘贴数据 <span style="color:var(--gray-400);font-weight:400">(从导出的Excel复制整片数据,含表头)</span></label>
-      <textarea class="form-control" id="csImportText" rows="8" placeholder="年/月	销售员	客户	折后总金额	销售员所属门店	客户来源	品类	客户画像"></textarea>
+      <textarea class="form-control" id="csImportText" rows="8" placeholder="年/月	销售员	客户	商品名称	折后总金额	销售员所属门店	客户来源	品类	客户画像"></textarea>
     </div>
     <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px;font-size:12px;color:var(--gray-600);margin-bottom:12px">
       <strong>导入规则:</strong><br>
-      • 按「年/月 + 销售员 + 客户」匹配系统客户组(前5列仅作匹配依据,绝不被覆盖)<br>
+      • 按「年/月 + 销售员 + 客户」匹配系统客户组(其余列仅作参考,绝不被覆盖)<br>
       • 仅覆盖「客户来源 / 品类 / 客户画像」三列;导入表该单元格留空 = 保留原值<br>
       • 匹配不到的客户组(前5列不存在于业绩明细)整行跳过<br>
       • 选项建议与"表单配置-客户标签配置"一致,不一致会提示但照常写入
@@ -14481,9 +14486,12 @@ async function doCsImportTags() {
   const iDocMonth = idx(['年/月', '年月'], 0);
   const iSales = idx(['销售员'], 1);
   const iCust = idx(['客户'], 2);
-  const iSource = idx(['客户来源'], 5);
-  const iCat = idx(['品类'], 6);
-  const iPro = idx(['客户画像'], 7);
+  // 无表头兜底:按列数自适应 —— 9列(含「商品名称」)时 客户来源/品类/客户画像 位于 6/7/8;8列(旧格式)位于 5/6/7
+  const _w = ((hasHeader ? rows[1] : rows[0]) || []).length;
+  const _base = _w >= 9 ? 6 : 5;
+  const iSource = idx(['客户来源'], _base);
+  const iCat = idx(['品类'], _base + 1);
+  const iPro = idx(['客户画像'], _base + 2);
   const dataRows = hasHeader ? rows.slice(1) : rows;
   if (!dataRows.length) { showToast('没有可导入的数据行', 'error'); return; }
   const cfg = (cloudData.formConfig && cloudData.formConfig.customerTags) || { customerSource: [], category: [], customerProfile: [] };
@@ -14532,7 +14540,7 @@ async function doCsImportTags() {
   if (salesBoardTab === 'profile') renderSalesBoardProfile();
   if (salesBoardTab === 'signing') renderSalesBoardSigning();
   let msg = '导入完成 · 匹配 ' + matchedGroups + ' 组 / 更新 ' + updatedDetails + ' 条明细';
-  if (skipped) msg += ' / 跳过 ' + skipped + ' 行(前5列未匹配)';
+  if (skipped) msg += ' / 跳过 ' + skipped + ' 行(年/月+销售员+客户 未匹配)';
   if (fail) msg += ' / ' + fail + ' 条写入失败';
   if (warnOpts) msg += ' / ' + warnOpts + ' 个值不在系统选项内(已照常写入)';
   showToast(msg, fail ? 'error' : 'success', 4500);
