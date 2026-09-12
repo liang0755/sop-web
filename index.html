@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260911110824';
-const APP_VERSION = '1.42.127'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260912165003';
+const APP_VERSION = '1.42.128'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -11328,7 +11328,8 @@ function loadVisitStats() {
   // 存当前矩阵的筛选后记录，供单元格点击明细用
   window.__blockerMatrixRecords = records;
   const c = document.getElementById('visitStatsResults');
-  if (!records.length) {
+  // 个人拜访类型统计需要展示「数据为0」的在职员工,故即使区间内无任何记录也继续渲染(整表为0行)
+  if (!records.length && visitStatsTab !== 'person') {
     c.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无拜访数据</div>';
     return;
   }
@@ -11616,6 +11617,25 @@ function renderGroupedVisitStats(records, s, e, mode) {
     if (!byEmp[emp]) byEmp[emp] = { records: [], dept: isTeam ? '' : (r.department || '') };
     byEmp[emp].records.push(r);
   });
+  // 个人拜访类型统计:把「数据为0」的人员也补成空行(单元格保持空白),口径=全部在职员工
+  //   - 有人员筛选时:只补选中的那批人(=完全按选中名单显示,含其 0 数据)
+  //   - 无筛选时:补全部在职员工(active 且非 admin/viewer,排除已离职 leaveDate<=今天)
+  //   - 与「区间内有记录的人」取并集,确保历史数据里的既有人员不会消失
+  if (!isTeam) {
+    const todayYMD = localYMD(new Date());
+    let roster;
+    if (visitStatsPersonFilter && visitStatsPersonFilter.length) {
+      roster = visitStatsPersonFilter.slice();
+    } else {
+      roster = cloudData.users
+        .filter(u => u.active && u.role !== 'admin' && u.role !== 'viewer')
+        .filter(u => !(u.leaveDate && u.leaveDate <= todayYMD))
+        .map(u => u.name)
+        .filter(Boolean);
+    }
+    const known = new Set(Object.keys(byEmp));
+    roster.forEach(n => { if (!known.has(n)) { known.add(n); byEmp[n] = { records: [], dept: '' }; } });
+  }
   const emps = Object.keys(byEmp).sort();
   if (!emps.length) return '<div class="empty-state"><div class="icon">📭</div>暂无拜访数据</div>';
 
