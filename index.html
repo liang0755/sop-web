@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260912165003';
-const APP_VERSION = '1.42.128'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260912170512';
+const APP_VERSION = '1.42.129'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -11253,7 +11253,7 @@ async function renderVisitStats() {
       <div class="filter-bar">
         <div class="form-group"><label>开始日期</label><input type="date" class="form-control" id="visitStatsStart" value="${mAgo}"></div>
         <div class="form-group"><label>结束日期</label><input type="date" class="form-control" id="visitStatsEnd" value="${today}"></div>
-        ${visitStatsTab === 'person' ? multiSelectPanelHtml('vsPerson', {label:'人员', options:[...new Set(cloudData.visitRecords.map(r=>r.employee))].sort(), selected:visitStatsPersonFilter, placeholder:'全部人员', defaultKey:'visitStats.person', onChange:function(arr){ visitStatsPersonFilter = arr; loadVisitStats(); }}) : ''}
+        ${visitStatsTab === 'person' ? multiSelectPanelHtml('vsPerson', {label:'人员', options:[...new Set([...cloudData.users.filter(u=>u.active && u.role!=='admin' && u.role!=='viewer' && !(u.leaveDate && u.leaveDate<=localYMD(new Date()))).map(u=>u.name), ...cloudData.visitRecords.map(r=>r.employee)].filter(Boolean))].sort(), selected:visitStatsPersonFilter, placeholder:'全部人员', defaultKey:'visitStats.person', onChange:function(arr){ visitStatsPersonFilter = arr; loadVisitStats(); }}) : ''}
         <div class="form-group"><label>&nbsp;</label><button class="btn btn-primary" onclick="loadVisitStats()">🔍 统计</button></div>
       </div>
     </div></div>
