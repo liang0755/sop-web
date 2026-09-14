@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260912170512';
-const APP_VERSION = '1.42.129'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260914100859';
+const APP_VERSION = '1.42.130'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -10294,6 +10294,8 @@ async function handleVisitUpload(input) {
 
 // ============ Management Weekly Report ============
 let mgrReportEditId = null; // track editing state
+let mgrReportMonthSel = null;      // 管理周报列表·月份筛选:null=未选(默认当月) / ''=全部月份 / 'YYYY-MM'
+let mgrReportExpandedWeeks = null; // 管理周报列表·按周收起:Set<weekStart>;null=未初始化(默认只展开最近一周)
 
 function getWeekNumber(date) {
   const d = new Date(date);
@@ -10411,6 +10413,10 @@ async function renderMgrReport() {
   const _mgrMonths = {};
   Object.keys(weekLabelMap).forEach(ws => { const ym = ws.slice(0,7); _mgrMonths[ym] = true; });
   const mgrMonths = Object.keys(_mgrMonths).sort().reverse();
+  // 月份筛选默认当月:把当月并入可选项并作为默认选中;用户已手动选过则沿用其选择
+  const mgrCurYm = localYMD(new Date()).slice(0, 7);
+  const mgrMonthOpts = [...new Set([...mgrMonths, mgrCurYm])].sort().reverse();
+  const mgrSelMonth = (mgrReportMonthSel === null) ? mgrCurYm : mgrReportMonthSel;
 
   body.innerHTML = `
     <div class="card filter-card" style="margin-bottom:20px">
@@ -10453,8 +10459,8 @@ async function renderMgrReport() {
         <h4>📋 已提交的管理周报</h4>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select class="form-control form-control-sm" id="mgrReportMonthFilter" onchange="onMgrReportMonthChange()" style="min-width:140px">
-            <option value="">全部月份</option>
-            ${mgrMonths.map(m => `<option value="${m}">${m}</option>`).join('')}
+            <option value=""${mgrSelMonth === '' ? ' selected' : ''}>全部月份</option>
+            ${mgrMonthOpts.map(m => `<option value="${m}"${m === mgrSelMonth ? ' selected' : ''}>${m}</option>`).join('')}
           </select>
           <div style="position:relative">
             <button class="btn btn-sm btn-outline" id="mgrWeekCheckBtn" onclick="toggleMgrWeekCheck()">📆 选择周次 ▾</button>
@@ -10707,9 +10713,20 @@ function buildMgrWeekCheckList() {
   if (!list) return;
   list.innerHTML = weeks.length ? weeks.map(ws => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin:4px 0;cursor:pointer"><input type="checkbox" class="mgr-week-cb" value="${ws}" onchange="renderMgrReportList()"> ${map[ws]}</label>`).join('') : '<div style="font-size:12px;color:var(--gray-400)">该月份暂无周报</div>';
 }
-function onMgrReportMonthChange() { buildMgrWeekCheckList(); renderMgrReportList(); }
+function onMgrReportMonthChange() {
+  mgrReportMonthSel = document.getElementById('mgrReportMonthFilter')?.value || '';
+  mgrReportExpandedWeeks = null; // 换月后重新按「只展开最近一周」初始化
+  buildMgrWeekCheckList();
+  renderMgrReportList();
+}
 function toggleMgrWeekCheck() { const p = document.getElementById('mgrWeekCheckPop'); if (p) p.style.display = p.style.display === 'none' ? 'block' : 'none'; }
 function mgrWeekCheckAll(v) { document.querySelectorAll('#mgrWeekCheckList .mgr-week-cb').forEach(cb => cb.checked = v); renderMgrReportList(); }
+// 管理周报列表:按周收起/展开(状态存模块级 Set,重渲染后保持)
+function toggleMgrWeekRow(ws) {
+  if (!(mgrReportExpandedWeeks instanceof Set)) mgrReportExpandedWeeks = new Set();
+  if (mgrReportExpandedWeeks.has(ws)) mgrReportExpandedWeeks.delete(ws); else mgrReportExpandedWeeks.add(ws);
+  renderMgrReportList();
+}
 
 function renderMgrReportList() {
   const container = document.getElementById('mgrReportList');
@@ -10723,6 +10740,11 @@ function renderMgrReportList() {
   let weeksToShow = allWeeks;
   if (fm) weeksToShow = weeksToShow.filter(ws => ws.slice(0,7) === fm);
   if (checkedWeeks.length) weeksToShow = weeksToShow.filter(ws => checkedWeeks.includes(ws));
+  // 按周收起:首次(或换月后)默认只展开最近一周(weeksToShow 已按周次倒序),其余收起;之后沿用用户手动开合
+  if (mgrReportExpandedWeeks === null) {
+    mgrReportExpandedWeeks = new Set(weeksToShow.length ? [weeksToShow[0]] : []);
+  }
+  const _mgrWeekExpanded = (ws) => mgrReportExpandedWeeks instanceof Set && mgrReportExpandedWeeks.has(ws);
   const filtered = myReports.filter(r => weeksToShow.includes(r.weekStart));
   if (!weeksToShow.length) {
     container.innerHTML = '<div class="empty-state"><div class="icon">📭</div>暂无管理周报记录</div>';
@@ -10783,9 +10805,15 @@ function renderMgrReportList() {
       const wkByDept = {};
       wkReports.forEach(r => { if (r.department) wkByDept[r.department] = r; });
       const label = weekLabelMap[ws] || ws;
-      return `<div class="mgr-report-week-row" style="margin-bottom:24px">
-        <div class="mgr-report-week-label" style="font-weight:600;font-size:14px;color:var(--gray-700);border-bottom:2px solid var(--primary);padding-bottom:6px;margin-bottom:12px">📅 ${label}</div>
-        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch">
+      const expanded = _mgrWeekExpanded(ws);
+      const submitted = allDepts.filter(d => wkByDept[d]).length;
+      return `<div class="mgr-report-week-row" style="margin-bottom:${expanded ? '24px' : '12px'}">
+        <div class="mgr-report-week-label" style="font-weight:600;font-size:14px;color:var(--gray-700);border-bottom:2px solid var(--primary);padding-bottom:6px;margin-bottom:12px;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none" onclick="toggleMgrWeekRow('${ws}')" title="${expanded ? '点击收起' : '点击展开'}">
+          <span style="display:inline-block;font-size:11px;color:var(--primary);transition:transform .15s;transform:rotate(${expanded ? '90deg' : '0deg'})">▶</span>
+          <span>📅 ${label}</span>
+          <span style="font-size:12px;font-weight:400;color:var(--gray-400)">${submitted}/${allDepts.length} 已提交 · ${expanded ? '点击收起' : '点击展开'}</span>
+        </div>
+        <div style="display:${expanded ? 'flex' : 'none'};gap:16px;flex-wrap:wrap;align-items:stretch">
           ${allDepts.map(dept => wkByDept[dept] ? _renderCard(wkByDept[dept]) : _renderEmpty(dept)).join('')}
         </div>
       </div>`;
