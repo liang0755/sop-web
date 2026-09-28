@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260914100859';
-const APP_VERSION = '1.42.130'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20260928095213';
+const APP_VERSION = '1.42.133'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1563,7 +1563,8 @@ async function loadRoleScopedData() {
   reg('salesPerf', '/m0PerformanceSnapshots.json', 'm0PerformanceSnapshots');
   reg('mgrPerf', '/mgrPerformanceRecords.json', 'mgrPerformanceRecords');
   reg('mgrPerf', '/mgrPerformanceSnapshots.json', 'mgrPerformanceSnapshots');
-  reg('callData', '/callRecords.json', 'callRecords');
+  // 注意: callRecords(52,969 条 / ~18.5MB)已移出本函数,改为 loadCallRecordsLazy() 懒加载,
+  // 否则全量下载会阻塞 init() 的 await → 报表数据永不加载、侧栏卡「刷新中…」。
   if (specs.length === 0) return; // 员工无管理权限 → 直接跳过,零开销
   try {
     const res = await Promise.all(specs.map(([url]) => fetch(FB_BASE + url)));
@@ -1572,13 +1573,12 @@ async function loadRoleScopedData() {
       const r = res[i];
       let d = null;
       if (r && r.ok) { try { d = await r.json(); } catch(e) { d = null; } }
-      if (key === 'callRecords') cloudData.callRecords = (d && typeof d === 'object') ? Object.values(d) : [];
-      else cloudData[key] = (d && typeof d === 'object') ? d : {};
+      cloudData[key] = (d && typeof d === 'object') ? d : {};
     }
   } catch(e) {
     console.warn('Role-scoped data fetch failed:', e.message);
     ['gradeRecords','m0Records','performanceRecords','performanceSnapshots','m0PerformanceRecords','m0PerformanceSnapshots','mgrPerformanceRecords','mgrPerformanceSnapshots'].forEach(k => { cloudData[k] = {}; });
-    cloudData.callRecords = []; // 数组型节点,切勿重置为 {} 否则后续 .filter/.map 会抛错
+    // callRecords 已移出本函数(改为懒加载),此处不再重置,避免后台刷新失败时误清空已加载的外呼数据
   }
 }
 
@@ -1746,6 +1746,7 @@ async function loadCloudData() {
   await _coreDataPromise;
   await loadRoleScopedData();
   await loadReportData({force: true});
+  loadCallRecordsLazy(); // 全量刷新场景也懒加载外呼数据,不阻塞首屏
   startBackgroundPolling(); // 启动后台定时增量刷新(让已打开页面的其他账号自动同步)
   // 数据已全部加载完成:此时 filterDefaults 必然就绪(缓存命中或后台 loadCoreDataFresh 已完成),
   // 强制重绘一次当前页 + 直接回填默认值到 DOM,确保保存的全局筛选默认值必定生效(不依赖首屏渲染时序)
@@ -2180,6 +2181,8 @@ document.querySelectorAll('.sidebar .nav-item').forEach(el => {
 setInterval(() => {
   const ap = document.querySelector('.nav-item.active')?.dataset.page;
   if (ap) silentRefresh(ap);
+  // 停留在外呼页时按需刷新外呼数据(懒加载,不进 silentRefresh 的阻塞 Promise.all)
+  if (ap === 'callData' || ap === 'callStats') loadCallRecordsLazy();
 }, 30000);
 
 // 轻量数据指纹(覆盖新增/删除/编辑关键字段), 用于判断后台刷新是否真正产生变更
@@ -2210,9 +2213,9 @@ async function silentRefresh(page, force = false) {
     let iVisit = -1, iSales = -1, iPerfSnap = -1, iM0Snap = -1, iMgrSnap = -1, iMgrR = -1;
     if (needVisit) { iVisit = fetches.length; fetches.push(fetch(FB_BASE + '/visitRecords.json')); }
     if (needSales) { iSales = fetches.length; fetches.push(fetch(FB_BASE + '/salesRecords.json')); }
-    const needCall = hasPermission('callData') || hasPermission('callStats');
-    let iCall = -1;
-    if (needCall) { iCall = fetches.length; fetches.push(fetch(FB_BASE + '/callRecords.json')); }
+    // 外呼数据(callRecords ~18.5MB)已移出后台静默刷新:放进此处会拖垮整个 Promise.all 并令
+    // bgRefreshInFlight 永久为 true,从而屏蔽后续所有报表刷新。改由 loadCallRecordsLazy() 在
+    // 进入外呼页 / 30s tick 时按需拉取(见下方 setInterval)。
     // 仅具权限者才在后台刷新管理绩效快照,避免普通员工无谓拉取
     if (needPerf) {
       iPerfSnap = fetches.length; fetches.push(fetch(FB_BASE + '/performanceSnapshots.json'));
@@ -2248,14 +2251,6 @@ async function silentRefresh(page, force = false) {
       cloudData.approvals = Array.isArray(newAp) ? newAp : [];
       updateApprovalsNavBadge();
       if (document.querySelector('.nav-item.active')?.dataset.page === 'approvals') renderApprovals();
-    }
-    // 外呼数据后台刷新
-    const newCall = (iCall >= 0 && results[iCall] && results[iCall].ok) ? Object.values(await results[iCall].json() || {}) : null;
-    if (newCall) {
-      cloudData.callRecords = Array.isArray(newCall) ? newCall : [];
-      const cp = document.querySelector('.nav-item.active')?.dataset.page;
-      if (cp === 'callData') renderCallData();
-      else if (cp === 'callStats') renderCallStats();
     }
     // 任一数据有变更(新增/删除/编辑关键字段)即更新+重渲染, 而非仅比记录数量
     const mgrRChanged = newMgrR && (newMgrR.length !== cloudData.mgrReports.length || dataSig(newMgrR) !== dataSig(cloudData.mgrReports));
@@ -6022,6 +6017,8 @@ const CALL_PAGE_SIZE = 50;
 let callStatsTab = 'team'; // team=按团队 / person=按个人
 let callStatsDeptFilter = [];
 let callStatsPersonFilter = [];
+let callRecordsLoaded = false;   // 外呼数据是否已加载(懒加载,不阻塞启动关键路径)
+let _callRecordsPromise = null;  // 防止并发重复拉取 18MB 节点
 
 // 时长工具: "HH:MM:SS" → 秒; 秒 → 展示
 function callDurToSec(s) {
@@ -6068,6 +6065,38 @@ function filterCallRecords(s, e, deptF, personF) {
     if (personF && personF.length && personF.indexOf(r.employee) < 0) return false;
     return true;
   });
+}
+
+// 外呼数据懒加载:从启动关键路径解耦。
+// 根因:原 loadRoleScopedData() 在启动 Promise.all 中全量拉取 callRecords(52,969 条 / ~18.5MB),
+// 在本环境代理限速下完整下载耗时 >200s,导致 init() 的 await 永久阻塞 → 报表数据永不加载、侧栏卡「刷新中…」。
+// 现改为:①启动不再等待它;②进入外呼页 / 后台 tick / 启动预加载时才按需拉取;③全程不阻塞界面与其它数据。
+// 若后续在 Firebase 规则中为 /sop/callRecords 加上 ".indexOn":["date"],可在此切换为按日期有界查询
+// (orderBy="date"&startAt&endAt)进一步减小传输量(应用目前为客户端按日期/部门/员工过滤,故仍取全量)。
+async function loadCallRecordsLazy() {
+  if (_callRecordsPromise) return _callRecordsPromise;            // 已在拉取中,复用同一 Promise,避免并发重复下载
+  if (callRecordsLoaded) return Promise.resolve();               // 已加载,直接返回
+  if (!hasPermission('callData') && !hasPermission('callStats')) return Promise.resolve(); // 无权限不拉
+  _callRecordsPromise = (async () => {
+    try {
+      const r = await fetch(FB_BASE + '/callRecords.json');
+      if (!r.ok) return;
+      const d = await r.json().catch(() => null);
+      if (d && typeof d === 'object') {
+        cloudData.callRecords = Object.values(d);
+        callRecordsLoaded = true;
+        // 拉取完成时若正停留在外呼页,自动重绘当前页(无需整站重渲染)
+        const cp = document.querySelector('.nav-item.active')?.dataset.page;
+        if (cp === 'callData') renderCallData();
+        else if (cp === 'callStats') renderCallStats();
+      }
+    } catch (e) {
+      console.warn('外呼数据懒加载失败:', e && e.message);
+    } finally {
+      _callRecordsPromise = null; // 允许失败后重试
+    }
+  })();
+  return _callRecordsPromise;
 }
 // 快捷日期范围计算(今天/昨天/本周/上周/本月/上月/今年/去年) —— 外呼数据/统计共用
 function calcQuickRange(type) {
@@ -6191,6 +6220,12 @@ function sortCallAvgKeys(groups) {
 function renderCallData() {
   const body = document.getElementById('contentBody');
   if (!hasPermission('callData')) { body.innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面,请联系管理员</div>'; return; }
+  // 外呼数据未加载完 → 显示「加载中」并触发懒加载,不阻塞其它模块(数据约 5.3 万条,首次加载较慢)
+  if (!callRecordsLoaded) {
+    body.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:48px;color:var(--gray-500)">⏳ 外呼数据加载中(全量约 5.3 万条,首次加载较慢,请稍候)…</div></div>';
+    loadCallRecordsLazy();
+    return;
+  }
   callDataDeptFilter = takeFilterDefault('callData.dept', callDataDeptFilter);
   callDataPersonFilter = takeFilterDefault('callData.person', callDataPersonFilter);
   const today = localYMD();
@@ -6475,6 +6510,12 @@ function switchCallStatsTab(tab, el) {
 function renderCallStats() {
   const body = document.getElementById('contentBody');
   if (!hasPermission('callStats')) { body.innerHTML = '<div class="alert alert-danger">⚠️ 您没有权限访问此页面,请联系管理员</div>'; return; }
+  // 外呼数据未加载完 → 显示「加载中」并触发懒加载(与外呼数据页一致,避免整站卡在 18MB 下载)
+  if (!callRecordsLoaded) {
+    body.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:48px;color:var(--gray-500)">⏳ 外呼数据加载中(全量约 5.3 万条,首次加载较慢,请稍候)…</div></div>';
+    loadCallRecordsLazy();
+    return;
+  }
   callStatsDeptFilter = takeFilterDefault('callStats.dept', callStatsDeptFilter);
   callStatsPersonFilter = takeFilterDefault('callStats.person', callStatsPersonFilter);
   const today = localYMD();
@@ -10211,6 +10252,30 @@ async function handleVisitUpload(input) {
       if (alertEl) alertEl.innerHTML = '<div class="alert alert-danger">❌ 导入被阻止:该文件缺少「签到事件」列,疑似上传了非拜访数据(如外呼数据)。请上传包含「签到事件」列的拜访数据 CSV。</div>';
       input.value = '';
       return;
+    }
+    // 防错导入(v1.42.131):「拜访结果」列若含当前"拜访结果配置"以外的值,导入后该行下拉框会因找不到
+    // 匹配选项而渲染为空白(selectedIndex = -1),看起来像"之前填的数据消失"。故先统计并提示用户确认。
+    const _cfgResultSet = new Set((getVisitConfig().visitResults || []).map(v => String(v).trim()));
+    const _offCfg = {};
+    if (colMap.visitResult !== undefined) {
+      for (let i = 1; i < rows.length; i++) {
+        const _r = rows[i];
+        if (!_r[colMap.contactTime] && !_r[colMap.employee]) continue;
+        const _v = String(_r[colMap.visitResult] == null ? '' : _r[colMap.visitResult]).trim();
+        if (_v && !_cfgResultSet.has(_v)) _offCfg[_v] = (_offCfg[_v] || 0) + 1;
+      }
+    }
+    const _offCfgKeys = Object.keys(_offCfg);
+    if (_offCfgKeys.length) {
+      const _offCfgList = _offCfgKeys.map(v => '「' + v + '」' + _offCfg[v] + ' 条').join('、');
+      if (!confirm('⚠️ 该文件的「拜访结果」列含有 ' + _offCfgKeys.length + ' 个当前配置外的值:\n\n' + _offCfgList +
+        '\n\n这些行导入后下拉框会显示空白,需到「表单配置 - 拜访结果」补上对应选项才能正常显示。\n\n' +
+        '· 点「确定」照常导入\n' +
+        '· 点「取消」中止导入,先修正 CSV 或补全配置选项')) {
+        if (alertEl) alertEl.innerHTML = '<div class="alert alert-warning">已中止导入:「拜访结果」列含配置外的值 —— ' + _offCfgList + '</div>';
+        input.value = '';
+        return;
+      }
     }
     // 查重前确保内存中的拜访数据是最新的(避免登录后未刷新 / 缓存为空导致 existingKeys 为空而漏查重)
     await ensureVisitDataLoaded();
@@ -19521,6 +19586,7 @@ function applyMgrPerfBatchStandard() {
   }
   if (currentUser && currentUser.id) {
     hideLoginAndShowApp();
+    loadCallRecordsLazy(); // 预加载外呼数据(懒加载,不阻塞首屏/报表)
     const got = await requestSiblingSnapshot(400);
     if (got) {
       ensureXLSX().catch(()=>{});
@@ -19553,6 +19619,7 @@ function applyMgrPerfBatchStandard() {
   const gotSibling = await requestSiblingSnapshot(400);
   if (gotSibling) {
     hideLoginAndShowApp();
+    loadCallRecordsLazy(); // 预加载外呼数据(懒加载,不阻塞首屏/报表)
     navTo(getInitialPage());
     ensureXLSX().catch(()=>{});
     loadRoleScopedData().catch(e=>console.warn('角色数据补齐失败:', e && e.message));
