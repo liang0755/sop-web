@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20261010124606';
-const APP_VERSION = '1.42.135'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20261010144232';
+const APP_VERSION = '1.42.136'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -13691,6 +13691,35 @@ function getActiveSalesUsers() {
     .map(u => ({ name: u.name }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh'));
 }
+// 用户状态映射: name -> 'active' | 'departed'(离职) | 'disabled'(禁用) | 'admin'(管理/隐藏) | 缺省=非通讯录
+function getUserStatusMap() {
+  const m = {};
+  (cloudData.users || []).forEach(u => {
+    const nm = u && u.name; if (!nm) return;
+    let st;
+    if (u.role === 'admin' || u.role === 'manager' || u.role === 'viewer') st = 'admin';
+    else if (u.leaveDate) st = 'departed';
+    else if (!u.active) st = 'disabled';
+    else st = 'active';
+    if (!m[nm]) m[nm] = st; // 同名取首个
+  });
+  return m;
+}
+// 签约分析行集合:在岗销售(全列) + 有单据但被 getActiveSalesUsers 漏掉的销售(离职/禁用/管理/非通讯录)
+// 确保"所有单据都统计上":任何在 salesRecords 里出现过、且本年份/月份区间有数据的销售都占一行
+function getSigningSalesRows(result) {
+  const statusMap = getUserStatusMap();
+  const active = getActiveSalesUsers();
+  const activeNames = new Set(active.map(u => u.name));
+  const tagMap = { departed: '离职', disabled: '禁用', admin: '管理', nonsys: '非通讯录' };
+  const extra = [];
+  Object.keys(result).forEach(sp => {
+    if (activeNames.has(sp)) return;
+    const st = statusMap[sp] || 'nonsys';
+    extra.push({ name: sp, kind: st, tag: tagMap[st] || '其他' });
+  });
+  return active.concat(extra);
+}
 // 聚合:返回 { result: {销售: {月: {组: 业绩}}}, groupOrder: ['自拓','线索','其他',...], months: ['01'..'12'] }
 function aggregateSalesSigning(yearFilter) {
   const groupsMap = (cloudData.formConfig?.customerTags?.customerSourceGroups) || {};
@@ -13746,7 +13775,7 @@ function renderSalesBoardSigning() {
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesSigningYear()">重置为今年</button></div>
           <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportSalesSigning()">📤 导出 Excel</button></div>
         </div>
-        <div style="font-size:12px;color:var(--gray-600);margin-top:8px">💡 销售成员口径:在岗 + 非 admin/manager/viewer(含 M0 人员),分组顺序:自拓 → 线索 → 其他(在"表单配置 → 客户标签配置"可调整分组与归属项),未填写客户来源的记录单列「未设置」,</div>
+        <div style="font-size:12px;color:var(--gray-600);margin-top:8px">💡 销售成员口径:凡在单据里出现过的销售都纳入统计(含离职/禁用/管理账号/非通讯录人员,补回行会标注「离职/管理/非通讯录」小标签),确保「所有单据都统计上」;分组顺序:自拓 → 线索 → 其他(可在"表单配置 → 客户标签配置"调整),未填写客户来源的记录单列「未设置」,</div>
       </div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="sigTableWrap"></div></div></div>`;
@@ -13768,10 +13797,10 @@ function renderSalesSigningTable(yearFilter) {
   sigCurrentYear = yearFilter;
   const wrap = document.getElementById('sigTableWrap');
   if (!wrap) return;
-  let users = getActiveSalesUsers();
-  if (sbTeamFilters.sig.length) users = users.filter(u => sbTeamFilters.sig.some(t => normDeptKey(getSalesTeam(u.name) || '') === normDeptKey(t)));
   const { result, groupOrder, months, recsMap } = aggregateSalesSigning(yearFilter);
-  if (!users.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无在岗销售成员</div>'; return; }
+  let users = getSigningSalesRows(result); // 在岗 + 离职/禁用/管理/非通讯录(凡有单据者都占一行)
+  if (sbTeamFilters.sig.length) users = users.filter(u => sbTeamFilters.sig.some(t => normDeptKey(getSalesTeam(u.name) || '') === normDeptKey(t)));
+  if (!users.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无销售单据</div>'; return; }
   const ng = groupOrder.length;
   // 下钻:从 recsMap 派生 行合计/列合计/分组总计 的记录集合(销售名不含 '|',可安全按 '|' 拆分)
   const rowRecs = {}, colRecs = {}, grpRecs = {};
@@ -13816,7 +13845,7 @@ function renderSalesSigningTable(yearFilter) {
   groupOrder.forEach(g => { colAmount['合计|' + g] = 0; });
   users.forEach(u => {
     const spRow = result[u.name] || {};
-    body += `<tr><td style="position:sticky;left:0;background:#fff;font-weight:600">${esc(u.name)}</td>`;
+    body += `<tr><td style="position:sticky;left:0;background:#fff;font-weight:600">${esc(u.name)}${u.tag ? ` <span style="font-weight:400;font-size:10px;color:#8a8a8a;background:#f0f0f0;border-radius:3px;padding:1px 4px;margin-left:3px;white-space:nowrap">${u.tag}</span>` : ''}</td>`;
     const rowTotals = {}; groupOrder.forEach(g => { rowTotals[g] = 0; });
     months.forEach(m => {
       const monthData = spRow[m] || {};
@@ -13856,10 +13885,10 @@ function renderSalesSigningTable(yearFilter) {
 function exportSalesSigning() {
   const yearFilter = sigYearFilter;
   if (typeof XLSX === 'undefined') { showToast('表格组件未加载,请刷新页面', 'error'); return; }
-  let users = getActiveSalesUsers();
-  if (sbTeamFilters.sig.length) users = users.filter(u => sbTeamFilters.sig.some(t => normDeptKey(getSalesTeam(u.name) || '') === normDeptKey(t)));
   const { result, groupOrder, months } = aggregateSalesSigning(yearFilter);
-  if (!users.length) { showToast('无在岗销售成员', 'error'); return; }
+  let users = getSigningSalesRows(result);
+  if (sbTeamFilters.sig.length) users = users.filter(u => sbTeamFilters.sig.some(t => normDeptKey(getSalesTeam(u.name) || '') === normDeptKey(t)));
+  if (!users.length) { showToast('无销售单据', 'error'); return; }
   // 表头:销售 / 月(colspan N) ... / 合计(colspan N)
   const header1 = ['销售'];
   months.forEach(m => header1.push(parseInt(m, 10) + '月'));
@@ -13872,7 +13901,7 @@ function exportSalesSigning() {
   groupOrder.forEach(g => { colSum['合计|' + g] = 0; });
   users.forEach(u => {
     const spRow = result[u.name] || {};
-    const row = [u.name];
+    const row = [u.name + (u.tag ? ' (' + u.tag + ')' : '')];
     const rowTotals = {}; groupOrder.forEach(g => rowTotals[g] = 0);
     months.forEach(m => {
       const monthData = spRow[m] || {};
