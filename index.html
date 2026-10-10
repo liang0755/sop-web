@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20261010120436';
-const APP_VERSION = '1.42.134'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20261010124606';
+const APP_VERSION = '1.42.135'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -13712,6 +13712,7 @@ function aggregateSalesSigning(yearFilter) {
   for (const [gn, items] of Object.entries(groupsMap)) (items || []).forEach(it => { const k = String(it == null ? '' : it).trim(); if (k) itemToGroup[k] = gn; });
   const sales = (cloudData.salesRecords || []).filter(r => (yearFilter.length ? yearFilter.includes((r.docMonth || '').slice(0, 4)) : true));
   const result = {};
+  const recsMap = {};
   sales.forEach(r => {
     const sp = (r.salesperson || '').trim();
     const dm = r.docMonth || '';
@@ -13726,8 +13727,10 @@ function aggregateSalesSigning(yearFilter) {
     if (!result[sp]) result[sp] = {};
     if (!result[sp][m]) result[sp][m] = {};
     result[sp][m][g] = (result[sp][m][g] || 0) + toNum(r.amount);
+    const ck = sp + '|' + m + '|' + g;
+    (recsMap[ck] || (recsMap[ck] = [])).push(r);
   });
-  return { result, groupOrder, months };
+  return { result, groupOrder, months, recsMap };
 }
 function renderSalesBoardSigning() {
   const years = [...new Set((cloudData.salesRecords || []).map(r => (r.docMonth || '').slice(0, 4)).filter(Boolean))].sort();
@@ -13767,9 +13770,19 @@ function renderSalesSigningTable(yearFilter) {
   if (!wrap) return;
   let users = getActiveSalesUsers();
   if (sbTeamFilters.sig.length) users = users.filter(u => sbTeamFilters.sig.some(t => normDeptKey(getSalesTeam(u.name) || '') === normDeptKey(t)));
-  const { result, groupOrder, months } = aggregateSalesSigning(yearFilter);
+  const { result, groupOrder, months, recsMap } = aggregateSalesSigning(yearFilter);
   if (!users.length) { wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400)">无在岗销售成员</div>'; return; }
   const ng = groupOrder.length;
+  // 下钻:从 recsMap 派生 行合计/列合计/分组总计 的记录集合(销售名不含 '|',可安全按 '|' 拆分)
+  const rowRecs = {}, colRecs = {}, grpRecs = {};
+  for (const [k, recs] of Object.entries(recsMap)) {
+    const li = k.lastIndexOf('|'); const g = k.slice(li + 1);
+    const sm = k.slice(0, li); const li2 = sm.lastIndexOf('|');
+    const sp = sm.slice(0, li2); const m = sm.slice(li2 + 1);
+    (rowRecs[sp + '|' + g] || (rowRecs[sp + '|' + g] = [])).push(...recs);
+    (colRecs[m + '|' + g] || (colRecs[m + '|' + g] = [])).push(...recs);
+    (grpRecs[g] || (grpRecs[g] = [])).push(...recs);
+  }
   // 排序(按当前排序键取该销售在该列的值)
   const sigVal = (u, key) => {
     if (key === 'name') return u.name || '';
@@ -13811,21 +13824,32 @@ function renderSalesSigningTable(yearFilter) {
         const a = monthData[g] || 0;
         colAmount[m + '|' + g] += a;
         rowTotals[g] += a;
-        body += `<td class="num" style="white-space:nowrap">${a ? fmtSalesMoney(a) : '-'}</td>`;
+        const ck = u.name + '|' + m + '|' + g;
+        const cellRecs = recsMap[ck] || [];
+        body += `<td class="num drill-td" style="white-space:nowrap" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(u.name + ' ' + parseInt(m, 10) + '月 ' + g)}','${drillPut(cellRecs)}')">${a ? fmtSalesMoney(a) : '-'}</td>`;
       });
     });
     groupOrder.forEach(g => {
       colAmount['合计|' + g] += rowTotals[g];
-      body += `<td class="num" style="font-weight:700;background:var(--gray-50);white-space:nowrap">${rowTotals[g] ? fmtSalesMoney(rowTotals[g]) : '-'}</td>`;
+      const rk = u.name + '|' + g;
+      const rcell = rowRecs[rk] || [];
+      body += `<td class="num drill-td" style="font-weight:700;background:var(--gray-50);white-space:nowrap" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(u.name + ' 合计 ' + g)}','${drillPut(rcell)}')">${rowTotals[g] ? fmtSalesMoney(rowTotals[g]) : '-'}</td>`;
     });
     body += '</tr>';
   });
   body += '</tbody>';
   let foot = '<tfoot><tr class="total-row"><td>合计</td>';
   months.forEach(m => {
-    groupOrder.forEach(g => { foot += `<td class="num" style="white-space:nowrap">${colAmount[m + '|' + g] ? fmtSalesMoney(colAmount[m + '|' + g]) : '-'}</td>`; });
+    groupOrder.forEach(g => {
+      const fk = m + '|' + g;
+      const fcell = colRecs[fk] || [];
+      foot += `<td class="num drill-td" style="white-space:nowrap" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(parseInt(m, 10) + '月 ' + g)}','${drillPut(fcell)}')">${colAmount[m + '|' + g] ? fmtSalesMoney(colAmount[m + '|' + g]) : '-'}</td>`;
+    });
   });
-  groupOrder.forEach(g => { foot += `<td class="num" style="white-space:nowrap">${colAmount['合计|' + g] ? fmtSalesMoney(colAmount['合计|' + g]) : '-'}</td>`; });
+  groupOrder.forEach(g => {
+    const gcell = grpRecs[g] || [];
+    foot += `<td class="num drill-td" style="white-space:nowrap" title="点击查看明细" onclick="openDrillDetail('${escapeTitle(g + ' 合计')}','${drillPut(gcell)}')">${colAmount['合计|' + g] ? fmtSalesMoney(colAmount['合计|' + g]) : '-'}</td>`;
+  });
   foot += '</tr></tfoot>';
   wrap.innerHTML = `<table class="source-summary-table" style="font-size:12px">${head}${body}${foot}</table>`;
 }
