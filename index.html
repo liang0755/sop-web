@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20260928095213';
-const APP_VERSION = '1.42.133'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20261010120436';
+const APP_VERSION = '1.42.134'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -3749,8 +3749,8 @@ function sortRowsBy(rows, st, valFn, tieFn) {
 }
 // 生成一个可点击排序的 th:sortTh(key, 列标题, 点击函数名, 指示器, 额外class, 额外style)
 // 例:sortTh('score','绩效评分','toggleXxSort',xxInd('score'),'num','width:100px')
-function sortTh(key, label, onclick, ind, extraCls, extraStyle) {
-  return `<th class="sort-th${extraCls ? ' ' + extraCls : ''}" style="cursor:pointer${extraStyle || ''}" onclick="${onclick}('${key}')">${label}${ind || ''}</th>`;
+function sortTh(key, label, onclick, ind, extraCls, extraStyle, extraAttr) {
+  return `<th class="sort-th${extraCls ? ' ' + extraCls : ''}"${extraAttr || ''} style="cursor:pointer${extraStyle || ''}" onclick="${onclick}('${key}')">${label}${ind || ''}</th>`;
 }
 
 function loadDataView(type) {
@@ -13682,6 +13682,8 @@ function renderProfileSummaryTable(year) {
 }
 
 // ===== 销售签约分析:销售 × 月份 × 来源分组 业绩矩阵 =====
+// 未填写客户来源(customerSource 为空)的记录归入的固定分组名,单列显示以便与总额对账
+const UNSET_SRC_GROUP = '未设置';
 // 在岗销售成员:在岗 + 非 admin/manager/viewer(含 M0 人员)
 function getActiveSalesUsers() {
   return (cloudData.users || [])
@@ -13702,8 +13704,12 @@ function aggregateSalesSigning(yearFilter) {
   const preferred = ['自拓', '线索', '其他'];
   const configured = Object.keys(groupsMap);
   const groupOrder = preferred.filter(g => configured.includes(g)).concat(configured.filter(g => !preferred.includes(g)));
+  // 未填写来源的记录单列「未设置」组(固定末列;配置里已有同名组则不重复追加)
+  if (!groupOrder.includes(UNSET_SRC_GROUP)) groupOrder.push(UNSET_SRC_GROUP);
+  // 配置项与记录值两侧统一 trim 后再匹配:修掉配置里 " 进销存"(带前导空格)这类整组被静默丢弃的问题
+  const sourceSet = new Set(sourceList.map(s => String(s == null ? '' : s).trim()).filter(Boolean));
   const itemToGroup = {};
-  for (const [gn, items] of Object.entries(groupsMap)) items.forEach(it => { itemToGroup[it] = gn; });
+  for (const [gn, items] of Object.entries(groupsMap)) (items || []).forEach(it => { const k = String(it == null ? '' : it).trim(); if (k) itemToGroup[k] = gn; });
   const sales = (cloudData.salesRecords || []).filter(r => (yearFilter.length ? yearFilter.includes((r.docMonth || '').slice(0, 4)) : true));
   const result = {};
   sales.forEach(r => {
@@ -13712,9 +13718,11 @@ function aggregateSalesSigning(yearFilter) {
     if (!sp || !dm) return;
     const m = dm.slice(5);
     if (!months.includes(m)) return;
-    const src = (r.customerSource || '').trim();
-    if (!src || !sourceList.includes(src)) return; // 空/未配置来源跳过
-    const g = itemToGroup[src] || '其他';
+    const src = String(r.customerSource == null ? '' : r.customerSource).trim();
+    let g;
+    if (!src) g = UNSET_SRC_GROUP;            // 未填写来源 → 单列「未设置」
+    else if (!sourceSet.has(src)) return;     // 已填写但不在表单配置中的来源仍跳过
+    else g = itemToGroup[src] || '其他';
     if (!result[sp]) result[sp] = {};
     if (!result[sp][m]) result[sp][m] = {};
     result[sp][m][g] = (result[sp][m][g] || 0) + toNum(r.amount);
@@ -13735,7 +13743,7 @@ function renderSalesBoardSigning() {
           <div class="form-group"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="resetSalesSigningYear()">重置为今年</button></div>
           <div class="form-group" style="margin-left:auto"><label style="font-size:12px;color:var(--gray-500)">&nbsp;</label><button class="btn btn-outline" onclick="exportSalesSigning()">📤 导出 Excel</button></div>
         </div>
-        <div style="font-size:12px;color:var(--gray-600);margin-top:8px">💡 销售成员口径:在岗 + 非 admin/manager/viewer(含 M0 人员),分组顺序:自拓 → 线索 → 其他(在"表单配置 → 客户标签配置"可调整分组与归属项),</div>
+        <div style="font-size:12px;color:var(--gray-600);margin-top:8px">💡 销售成员口径:在岗 + 非 admin/manager/viewer(含 M0 人员),分组顺序:自拓 → 线索 → 其他(在"表单配置 → 客户标签配置"可调整分组与归属项),未填写客户来源的记录单列「未设置」,</div>
       </div>
     </div>
     <div class="card"><div class="card-body"><div class="table-wrap" id="sigTableWrap"></div></div></div>`;
@@ -13781,7 +13789,7 @@ function renderSalesSigningTable(yearFilter) {
   users = sortRowsBy(users, sigSort, (u) => sigVal(u, sigSort.key), (a, b) => (a.name || '').localeCompare(b.name || '', 'zh'));
   const sigInd = (k) => sortIndOf(sigSort, k);
   let head = '<thead><tr>'
-    + sortTh('name', '销售', 'toggleSigSort', sigInd('name'), '', 'min-width:100px;position:sticky;left:0;background:#fff;z-index:2');
+    + sortTh('name', '销售', 'toggleSigSort', sigInd('name'), '', 'min-width:100px;position:sticky;left:0;background:#fff;z-index:2', ' rowspan="2"');
   months.forEach(m => { head += `<th colspan="${ng}">${parseInt(m, 10)}月</th>`; });
   head += `<th colspan="${ng}" style="background:var(--gray-100)">合计</th></tr><tr>`;
   months.forEach(m => {
