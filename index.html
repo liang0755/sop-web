@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20261010144232';
-const APP_VERSION = '1.42.136'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20261012105513';
+const APP_VERSION = '1.42.137'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -15547,7 +15547,47 @@ function sgBoardNoteSave(key, val) {
 const GRADE_AUTO = '__AUTO__';          // 哨兵:恢复为自动评级(最终保存时清除手动值)
 let sgPending = {};                      // key -> { grade: 字符串|GRADE_AUTO, note: 字符串 }
 let m0Pending = {};                      // M0 看板暂存缓冲 key -> { grade: 字符串, note: 字符串 }
+// 逐级(±1级)防呆:手动改职级时,校验与相邻月(上月/下月)的有效职级差不超过1
+// 返回 null 表示通过,否则返回错误提示字符串
+function sgCheckAdjacentLevels(key, newGrade, levels, roll) {
+  if (!levels || !levels.length) return null;
+  if (newGrade === GRADE_AUTO) return null; // 自动填充本身已±1,无需校验
+  const parts = key.split('_');
+  const year = parts[0];
+  const m = parseInt(parts[parts.length - 1], 10);
+  if (!(m >= 1 && m <= 12)) return null;
+  const spKey = parts.slice(1, -1).join('_');
+  const allSps = [...new Set((cloudData.salesRecords || []).map(function (r) { return (r.salesperson || '').trim(); }).filter(Boolean))];
+  const sp = allSps.find(function (s) { return gradeKey(year, s, m) === key; })
+          || allSps.find(function (s) { return s.replace(/[.#$\[\]]/g, '_') === spKey; })
+          || spKey.replace(/_/g, '');
+  if (!sp) return null;
+  const newRank = gradeRankIndex(newGrade, levels);
+  // 以"本次新值"覆盖该月,重算整条链路,使相邻月(尤其下月)的判定基于新值
+  const savedPending = sgPending;
+  sgPending = Object.assign({}, sgPending);
+  sgPending[gradeKey(year, sp, m)] = { grade: newGrade };
+  const rg = sgComputeGrades((roll && roll[sp]) || {}, levels, year, sp);
+  sgPending = savedPending;
+  if (m > 1 && rg[m - 1]) {
+    const d = Math.abs(newRank - rg[m - 1].effRank);
+    if (d > 1) return '上月为' + rg[m - 1].effName + ',与本次修改相差 ' + d + ' 级';
+  }
+  if (m < 12 && rg[m + 1]) {
+    const d = Math.abs(newRank - rg[m + 1].effRank);
+    if (d > 1) return '下月为' + rg[m + 1].effName + ',与本次修改相差 ' + d + ' 级';
+  }
+  return null;
+}
 function sgStage(key, patch) {
+  // 手动改职级 → 逐级(±1级)防呆(先校验,通过才暂存,被阻止时不留空占位)
+  if (patch && patch.grade !== undefined && patch.grade !== GRADE_AUTO) {
+    const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
+    const parts = key.split('_');
+    const roll = (sgBuildRoll(parts[0])).roll;
+    const err = sgCheckAdjacentLevels(key, patch.grade, levels, roll);
+    if (err) { showToast('只能逐级(±1级)升降:' + err + ',已阻止', 'error'); return; }
+  }
   if (!sgPending[key]) sgPending[key] = {};
   Object.assign(sgPending[key], patch);
   renderSalesGrade();
@@ -15679,6 +15719,14 @@ async function sgSaveAll() {
   const levels = (cloudData.formConfig && cloudData.formConfig.gradeConfig) || [];
   // 预算所有销售员的 roll(避免在循环内重复算)
   const { roll: _fullRoll } = sgBuildRoll(salesGradeYear);
+  // 逐级(±1级)防呆:手动改职级的,校验与相邻月差不超过1;有越级则整批阻止本次保存
+  for (const k of keys) {
+    const p = sgPending[k];
+    if (p && p.grade !== undefined && p.grade !== GRADE_AUTO) {
+      const err = sgCheckAdjacentLevels(k, p.grade, levels, _fullRoll);
+      if (err) { showToast('只能逐级(±1级)升降:' + k + ' ' + err + ',已阻止本次保存', 'error'); return; }
+    }
+  }
   let n = 0, fail = 0;
   await Promise.all(keys.map(async k => {
     try {
