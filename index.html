@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20261012105513';
-const APP_VERSION = '1.42.137'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20261014095308';
+const APP_VERSION = '1.42.138'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -19368,6 +19368,14 @@ function sortMgrPerfSingleRows(rows) {
   });
 }
 
+// 管理绩效单月看板:加分项列宽按名称长度自适应(表头多为长名称,避免被挤成逐字竖排)
+// ≤12字 → 96px;13–20字 → 132px;>20字 → 172px
+function perfBonusColWidth(name) {
+  const n = (name || '').length;
+  if (n <= 12) return 96;
+  if (n <= 20) return 132;
+  return 172;
+}
 function refreshMgrPerfSingle() {
   const year = document.getElementById('mgrPerfYear') ? document.getElementById('mgrPerfYear').value : mgrPerfYear;
   mgrPerfYear = year;
@@ -19406,7 +19414,7 @@ function refreshMgrPerfSingle() {
     h += `<th class="sort-th" style="background:#FAEEDA;cursor:pointer" onclick="mgrPerfSortToggle('i:${it.key}:act')">${it.type === 'auto-demo' || it.type === 'auto-team' || it.type === 'auto-m0-demo' ? '完成(自动)' : '完成'}${mgrPerfSortInd('i:' + it.key + ':act')}</th>`;
     h += `<th class="sort-th" style="background:#FAEEDA;cursor:pointer" onclick="mgrPerfSortToggle('i:${it.key}:score')">得分${mgrPerfSortInd('i:' + it.key + ':score')}</th>`;
   });
-  bonusList.forEach(b => { h += `<th class="sort-th" style="background:#EAF3DE;white-space:pre-wrap;cursor:pointer" onclick="mgrPerfSortToggle('b:${b.key}')">${esc(b.name)}${mgrPerfSortInd('b:' + b.key)}</th>`; });
+  bonusList.forEach(b => { const bw = perfBonusColWidth(b.name); h += `<th class="sort-th" style="background:#EAF3DE;white-space:pre-wrap;text-align:center;vertical-align:middle;cursor:pointer;width:${bw}px;min-width:${bw}px" onclick="mgrPerfSortToggle('b:${b.key}')">${esc(b.name)}${mgrPerfSortInd('b:' + b.key)}</th>`; });
   h += '</tr></thead><tbody>';
 
   rows.forEach(row => {
@@ -19440,11 +19448,12 @@ function refreshMgrPerfSingle() {
       h += `<td style="text-align:center;font-weight:600">${Number(x.score).toFixed(2)}</td>`;
     });
     d.bonus.forEach(x => {
+      const bw = perfBonusColWidth(x.b && x.b.name);
       if (d.frozen) {
-        h += `<td style="text-align:center">${x.cnt}</td>`;
+        h += `<td style="text-align:center;min-width:${bw}px">${x.cnt}</td>`;
       } else {
         const bk = 'bonus_' + x.b.key;
-        h += `<td>${perfCellHtml({ k: k, save: 'saveMgrPerfByKey', field: bk, cast: 'float', val: x.cnt, w: '60px' })}</td>`;
+        h += `<td style="text-align:center;min-width:${bw}px">${perfCellHtml({ k: k, save: 'saveMgrPerfByKey', field: bk, cast: 'float', val: x.cnt, w: String(Math.max(56, bw - 40)) + 'px' })}</td>`;
       }
     });
     if (d.frozen) {
