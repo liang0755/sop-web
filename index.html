@@ -1254,8 +1254,8 @@ async function loadUsersOnly() {
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20261014095308';
-const APP_VERSION = '1.42.138'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20261017114343';
+const APP_VERSION = '1.42.139'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -6073,7 +6073,8 @@ function filterCallRecords(s, e, deptF, personF) {
 // 现改为:①启动不再等待它;②进入外呼页 / 后台 tick / 启动预加载时才按需拉取;③全程不阻塞界面与其它数据。
 // 若后续在 Firebase 规则中为 /sop/callRecords 加上 ".indexOn":["date"],可在此切换为按日期有界查询
 // (orderBy="date"&startAt&endAt)进一步减小传输量(应用目前为客户端按日期/部门/员工过滤,故仍取全量)。
-async function loadCallRecordsLazy() {
+async function loadCallRecordsLazy(force) {
+  if (force) { _callRecordsPromise = null; callRecordsLoaded = false; } // 强制重拉:清缓存后重新下载(供手动刷新外呼页使用)
   if (_callRecordsPromise) return _callRecordsPromise;            // 已在拉取中,复用同一 Promise,避免并发重复下载
   if (callRecordsLoaded) return Promise.resolve();               // 已加载,直接返回
   if (!hasPermission('callData') && !hasPermission('callStats')) return Promise.resolve(); // 无权限不拉
@@ -12161,18 +12162,45 @@ async function refreshAndRender() {
   navTo(activePage);
 }
 
+// 按当前页面只重拉其依赖的数据域(替代全量 loadCloudData),随后重绘当前页。
+// 未映射页面回退全量刷新,确保不漏刷。v1.42.139
+async function refreshCurrentPageData() {
+  const activePage = document.querySelector('.nav-item.active')?.dataset.page || 'dashboard';
+  // 页面 → 需重拉的数据域:call=外呼;reports=日报/周报/拜访/销售/管理周报;role=角色相关评级绩效记录;core=核心配置
+  const MAP = {
+    callData: ['call'], callStats: ['call'],
+    salesGrade: ['role', 'core'], salesPerf: ['role'], mgrPerf: ['role'],
+    dashboard: ['reports'], dailyData: ['reports'], weeklyData: ['reports'],
+    summary: ['reports'], visitData: ['reports'], visitStats: ['reports'],
+    salesDetail: ['reports'], salesBoard: ['reports'], mgrReport: ['reports'],
+    roleConfig: ['core'], formConfig: ['core'], brandConfig: ['core'], visitConfig: ['core']
+  };
+  const plan = MAP[activePage];
+  if (!plan) { await loadCloudData(); return; } // 未映射页面:回退全量刷新
+  if (plan.indexOf('call') >= 0) { await loadCallRecordsLazy(true); }
+  if (plan.indexOf('reports') >= 0) {
+    try {
+      const d = await fetchReportsFromCloud();
+      cloudData.dailyReports = d.daily;
+      cloudData.weeklyReports = d.weekly;
+      if (d.visit) cloudData.visitRecords = d.visit;
+      if (d.mgr !== undefined) cloudData.mgrReports = d.mgr;
+      if (d.sales !== undefined) cloudData.salesRecords = d.sales;
+      saveReportsCache();
+    } catch (e) { console.warn('报表刷新失败:', e && e.message); }
+  }
+  if (plan.indexOf('role') >= 0) { try { await loadRoleScopedData(); } catch (e) { console.warn('角色数据刷新失败:', e && e.message); } }
+  if (plan.indexOf('core') >= 0) { try { await loadCoreDataFresh(); } catch (e) { console.warn('核心配置刷新失败:', e && e.message); } }
+  navTo(activePage); // 重绘当前页(覆盖全部页面,含外呼);navTo 内 silentRefresh 为按权限轻量刷新,不再全量拉取
+}
+
 async function sidebarRefresh() {
   const btn = document.getElementById('sidebarRefreshBtn');
   if (btn) { btn.classList.add('loading'); btn.textContent = '⏳ 刷新中...'; }
   try {
-    reportsLoaded = false;
-    dataLoaded = false;
-    await loadCloudData();
+    await refreshCurrentPageData();
     lastRefreshTime = Date.now();
     updateSidebarRefreshTime();
-    // Re-render current active page
-    const activePage = document.querySelector('.nav-item.active')?.dataset.page || 'dashboard';
-    navTo(activePage);
   } catch(e) {
     console.error('Refresh failed:', e);
     alert('刷新失败,请检查网络后重试');
