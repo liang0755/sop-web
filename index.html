@@ -1231,7 +1231,58 @@ function genId(){return Date.now().toString(36)+Math.random().toString(36).subst
 
 // Phase 1: Load core data (users, formConfig, brandConfig) - small, fast, enough for login
 // Phase 0: Load ONLY users - minimum data needed for login (fast)
+// ---------- 用户数据本地缓存:加速复访(stale-while-revalidate) ----------
+// 用户列表体量不大,但每次启动/刷新都拉一遍;命中本地缓存则秒开 UI,后台静默刷新捞取新增/改动用户
+const USERS_CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+function usersCacheKey() { return 'sop_users_cache_' + APP_CACHE_VER; } // 懒构造:避免引用位于本声明之后的 APP_CACHE_VER(const TDZ)
+function saveUsersCache() {
+  try {
+    const s = JSON.stringify({ t: Date.now(), users: cloudData.users });
+    if (s.length > 2 * 1024 * 1024) return; // 过大不缓存,避免撑爆 localStorage
+    localStorage.setItem(usersCacheKey(), s);
+  } catch(e) {}
+}
+function loadUsersCache() {
+  try {
+    const raw = localStorage.getItem(usersCacheKey());
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (!p || !Array.isArray(p.users) || typeof p.t !== 'number') return null;
+    if (Date.now() - p.t > USERS_CACHE_TTL) return null; // 过期 → 走网络拉取
+    return p.users;
+  } catch(e) { return null; }
+}
+async function ensureAdminExists() {
+  if (cloudData.users.find(u => u.username === 'admin')) return;
+  const adminPwd = await hashPassword('admin123');
+  const admin = {id:'admin_001',username:'admin',password:adminPwd,name:'管理员',department:'管理部',role:'admin',active:true,createdAt:new Date().toISOString()};
+  if (isCloudAvailable) { try { await apiCreate('users', admin); } catch(e) {} }
+  cloudData.users.push(admin);
+}
+async function refreshUsersInBackground() {
+  try {
+    const uRes = await fetch(FB_BASE + '/users.json');
+    if (uRes.ok) {
+      cloudData.users = Object.values(await uRes.json() || {});
+      isCloudAvailable = true;
+      await ensureAdminExists();
+      saveUsersCache();
+    }
+  } catch(e) { console.warn('Users background refresh failed:', e && e.message); }
+}
+// Phase 0: Load ONLY users - minimum data needed for login (fast)
 async function loadUsersOnly() {
+  // 命中本地缓存 → 秒开 UI,后台静默刷新确保数据新鲜(避免每次启动都拉 users.json)
+  let cached = null;
+  try { cached = loadUsersCache(); } catch(e) {}
+  if (cached) {
+    cloudData.users = cached;
+    isCloudAvailable = true;
+    dataLoaded = true;
+    saveUsersCache(); // 刷新时间戳,延长命中窗口
+    refreshUsersInBackground().catch(e => console.warn('users bg refresh failed:', e && e.message));
+    return;
+  }
   try {
     const uRes = await fetch(FB_BASE + '/users.json');
     cloudData.users = uRes.ok ? Object.values(await uRes.json() || {}) : [];
@@ -1241,21 +1292,16 @@ async function loadUsersOnly() {
     if (!cloudConfirmedViaSibling) isCloudAvailable = false;
     cloudData.users = [];
   }
-  // Ensure admin exists
-  if (!cloudData.users.find(u => u.username === 'admin')) {
-    const adminPwd = await hashPassword('admin123');
-    const admin = {id:'admin_001',username:'admin',password:adminPwd,name:'管理员',department:'管理部',role:'admin',active:true,createdAt:new Date().toISOString()};
-    if (isCloudAvailable) { try { await apiCreate('users', admin); } catch(e) {} }
-    cloudData.users.push(admin);
-  }
+  await ensureAdminExists();
   dataLoaded = true;
+  saveUsersCache();
 }
 
 // Phase 1: Load config data (formConfig, brandConfig, departments, aiConfig, roleConfig) - background, non-blocking
 // ---------- 核心配置本地缓存:加速复访(stale-while-revalidate,类报表缓存) ----------
 // APP_CACHE_VER: 数据缓存版本戳。upload.py 每次部署会自动改写为新时间戳,旧版本 localStorage 缓存即失效 → 部署后用户刷新即拉取最新数据
-const APP_CACHE_VER = '20261017114343';
-const APP_VERSION = '1.42.139'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
+const APP_CACHE_VER = '20261026120536';
+const APP_VERSION = '1.42.140'; // 页面版本号(格式 主.次.修订);upload.py 每次部署自动递增末位 → 用于识别是否是最新页面
 const CORE_CONFIG_CACHE_KEY = 'sop_core_config_cache_' + APP_CACHE_VER;
 const CORE_CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟:核心配置缓存过期时间。修 formConfig 等配置"永不过期"导致的跨账号不同步(原仅校验版本号,平时不变→其他账号永远读旧配置)
 function saveCoreConfigCache() {
@@ -1551,7 +1597,52 @@ async function loadCoreDataFresh() {
 //   gradeRecords, m0Records            → salesGrade
 //   performanceRecords, performanceSnapshots, m0PerformanceRecords, m0PerformanceSnapshots → salesPerf
 //   mgrPerformanceRecords, mgrPerformanceSnapshots → mgrPerf
-async function loadRoleScopedData() {
+// ---------- 管理类记录(角色限定)本地缓存:加速复访(按用户隔离, stale-while-revalidate) ----------
+// gradeRecords/m0Records/performanceRecords/... 仅管理员/经理可见,普通成员本就零开销;
+// 但管理账号每次登录/刷新都拉 8 个节点,缓存命中则秒开,后台静默刷新保证新鲜
+const ROLESCOPED_CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+function rolescopedCacheKey() {
+  const uid = currentUser ? currentUser.id : 'guest';
+  return 'sop_rolescoped_cache_' + APP_CACHE_VER + '_' + uid;
+}
+function saveRoleScopedCache() {
+  try {
+    const payload = {
+      t: Date.now(),
+      gradeRecords: cloudData.gradeRecords,
+      m0Records: cloudData.m0Records,
+      performanceRecords: cloudData.performanceRecords,
+      performanceSnapshots: cloudData.performanceSnapshots,
+      m0PerformanceRecords: cloudData.m0PerformanceRecords,
+      m0PerformanceSnapshots: cloudData.m0PerformanceSnapshots,
+      mgrPerformanceRecords: cloudData.mgrPerformanceRecords,
+      mgrPerformanceSnapshots: cloudData.mgrPerformanceSnapshots
+    };
+    const s = JSON.stringify(payload);
+    if (s.length > 4 * 1024 * 1024) return; // 过大不缓存,避免撑爆 localStorage
+    localStorage.setItem(rolescopedCacheKey(), s);
+  } catch(e) {}
+}
+function loadRoleScopedCache() {
+  try {
+    const raw = localStorage.getItem(rolescopedCacheKey());
+    if (!raw) return false;
+    const p = JSON.parse(raw);
+    if (!p || typeof p.t !== 'number') return false;
+    if (Date.now() - p.t > ROLESCOPED_CACHE_TTL) return false; // 过期
+    cloudData.gradeRecords = p.gradeRecords || {};
+    cloudData.m0Records = p.m0Records || {};
+    cloudData.performanceRecords = p.performanceRecords || {};
+    cloudData.performanceSnapshots = p.performanceSnapshots || {};
+    cloudData.m0PerformanceRecords = p.m0PerformanceRecords || {};
+    cloudData.m0PerformanceSnapshots = p.m0PerformanceSnapshots || {};
+    cloudData.mgrPerformanceRecords = p.mgrPerformanceRecords || {};
+    cloudData.mgrPerformanceSnapshots = p.mgrPerformanceSnapshots || {};
+    return true;
+  } catch(e) { return false; }
+}
+// 实际从云端拉取"当前登录用户有权查看"的管理类记录节点(按角色权限注册)
+async function fetchRoleScopedFromCloud() {
   if (!currentUser) return;
   const specs = [];
   const reg = (perm, url, key) => { if (hasPermission(perm)) specs.push([url, key]); };
@@ -1580,6 +1671,27 @@ async function loadRoleScopedData() {
     ['gradeRecords','m0Records','performanceRecords','performanceSnapshots','m0PerformanceRecords','m0PerformanceSnapshots','mgrPerformanceRecords','mgrPerformanceSnapshots'].forEach(k => { cloudData[k] = {}; });
     // callRecords 已移出本函数(改为懒加载),此处不再重置,避免后台刷新失败时误清空已加载的外呼数据
   }
+}
+async function refreshRoleScopedInBackground() {
+  try {
+    await fetchRoleScopedFromCloud();
+    saveRoleScopedCache();
+    // 仅当停留在角色相关页面时才强制重绘,避免误扰动其他页面编辑态
+    const ap = (typeof document !== 'undefined') ? document.querySelector('.nav-item.active')?.dataset.page : null;
+    const rolePages = ['salesGrade','salesPerf','mgrPerf'];
+    if (dataLoaded && rolePages.indexOf(ap) >= 0 && typeof rerenderCurrentPage === 'function') rerenderCurrentPage(true);
+  } catch(e) { console.warn('role-scoped bg refresh failed:', e && e.message); }
+}
+// Phase 1.5: 按角色权限加载"管理类记录节点"
+async function loadRoleScopedData() {
+  if (!currentUser) return;
+  // 命中本地缓存 → 秒开 UI,后台静默刷新保证数据新鲜(按登录用户隔离)
+  if (loadRoleScopedCache()) {
+    refreshRoleScopedInBackground().catch(e => console.warn('role-scoped bg refresh failed:', e && e.message));
+    return;
+  }
+  await fetchRoleScopedFromCloud();
+  saveRoleScopedCache();
 }
 
 // Phase 2: Load report data (dailyReports, weeklyReports) - larger, needed after login
@@ -1740,9 +1852,10 @@ async function loadCloudData() {
   reportsLoaded = false;
   visitDataLoaded = false;
   cloudData.mgrReports = [];
-  _usersDataPromise = loadUsersOnly();
+  // 复用 init/登录已发起的 Promise(在途则共享,避免重复拉取 users/core)
+  if (!_usersDataPromise) _usersDataPromise = loadUsersOnly();
   await _usersDataPromise;
-  _coreDataPromise = loadCoreData();
+  if (!_coreDataPromise) _coreDataPromise = loadCoreData();
   await _coreDataPromise;
   await loadRoleScopedData();
   await loadReportData({force: true});
